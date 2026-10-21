@@ -1,0 +1,154 @@
+{
+ "lab": "inc.rbac-denied",
+ "kind": "incident",
+ "lab_hash": "93ea3879e5f01d3c",
+ "recorded_at": "2026-10-14T17:26:51+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc logs deploy/reporter --tail=4 -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "17:27:08 list pods -> HTTP 403\npods is forbidden: User \"system:serviceaccount:academy-inc-rbac:reporter\" cannot list resource \"pods\" in API group \"\" in the namespace \"academy-inc-rbac\"\n17:27:18 list pods -> HTTP 403\npods is forbidden: User \"system:serviceaccount:academy-inc-rbac:reporter\" cannot list resource \"pods\" in API group \"\" in the namespace \"academy-inc-rbac\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-inc-rbac:reporter -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get rolebinding reporter-view -n academy-inc-rbac -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            ROLE               AGE   USERS   GROUPS   SERVICEACCOUNTS\nreporter-view   ClusterRole/view   31s                    academy-inc-rbac/reportr\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get serviceaccounts -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME       SECRETS   AGE\nbuilder    1         33s\ndefault    1         33s\ndeployer   1         33s\nreporter   1         32s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc delete rolebinding reporter-view -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io \"reporter-view\" deleted from academy-inc-rbac namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc policy add-role-to-user view -z reporter -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"reporter\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-inc-rbac:reporter -n academy-inc-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "can-list",
+    "title": "reporter may list pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can reporter list pods? no"
+   },
+   {
+    "id": "api-200",
+    "title": "The workload's own API call returns 200",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "403"
+   },
+   {
+    "id": "no-typo",
+    "title": "No binding names the non-existent reportr",
+    "expect": "0 bindings",
+    "status": "fail",
+    "observed": "1 matching rolebindings"
+   }
+  ],
+  "at": 1791998841.8336563
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "can-list",
+    "title": "reporter may list pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can reporter list pods? yes"
+   },
+   {
+    "id": "api-200",
+    "title": "The workload's own API call returns 200",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "200"
+   },
+   {
+    "id": "no-typo",
+    "title": "No binding names the non-existent reportr",
+    "expect": "0 bindings",
+    "status": "pass",
+    "observed": "0 matching rolebindings"
+   }
+  ],
+  "at": 1791998851.602801
+ },
+ "seconds": 40,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-rbac: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

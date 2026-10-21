@@ -1,0 +1,144 @@
+{
+ "lab": "lesson.h.observability",
+ "kind": "lesson",
+ "lab_hash": "0fb1bef54d51e5a2",
+ "recorded_at": "2026-10-16T18:50:34+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-h-observability",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f crashy.yaml && oc rollout status deploy/crashy --timeout=120s",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/crashy created\nWaiting for deployment \"crashy\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"crashy\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/crashy created\nWaiting for deployment \"crashy\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"crashy\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/crashy --previous",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (BadRequest): previous terminated container \"app\" in pod \"crashy-687dcbfff8-ddxmf\" not found\n",
+   "combined": "Error from server (BadRequest): previous terminated container \"app\" in pod \"crashy-687dcbfff8-ddxmf\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/crashy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "starting app\n",
+   "stderr": "",
+   "combined": "starting app\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod -l app=crashy --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1 --timeout=120s && oc get pods -l app=crashy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/crashy-687dcbfff8-ddxmf condition met\nNAME                      READY   STATUS    RESTARTS     AGE\ncrashy-687dcbfff8-ddxmf   1/1     Running   1 (1s ago)   22s\n",
+   "stderr": "",
+   "combined": "pod/crashy-687dcbfff8-ddxmf condition met\nNAME                      READY   STATUS    RESTARTS     AGE\ncrashy-687dcbfff8-ddxmf   1/1     Running   1 (1s ago)   22s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/crashy --previous",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "starting app\nfatal: CONFIG_URL is not set\n",
+   "stderr": "",
+   "combined": "starting app\nfatal: CONFIG_URL is not set\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe pod -l app=crashy | sed -n '/Last State/,/Restart Count/p'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    Last State:     Terminated\n      Reason:       Error\n      Exit Code:    1\n      Started:      Fri, 16 Oct 2026 18:49:25 +0000\n      Finished:     Fri, 16 Oct 2026 18:49:45 +0000\n    Ready:          True\n    Restart Count:  1\n",
+   "stderr": "",
+   "combined": "    Last State:     Terminated\n      Reason:       Error\n      Exit Code:    1\n      Started:      Fri, 16 Oct 2026 18:49:25 +0000\n      Finished:     Fri, 16 Oct 2026 18:49:45 +0000\n    Ready:          True\n    Restart Count:  1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --sort-by=.lastTimestamp",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE     REASON              OBJECT                         MESSAGE\n22s         Normal   Scheduled           pod/crashy-687dcbfff8-ddxmf    Successfully assigned academy-lesson-h-observability/crashy-687dcbfff8-ddxmf to crc\n23s         Normal   SuccessfulCreate    replicaset/crashy-687dcbfff8   Created pod: crashy-687dcbfff8-ddxmf\n23s         Normal   ScalingReplicaSet   deployment/crashy              Scaled up replica set crashy-687dcbfff8 from 0 to 1\n22s         Normal   AddedInterface      pod/crashy-687dcbfff8-ddxmf    Add eth0 [10.217.0.239/23] from ovn-kubernetes\n2s          Normal   Pulled              pod/crashy-687dcbfff8-ddxmf    Container image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" already present on machine\n2s          Normal   Created             pod/crashy-687dcbfff8-ddxmf    Created container: app\n2s          Normal   Started             pod/crashy-687dcbfff8-ddxmf    Started container app\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE     REASON              OBJECT                         MESSAGE\n22s         Normal   Scheduled           pod/crashy-687dcbfff8-ddxmf    Successfully assigned academy-lesson-h-observability/crashy-687dcbfff8-ddxmf to crc\n23s         Normal   SuccessfulCreate    replicaset/crashy-687dcbfff8   Created pod: crashy-687dcbfff8-ddxmf\n23s         Normal   ScalingReplicaSet   deployment/crashy              Scaled up replica set crashy-687dcbfff8 from 0 to 1\n22s         Normal   AddedInterface      pod/crashy-687dcbfff8-ddxmf    Add eth0 [10.217.0.239/23] from ovn-kubernetes\n2s          Normal   Pulled              pod/crashy-687dcbfff8-ddxmf    Container image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" already present on machine\n2s          Normal   Created             pod/crashy-687dcbfff8-ddxmf    Created container: app\n2s          Normal   Started             pod/crashy-687dcbfff8-ddxmf    Started container app\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f web.yaml && oc rollout status deploy/web --timeout=120s && oc logs deploy/web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\nWaiting for deployment \"web\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\nserving from web-7d86f95c6c-9gv4m\n",
+   "stderr": "Found 2 pods, using pod/web-7d86f95c6c-9gv4m\n",
+   "combined": "deployment.apps/web created\nWaiting for deployment \"web\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\nFound 2 pods, using pod/web-7d86f95c6c-9gv4m\nserving from web-7d86f95c6c-9gv4m\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/web --all-pods",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[pod/web-7d86f95c6c-9gv4m/app] serving from web-7d86f95c6c-9gv4m\n[pod/web-7d86f95c6c-npk8n/app] serving from web-7d86f95c6c-npk8n\n",
+   "stderr": "",
+   "combined": "[pod/web-7d86f95c6c-9gv4m/app] serving from web-7d86f95c6c-9gv4m\n[pod/web-7d86f95c6c-npk8n/app] serving from web-7d86f95c6c-npk8n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm top pods",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: Metrics API not available\n",
+   "combined": "error: Metrics API not available\n",
+   "ok": true
+  }
+ ],
+ "seconds": 72,
+ "ok": true,
+ "problems": []
+}

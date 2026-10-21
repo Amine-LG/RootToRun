@@ -1,0 +1,71 @@
+id: lab.olm-inspect
+title: "Inside Operator Lifecycle Manager"
+summary: "Read catalogs, package channels, subscriptions, operator groups and ClusterServiceVersions on a real cluster, and learn where install plans fit, without installing anything."
+module: b6-operators-maintenance
+mode: GUIDED_INVESTIGATION
+minutes: 20
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (OLM v0, operators.coreos.com) with the read-only reader identity."
+concepts: [ocp.olm, k8s.crd-operator]
+prerequisites: [c.olm]
+namespace: academy-olm
+objective: |
+  Know which object to read at each stage of an operator's life: where it comes from, which channel, what was
+  approved, and whether it installed. This lab has no grader: it only reads, because installing an operator needs
+  cluster-administrator rights; the questions at the end check understanding.
+background: |
+  Installing an operator writes a **Subscription** (package, channel, approval). OLM resolves it from a
+  **CatalogSource**, writes an **InstallPlan**, and installs a **ClusterServiceVersion** (CSV) whose phase tells you if
+  it worked. CRC ships catalogs but no optional operators (no Subscription, so no InstallPlan either); reading what
+  exists is enough to learn the chain. This lab changes nothing. These objects belong to the classic OLM (v0, API
+  group `operators.coreos.com`), which is OpenShift's operator installer; OpenShift 4.21 also offers OLM v1
+  (`ClusterExtension` objects, documented under "Extensions"), which this lab does not cover.
+
+  **Where everything comes from.** Nothing is created. The catalogs are the CatalogSources OpenShift Local ships in
+  `openshift-marketplace`; reading them needs the reader identity, a ServiceAccount the app creates once from the
+  Connections page and binds to `cluster-reader`.
+steps:
+  - id: catalogs
+    title: "Catalogs and packages"
+    do: "List catalog sources and look at one package's channels."
+    commands:
+      - {cmd: "oc get catalogsources -n openshift-marketplace", as: reader, meaning: "where operators come from"}
+      - {cmd: "oc get packagemanifest openshift-gitops-operator -n openshift-marketplace -o jsonpath='{.status.defaultChannel}'", as: reader, meaning: "the default channel of the OpenShift GitOps operator"}
+      - {cmd: "oc get packagemanifest openshift-gitops-operator -n openshift-marketplace -o jsonpath='{range .status.channels[*]}{.name}{\"\\n\"}{end}'", as: reader, meaning: "all its channels"}
+    observe: "Four gRPC catalogs: `redhat-operators`, `certified-operators`, `community-operators` and `redhat-marketplace`. The GitOps package's default channel is `latest`; its channels are versioned `gitops-1.x` streams plus `latest` (listed in text order, so `gitops-1.10` comes before `gitops-1.6`). The fourth catalog, `redhat-marketplace`, is the Red Hat Marketplace: the 4.21 documentation already lists only the other three as the catalogs Red Hat distributes, and the 4.22 release notes list Red Hat Marketplace as removed (deprecated in 4.20 and 4.21), so a newer cluster may not have it."
+    why: "A PackageManifest is a read-only view of what a catalog offers. The channel you subscribe to decides which updates you receive: `latest` follows every new release, a versioned channel stays on one minor stream."
+  - id: installed
+    title: "What is installed"
+    do: "List subscriptions and CSVs across the cluster."
+    commands:
+      - {cmd: "oc get subscriptions -A", as: reader, meaning: "what was asked for"}
+      - {cmd: "oc get csv -n openshift-operator-lifecycle-manager", as: reader, meaning: "what is installed (packageserver is OLM's own)"}
+      - {cmd: "oc get clusteroperator operator-lifecycle-manager", as: reader, meaning: "OLM's own health"}
+    observe: "`No resources found` for subscriptions: nothing optional is installed on this CRC cluster. The only CSV in this namespace is `packageserver` (OLM's own API server for PackageManifests) in phase Succeeded, and the `operator-lifecycle-manager` cluster operator is Available, not Progressing, not Degraded."
+    why: "On a real cluster you read the chain backwards when something fails: CSV phase → InstallPlan → Subscription conditions → CatalogSource health."
+  - id: plans
+    title: "Install plans, operator groups and a CSV's history"
+    do: "List install plans and operator groups across the cluster, then describe the packageserver CSV."
+    commands:
+      - {cmd: "oc get installplans -A", as: reader, meaning: "No resources found: OLM writes an InstallPlan only when it resolves a Subscription, and this cluster has none"}
+      - {cmd: "oc get operatorgroups -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,TARGET_NAMESPACES:.spec.targetNamespaces,SELECTOR:.spec.selector.matchLabels", as: reader, meaning: "the three OperatorGroups and which namespaces each one targets"}
+      - {cmd: "oc describe csv packageserver -n openshift-operator-lifecycle-manager", as: reader, meaning: "spec (what the operator installs and the permissions it needs) and status (current phase, the history of phase changes, and the requirement checks)"}
+    observe: "`No resources found` for install plans. Three OperatorGroups, one per targeting mode: `global-operators` in `openshift-operators` has neither target namespaces nor a selector, which means all namespaces (operators installed for the whole cluster often go there; another all-namespaces operator can use its own installation namespace with a compatible OperatorGroup); `olm-operators` lists one target namespace, its own; `openshift-cluster-monitoring` selects namespaces by the label `openshift.io/cluster-monitoring: true`. The CSV description is long. Its annotations name the OperatorGroup it belongs to (`olm.operatorGroup: olm-operators`). Its Status section ends with `Phase: Succeeded`, `Reason: InstallSucceeded`, `install strategy completed with no errors`. Above that, `Conditions` is a history of phase changes: Pending (`NeedsReinstall`) → InstallReady (`AllRequirementsMet`) → Installing (`InstallSucceeded`, then `InstallWaiting`) → Succeeded, several times, with Failed entries in between (`ComponentUnhealthy: apiServices not installed`, once `InstallCheckFailed: install timeout`). On this CRC cluster they follow start-ups of the cluster, when packageserver was not ready yet. `Requirement Status` lists what the CSV needs (an APIService, RBAC rules, a ServiceAccount) and whether each is present or satisfied."
+    why: "An operator's CSV is only installed in a namespace with exactly one OperatorGroup, which decides which namespaces the operator watches. The CSV's phase answers 'did it install?', its conditions answer 'what happened on the way?', and its requirement status answers 'what is missing?'. On a cluster with Subscriptions, `oc get installplans -n <namespace>` shows each plan's CSV, approval mode and whether it was approved."
+hints: []
+checks: []
+questions:
+  - q: "An operator install hangs. In which order do you read OLM objects?"
+    a: "CSV phase and conditions, then the InstallPlan (approved? failed?), then the Subscription's conditions, then the CatalogSource's state."
+  - q: "What does Manual approval change?"
+    a: "OLM writes the InstallPlan but waits for someone to approve it, for the first install and every upgrade."
+enterprise: |
+  Regulated organisations usually mirror catalogs to an internal registry (disconnected clusters), pin channels,
+  and use Manual approval so operator upgrades go through change control.
+references:
+  - {title: "OpenShift 4.21: OLM resources (CatalogSource, Subscription, InstallPlan, CSV)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/operators/understanding-operators#olm-resources_olm-understanding-olm"}
+  - {title: "OpenShift 4.22 release notes: deprecated and removed features (Red Hat Marketplace)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html-single/release_notes/index#rn-ocp-release-notes-deprecated-removed-tables_release-notes"}
+# Inspects Operator Lifecycle Manager objects (operators.coreos.com).
+requires: [olm]
+variations:
+  - "As the reader, pick another package from the catalogs and find its default channel and the install modes its current CSV supports. Check: you can say whether it could be installed for one namespace, for several, or only for all namespaces."

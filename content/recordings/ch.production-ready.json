@@ -1,0 +1,1144 @@
+{
+ "lab": "ch.production-ready",
+ "kind": "challenge",
+ "lab_hash": "f399b4691534041c",
+ "recorded_at": "2026-10-20T18:25:11+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc create serviceaccount store -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/store created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set serviceaccount deploy/store store -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store serviceaccount updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store volume updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/store --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/store --liveness --get-url=http://:8080/ --initial-delay-seconds=10 --period-seconds=10 -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/store patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc expose deploy/store --port=8080 -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/store exposed\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create route edge store --service=store --insecure-policy=Redirect -n academy-ch-prod",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/store created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc apply -n academy-ch-prod -f -",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/store-ingress created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/store -n academy-ch-prod --timeout=240s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"store\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"store\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"store\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"store\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"store\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"store\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "ready",
+    "title": "store wants 3 replicas and has 3 Ready",
+    "expect": "3/3 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "content",
+    "title": "the page comes from ConfigMap store-content",
+    "expect": "ok",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "health",
+    "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+    "expect": "ok",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "resources",
+    "title": "CPU request, memory request and memory limit on every container",
+    "expect": "ok",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "identity",
+    "title": "pods run as the ServiceAccount store",
+    "expect": "store",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "scc",
+    "title": "pods admitted by restricted-v2",
+    "expect": "3 of 3 match",
+    "status": "fail",
+    "observed": "0 of 0 match · no pods"
+   },
+   {
+    "id": "surge",
+    "title": "updates keep every replica available",
+    "expect": "maxUnavailable = 0",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"store\" not found"
+   },
+   {
+    "id": "edge",
+    "title": "the Route terminates TLS at the edge",
+    "expect": "edge",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"store\" not found"
+   },
+   {
+    "id": "https",
+    "title": "https:// answers with the page",
+    "expect": "HTTP 200 store ok",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"store\" not found"
+   },
+   {
+    "id": "redirect",
+    "title": "http:// is redirected to https://",
+    "expect": "HTTP 302 → https://",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"store\" not found"
+   },
+   {
+    "id": "isolated",
+    "title": "a NetworkPolicy isolates the store pods for ingress",
+    "expect": "isolated",
+    "status": "fail",
+    "observed": "policies isolating these pods for ingress: none"
+   },
+   {
+    "id": "router-rule",
+    "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+    "expect": "router admitted on port 8080",
+    "status": "fail",
+    "observed": "policies isolating these pods for ingress: none"
+   },
+   {
+    "id": "frontend-ok",
+    "title": "frontend reaches store inside the cluster",
+    "expect": "store ok",
+    "status": "fail",
+    "observed": "command terminated with exit code 6"
+   },
+   {
+    "id": "batch-blocked",
+    "title": "batch is blocked (connection times out)",
+    "expect": "curl exit 28 (timeout)",
+    "status": "fail",
+    "observed": "command terminated with exit code 6"
+   },
+   {
+    "id": "batch-egress",
+    "title": "batch keeps its outbound access (the API server's health endpoint)",
+    "expect": "ok",
+    "status": "pass",
+    "observed": "ok"
+   }
+  ],
+  "at": 1792520731.5300245
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready",
+    "title": "store wants 3 replicas and has 3 Ready",
+    "expect": "3/3 ready",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "content",
+    "title": "the page comes from ConfigMap store-content",
+    "expect": "ok",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "health",
+    "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+    "expect": "ok",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "resources",
+    "title": "CPU request, memory request and memory limit on every container",
+    "expect": "ok",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "identity",
+    "title": "pods run as the ServiceAccount store",
+    "expect": "store",
+    "status": "pass",
+    "observed": "spec.template.spec.serviceAccountName = 'store'"
+   },
+   {
+    "id": "scc",
+    "title": "pods admitted by restricted-v2",
+    "expect": "3 of 3 match",
+    "status": "pass",
+    "observed": "3 of 3 match · store-596cb88df4-pdqz4: Running [ready, restarts 0], store-596cb88df4-tt6d7: Running [ready, restarts 0], store-596cb88df4-zgpjs: Running [ready, restarts 0]"
+   },
+   {
+    "id": "surge",
+    "title": "updates keep every replica available",
+    "expect": "maxUnavailable = 0",
+    "status": "pass",
+    "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+   },
+   {
+    "id": "edge",
+    "title": "the Route terminates TLS at the edge",
+    "expect": "edge",
+    "status": "pass",
+    "observed": "spec.tls.termination = 'edge'"
+   },
+   {
+    "id": "https",
+    "title": "https:// answers with the page",
+    "expect": "HTTP 200 store ok",
+    "status": "pass",
+    "observed": "https://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+   },
+   {
+    "id": "redirect",
+    "title": "http:// is redirected to https://",
+    "expect": "HTTP 302 → https://",
+    "status": "pass",
+    "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 302 → https://store-academy-ch-prod.apps-crc.testing/ · "
+   },
+   {
+    "id": "isolated",
+    "title": "a NetworkPolicy isolates the store pods for ingress",
+    "expect": "isolated",
+    "status": "pass",
+    "observed": "policies isolating these pods for ingress: store-ingress"
+   },
+   {
+    "id": "router-rule",
+    "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+    "expect": "router admitted on port 8080",
+    "status": "pass",
+    "observed": "isolated by [store-ingress]; namespaces labelled ['policy-group.network.openshift.io/ingress'] admitted on port 8080"
+   },
+   {
+    "id": "frontend-ok",
+    "title": "frontend reaches store inside the cluster",
+    "expect": "store ok",
+    "status": "pass",
+    "observed": "store ok"
+   },
+   {
+    "id": "batch-blocked",
+    "title": "batch is blocked (connection times out)",
+    "expect": "curl exit 28 (timeout)",
+    "status": "pass",
+    "observed": "command terminated with exit code 28"
+   },
+   {
+    "id": "batch-egress",
+    "title": "batch keeps its outbound access (the API server's health endpoint)",
+    "expect": "ok",
+    "status": "pass",
+    "observed": "ok"
+   }
+  ],
+  "at": 1792520780.9089627
+ },
+ "trials": [
+  {
+   "id": "works-but-open",
+   "title": "Deployed, healthy and exposed, but plain HTTP, default ServiceAccount and no NetworkPolicy",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "store wants 3 replicas and has 3 Ready",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "the page comes from ConfigMap store-content",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "health",
+     "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "resources",
+     "title": "CPU request, memory request and memory limit on every container",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "identity",
+     "title": "pods run as the ServiceAccount store",
+     "expect": "store",
+     "status": "fail",
+     "observed": "spec.template.spec.serviceAccountName = None"
+    },
+    {
+     "id": "scc",
+     "title": "pods admitted by restricted-v2",
+     "expect": "3 of 3 match",
+     "status": "pass",
+     "observed": "3 of 3 match · store-656c54cc75-9dftq: Running [ready, restarts 0], store-656c54cc75-b7s2x: Running [ready, restarts 0], store-656c54cc75-dnnkd: Running [ready, restarts 0]"
+    },
+    {
+     "id": "surge",
+     "title": "updates keep every replica available",
+     "expect": "maxUnavailable = 0",
+     "status": "fail",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = '25%'"
+    },
+    {
+     "id": "edge",
+     "title": "the Route terminates TLS at the edge",
+     "expect": "edge",
+     "status": "fail",
+     "observed": "spec.tls.termination = None"
+    },
+    {
+     "id": "https",
+     "title": "https:// answers with the page",
+     "expect": "HTTP 200 store ok",
+     "status": "pass",
+     "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "redirect",
+     "title": "http:// is redirected to https://",
+     "expect": "HTTP 302 → https://",
+     "status": "fail",
+     "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "isolated",
+     "title": "a NetworkPolicy isolates the store pods for ingress",
+     "expect": "isolated",
+     "status": "fail",
+     "observed": "policies isolating these pods for ingress: none"
+    },
+    {
+     "id": "router-rule",
+     "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+     "expect": "router admitted on port 8080",
+     "status": "fail",
+     "observed": "policies isolating these pods for ingress: none"
+    },
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches store inside the cluster",
+     "expect": "store ok",
+     "status": "pass",
+     "observed": "store ok"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked (connection times out)",
+     "expect": "curl exit 28 (timeout)",
+     "status": "fail",
+     "observed": "store ok"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch keeps its outbound access (the API server's health endpoint)",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc expose deploy/store --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/store exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:works-but-open",
+     "cmd": "oc expose svc/store -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/store exposed\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "edge-no-redirect",
+   "title": "Everything right except the Route: edge TLS, but HTTP still served (graded while still rolling out, so readiness fails too)",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "store wants 3 replicas and has 3 Ready",
+     "expect": "3/3 ready",
+     "status": "fail",
+     "observed": "spec.replicas 3, ready 3/3, updated 2, total 4, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "the page comes from ConfigMap store-content",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "health",
+     "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "resources",
+     "title": "CPU request, memory request and memory limit on every container",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "identity",
+     "title": "pods run as the ServiceAccount store",
+     "expect": "store",
+     "status": "pass",
+     "observed": "spec.template.spec.serviceAccountName = 'store'"
+    },
+    {
+     "id": "scc",
+     "title": "pods admitted by restricted-v2",
+     "expect": "3 of 3 match",
+     "status": "pass",
+     "observed": "4 of 4 match · store-5f96f6ff5-5565g: Running [ready, restarts 0], store-5f96f6ff5-cwxlw: Running [ready, restarts 0], store-5f96f6ff5-jxcpw: Pending [ContainerCreating, restarts 0], store-79fcb44ccf-h9f9s: Running [ready, restarts 0]"
+    },
+    {
+     "id": "surge",
+     "title": "updates keep every replica available",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "edge",
+     "title": "the Route terminates TLS at the edge",
+     "expect": "edge",
+     "status": "pass",
+     "observed": "spec.tls.termination = 'edge'"
+    },
+    {
+     "id": "https",
+     "title": "https:// answers with the page",
+     "expect": "HTTP 200 store ok",
+     "status": "pass",
+     "observed": "https://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "redirect",
+     "title": "http:// is redirected to https://",
+     "expect": "HTTP 302 → https://",
+     "status": "fail",
+     "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "isolated",
+     "title": "a NetworkPolicy isolates the store pods for ingress",
+     "expect": "isolated",
+     "status": "pass",
+     "observed": "policies isolating these pods for ingress: store-ingress"
+    },
+    {
+     "id": "router-rule",
+     "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+     "expect": "router admitted on port 8080",
+     "status": "pass",
+     "observed": "isolated by [store-ingress]; namespaces labelled ['policy-group.network.openshift.io/ingress'] admitted on port 8080"
+    },
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches store inside the cluster",
+     "expect": "store ok",
+     "status": "pass",
+     "observed": "store ok"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked (connection times out)",
+     "expect": "curl exit 28 (timeout)",
+     "status": "pass",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch keeps its outbound access (the API server's health endpoint)",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc create serviceaccount store -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc set serviceaccount deploy/store store -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store serviceaccount updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0}}}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc expose deploy/store --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/store exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc create route edge store --service=store --insecure-policy=Allow -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:edge-no-redirect",
+     "cmd": "oc apply -n academy-ch-prod -f -",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/store-ingress created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "g4-egress-substitute",
+   "title": "batch blocked by an egress policy on batch, store left open",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "store wants 3 replicas and has 3 Ready",
+     "expect": "3/3 ready",
+     "status": "fail",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 4, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "the page comes from ConfigMap store-content",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "health",
+     "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "resources",
+     "title": "CPU request, memory request and memory limit on every container",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "identity",
+     "title": "pods run as the ServiceAccount store",
+     "expect": "store",
+     "status": "pass",
+     "observed": "spec.template.spec.serviceAccountName = 'store'"
+    },
+    {
+     "id": "scc",
+     "title": "pods admitted by restricted-v2",
+     "expect": "3 of 3 match",
+     "status": "pass",
+     "observed": "4 of 4 match · store-5f96f6ff5-bdwkv: Running [ready, restarts 0], store-5f96f6ff5-h5srt: Running [ready, restarts 0], store-5f96f6ff5-lc7xr: Running [not ready, restarts 0], store-79fcb44ccf-zcjx5: Running [ready, restarts 0]"
+    },
+    {
+     "id": "surge",
+     "title": "updates keep every replica available",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "edge",
+     "title": "the Route terminates TLS at the edge",
+     "expect": "edge",
+     "status": "pass",
+     "observed": "spec.tls.termination = 'edge'"
+    },
+    {
+     "id": "https",
+     "title": "https:// answers with the page",
+     "expect": "HTTP 200 store ok",
+     "status": "pass",
+     "observed": "https://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "redirect",
+     "title": "http:// is redirected to https://",
+     "expect": "HTTP 302 → https://",
+     "status": "pass",
+     "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 302 → https://store-academy-ch-prod.apps-crc.testing/ · "
+    },
+    {
+     "id": "isolated",
+     "title": "a NetworkPolicy isolates the store pods for ingress",
+     "expect": "isolated",
+     "status": "fail",
+     "observed": "policies isolating these pods for ingress: none"
+    },
+    {
+     "id": "router-rule",
+     "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+     "expect": "router admitted on port 8080",
+     "status": "fail",
+     "observed": "policies isolating these pods for ingress: none"
+    },
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches store inside the cluster",
+     "expect": "store ok",
+     "status": "pass",
+     "observed": "store ok"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked (connection times out)",
+     "expect": "curl exit 28 (timeout)",
+     "status": "pass",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch keeps its outbound access (the API server's health endpoint)",
+     "expect": "ok",
+     "status": "fail",
+     "observed": "command terminated with exit code 28"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc create serviceaccount store -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc set serviceaccount deploy/store store -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store serviceaccount updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0}}}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/store patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc expose deploy/store --port=8080 -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/store exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc create route edge store --service=store --insecure-policy=Redirect -n academy-ch-prod",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/store created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-egress-substitute",
+     "cmd": "oc apply -n academy-ch-prod -f -",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/batch-dns-only created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "one-manifest",
+   "title": "A correct alternative: one manifest, TCP liveness, two policies (deny all, then allow)",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "store wants 3 replicas and has 3 Ready",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "the page comes from ConfigMap store-content",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "health",
+     "title": "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "resources",
+     "title": "CPU request, memory request and memory limit on every container",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "identity",
+     "title": "pods run as the ServiceAccount store",
+     "expect": "store",
+     "status": "pass",
+     "observed": "spec.template.spec.serviceAccountName = 'store'"
+    },
+    {
+     "id": "scc",
+     "title": "pods admitted by restricted-v2",
+     "expect": "3 of 3 match",
+     "status": "pass",
+     "observed": "3 of 3 match · store-6bb8964f6-lrtwj: Running [ready, restarts 0], store-6bb8964f6-nddm9: Running [ready, restarts 0], store-6bb8964f6-pxh5p: Running [ready, restarts 0]"
+    },
+    {
+     "id": "surge",
+     "title": "updates keep every replica available",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "edge",
+     "title": "the Route terminates TLS at the edge",
+     "expect": "edge",
+     "status": "pass",
+     "observed": "spec.tls.termination = 'edge'"
+    },
+    {
+     "id": "https",
+     "title": "https:// answers with the page",
+     "expect": "HTTP 200 store ok",
+     "status": "pass",
+     "observed": "https://store-academy-ch-prod.apps-crc.testing/ → HTTP 200 · store ok"
+    },
+    {
+     "id": "redirect",
+     "title": "http:// is redirected to https://",
+     "expect": "HTTP 302 → https://",
+     "status": "pass",
+     "observed": "http://store-academy-ch-prod.apps-crc.testing/ → HTTP 302 → https://store-academy-ch-prod.apps-crc.testing/ · "
+    },
+    {
+     "id": "isolated",
+     "title": "a NetworkPolicy isolates the store pods for ingress",
+     "expect": "isolated",
+     "status": "pass",
+     "observed": "policies isolating these pods for ingress: allow-store-clients, deny-all"
+    },
+    {
+     "id": "router-rule",
+     "title": "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)",
+     "expect": "router admitted on port 8080",
+     "status": "pass",
+     "observed": "isolated by [allow-store-clients, deny-all]; namespaces labelled ['policy-group.network.openshift.io/ingress'] admitted on port 8080"
+    },
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches store inside the cluster",
+     "expect": "store ok",
+     "status": "pass",
+     "observed": "store ok"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked (connection times out)",
+     "expect": "curl exit 28 (timeout)",
+     "status": "pass",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch keeps its outbound access (the API server's health endpoint)",
+     "expect": "ok",
+     "status": "pass",
+     "observed": "ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:one-manifest",
+     "cmd": "oc apply -n academy-ch-prod -f -",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/store created\ndeployment.apps/store created\nservice/store created\nroute.route.openshift.io/store created\nnetworkpolicy.networking.k8s.io/deny-all created\nnetworkpolicy.networking.k8s.io/allow-store-clients created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 466,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-prod: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

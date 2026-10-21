@@ -1,0 +1,173 @@
+{
+ "lab": "lesson.lx.redirection",
+ "kind": "lesson",
+ "lab_hash": "8d910f338c0394bf",
+ "recorded_at": "2026-10-15T17:10:03+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "ls logs > list.txt; cat list.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "app.log\nold.log\n",
+   "stderr": "",
+   "combined": "app.log\nold.log\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls logs nosuchdir > list.txt",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 2,
+   "stdout": "",
+   "stderr": "ls: cannot access 'nosuchdir': No such file or directory\n",
+   "combined": "ls: cannot access 'nosuchdir': No such file or directory\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat list.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "logs:\napp.log\nold.log\n",
+   "stderr": "",
+   "combined": "logs:\napp.log\nold.log\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls logs nosuchdir > all.txt 2>&1; cat all.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ls: cannot access 'nosuchdir': No such file or directory\nlogs:\napp.log\nold.log\n",
+   "stderr": "",
+   "combined": "ls: cannot access 'nosuchdir': No such file or directory\nlogs:\napp.log\nold.log\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo first > notes.txt; cat notes.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "first\n",
+   "stderr": "",
+   "combined": "first\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo second >> notes.txt; cat notes.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "first\nsecond\n",
+   "stderr": "",
+   "combined": "first\nsecond\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo oops > notes.txt; cat notes.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "oops\n",
+   "stderr": "",
+   "combined": "oops\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls nosuchdir 2>/dev/null; echo finished",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "finished\n",
+   "stderr": "",
+   "combined": "finished\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls logs nosuchdir 2>/dev/null",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 2,
+   "stdout": "logs:\napp.log\nold.log\n",
+   "stderr": "",
+   "combined": "logs:\napp.log\nold.log\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep ERROR logs/app.log",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "2026-10-14T09:12:40 ERROR timeout calling payments\n2026-10-14T09:12:47 ERROR timeout calling payments\n2026-10-14T09:30:02 ERROR invalid token from client\n",
+   "stderr": "",
+   "combined": "2026-10-14T09:12:40 ERROR timeout calling payments\n2026-10-14T09:12:47 ERROR timeout calling payments\n2026-10-14T09:30:02 ERROR invalid token from client\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep ERROR logs/app.log | wc -l",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "3\n",
+   "stderr": "",
+   "combined": "3\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep INFO logs/app.log | wc -l",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "3\n",
+   "stderr": "",
+   "combined": "3\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls /usr/bin | head -n 5",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[\nab\nac\naddr2line\nadwaita-1-demo\n",
+   "stderr": "",
+   "combined": "[\nab\nac\naddr2line\nadwaita-1-demo\n",
+   "ok": true
+  }
+ ],
+ "seconds": 8,
+ "ok": true,
+ "problems": []
+}

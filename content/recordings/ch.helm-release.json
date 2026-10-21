@@ -1,0 +1,471 @@
+{
+ "lab": "ch.helm-release",
+ "kind": "challenge",
+ "lab_hash": "83de2371a4cc5e3a",
+ "recorded_at": "2026-10-14T16:28:23+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "helm install shop lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error: INSTALLATION FAILED: Unable to continue with install: ConfigMap \"shop-web\" in namespace \"academy-ch-helm\" exists and cannot be imported into the current release: invalid ownership metadata; label validation error: missing key \"app.kubernetes.io/managed-by\": must be set to \"Helm\"; annotation validation error: missing key \"meta.helm.sh/release-name\": must be set to \"shop\"; annotation validation error: missing key \"meta.helm.sh/release-namespace\": must be set to \"academy-ch-helm\"\n",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc delete configmap shop-web -n academy-ch-helm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap \"shop-web\" deleted from academy-ch-helm namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "helm install shop lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME: shop\nLAST DEPLOYED: Wed Oct 14 16:28:35 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/shop-web -n academy-ch-helm --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"shop-web\" rollout to finish: 0 of 3 updated replicas are available...\nWaiting for deployment \"shop-web\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"shop-web\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"shop-web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "helm get values shop -n academy-ch-helm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "USER-SUPPLIED VALUES:\nmessage: shop-v2\nreplicas: 3\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "release",
+    "title": "release shop is deployed with replicas 3 and message shop-v2",
+    "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+    "status": "fail",
+    "observed": "no Helm release named shop in this project"
+   },
+   {
+    "id": "ready",
+    "title": "shop-web runs 3 Ready replicas",
+    "expect": "3/3 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop-web\" not found"
+   },
+   {
+    "id": "page",
+    "title": "the Route shop-web answers shop-v2",
+    "expect": "HTTP 200 shop-v2",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"shop-web\" not found"
+   },
+   {
+    "id": "owned",
+    "title": "ConfigMap shop-web belongs to the release",
+    "expect": "shop",
+    "status": "fail",
+    "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = None"
+   },
+   {
+    "id": "page-from-release",
+    "title": "the page in ConfigMap shop-web is the release's",
+    "expect": "shop-v2",
+    "status": "fail",
+    "observed": "data.index\\.html = 'hand-made test page'"
+   }
+  ],
+  "at": 1791995309.886279
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "release",
+    "title": "release shop is deployed with replicas 3 and message shop-v2",
+    "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+    "status": "pass",
+    "observed": "release shop revision 1 deployed: replicas = 3, message = 'shop-v2'"
+   },
+   {
+    "id": "ready",
+    "title": "shop-web runs 3 Ready replicas",
+    "expect": "3/3 ready",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "page",
+    "title": "the Route shop-web answers shop-v2",
+    "expect": "HTTP 200 shop-v2",
+    "status": "pass",
+    "observed": "http://shop-web-academy-ch-helm.apps-crc.testing/ → HTTP 200 · shop-v2"
+   },
+   {
+    "id": "owned",
+    "title": "ConfigMap shop-web belongs to the release",
+    "expect": "shop",
+    "status": "pass",
+    "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = 'shop'"
+   },
+   {
+    "id": "page-from-release",
+    "title": "the page in ConfigMap shop-web is the release's",
+    "expect": "shop-v2",
+    "status": "pass",
+    "observed": "data.index\\.html = 'shop-v2'"
+   }
+  ],
+  "at": 1791995325.4869087
+ },
+ "trials": [
+  {
+   "id": "hand-edits",
+   "title": "Installed with the chart's defaults, then fixed by hand (oc scale, oc patch): live state right, release wrong",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "release",
+     "title": "release shop is deployed with replicas 3 and message shop-v2",
+     "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+     "status": "fail",
+     "observed": "release shop revision 1 has replicas = 1, message = 'hello'"
+    },
+    {
+     "id": "ready",
+     "title": "shop-web runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "page",
+     "title": "the Route shop-web answers shop-v2",
+     "expect": "HTTP 200 shop-v2",
+     "status": "pass",
+     "observed": "http://shop-web-academy-ch-helm.apps-crc.testing/ → HTTP 200 · shop-v2"
+    },
+    {
+     "id": "owned",
+     "title": "ConfigMap shop-web belongs to the release",
+     "expect": "shop",
+     "status": "pass",
+     "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = 'shop'"
+    },
+    {
+     "id": "page-from-release",
+     "title": "the page in ConfigMap shop-web is the release's",
+     "expect": "shop-v2",
+     "status": "pass",
+     "observed": "data.index\\.html = 'shop-v2'"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:hand-edits",
+     "cmd": "oc delete configmap shop-web -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap \"shop-web\" deleted from academy-ch-helm namespace\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:hand-edits",
+     "cmd": "helm install shop lab/chart -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "NAME: shop\nLAST DEPLOYED: Wed Oct 14 16:29:05 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:hand-edits",
+     "cmd": "oc scale deploy/shop-web --replicas=3 -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop-web scaled\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:hand-edits",
+     "cmd": "oc patch configmap shop-web -n academy-ch-helm --type=merge -p '{\"data\":{\"index.html\":\"shop-v2\"}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-web patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "replicas-only",
+   "title": "Release installed with replicas=3 but the default message",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "release",
+     "title": "release shop is deployed with replicas 3 and message shop-v2",
+     "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+     "status": "fail",
+     "observed": "release shop revision 1 has message = 'hello'"
+    },
+    {
+     "id": "ready",
+     "title": "shop-web runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "page",
+     "title": "the Route shop-web answers shop-v2",
+     "expect": "HTTP 200 shop-v2",
+     "status": "fail",
+     "observed": "http://shop-web-academy-ch-helm.apps-crc.testing/ → HTTP 200 · hello"
+    },
+    {
+     "id": "owned",
+     "title": "ConfigMap shop-web belongs to the release",
+     "expect": "shop",
+     "status": "pass",
+     "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = 'shop'"
+    },
+    {
+     "id": "page-from-release",
+     "title": "the page in ConfigMap shop-web is the release's",
+     "expect": "shop-v2",
+     "status": "fail",
+     "observed": "data.index\\.html = 'hello'"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:replicas-only",
+     "cmd": "oc delete configmap shop-web -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap \"shop-web\" deleted from academy-ch-helm namespace\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:replicas-only",
+     "cmd": "helm install shop lab/chart --set replicas=3 -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "NAME: shop\nLAST DEPLOYED: Wed Oct 14 16:29:47 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "adopt",
+   "title": "A correct alternative: let Helm adopt the existing ConfigMap, then install, then upgrade with the message",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "release",
+     "title": "release shop is deployed with replicas 3 and message shop-v2",
+     "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+     "status": "pass",
+     "observed": "release shop revision 2 deployed: replicas = 3, message = 'shop-v2'"
+    },
+    {
+     "id": "ready",
+     "title": "shop-web runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "page",
+     "title": "the Route shop-web answers shop-v2",
+     "expect": "HTTP 200 shop-v2",
+     "status": "pass",
+     "observed": "http://shop-web-academy-ch-helm.apps-crc.testing/ → HTTP 200 · shop-v2"
+    },
+    {
+     "id": "owned",
+     "title": "ConfigMap shop-web belongs to the release",
+     "expect": "shop",
+     "status": "pass",
+     "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = 'shop'"
+    },
+    {
+     "id": "page-from-release",
+     "title": "the page in ConfigMap shop-web is the release's",
+     "expect": "shop-v2",
+     "status": "pass",
+     "observed": "data.index\\.html = 'shop-v2'"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:adopt",
+     "cmd": "oc label configmap shop-web app.kubernetes.io/managed-by=Helm -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-web labeled\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:adopt",
+     "cmd": "oc annotate configmap shop-web meta.helm.sh/release-name=shop meta.helm.sh/release-namespace=academy-ch-helm -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-web annotated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:adopt",
+     "cmd": "helm install shop lab/chart --set replicas=3 -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "NAME: shop\nLAST DEPLOYED: Wed Oct 14 16:30:32 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:adopt",
+     "cmd": "helm upgrade shop lab/chart --reuse-values --set message=shop-v2 -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Release \"shop\" has been upgraded. Happy Helming!\nNAME: shop\nLAST DEPLOYED: Wed Oct 14 16:30:35 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 2\nTEST SUITE: None\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "other-name",
+   "title": "Release installed under another name to dodge the conflict",
+   "kind": "wrong",
+   "expect": "failed",
+   "got": "failed",
+   "ok": true,
+   "results": [
+    {
+     "id": "release",
+     "title": "release shop is deployed with replicas 3 and message shop-v2",
+     "expect": "revision 1 deployed: replicas = 3, message = 'shop-v2'",
+     "status": "fail",
+     "observed": "no Helm release named shop in this project"
+    },
+    {
+     "id": "ready",
+     "title": "shop-web runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "fail",
+     "observed": "Error from server (NotFound): deployments.apps \"shop-web\" not found"
+    },
+    {
+     "id": "page",
+     "title": "the Route shop-web answers shop-v2",
+     "expect": "HTTP 200 shop-v2",
+     "status": "fail",
+     "observed": "Error from server (NotFound): routes.route.openshift.io \"shop-web\" not found"
+    },
+    {
+     "id": "owned",
+     "title": "ConfigMap shop-web belongs to the release",
+     "expect": "shop",
+     "status": "fail",
+     "observed": "metadata.annotations.meta\\.helm\\.sh/release-name = None"
+    },
+    {
+     "id": "page-from-release",
+     "title": "the page in ConfigMap shop-web is the release's",
+     "expect": "shop-v2",
+     "status": "fail",
+     "observed": "data.index\\.html = 'hand-made test page'"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:other-name",
+     "cmd": "helm install shop2 lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "NAME: shop2\nLAST DEPLOYED: Wed Oct 14 16:32:09 2026\nNAMESPACE: academy-ch-helm\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 235,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-helm: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

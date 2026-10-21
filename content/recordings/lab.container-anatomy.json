@@ -1,0 +1,222 @@
+{
+ "lab": "lab.container-anatomy",
+ "kind": "lab",
+ "lab_hash": "cea69db5811d7a35",
+ "recorded_at": "2026-10-14T17:38:17+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- id",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- grep Cap /proc/1/status",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "whoami",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1004310000(1004310000) gid=0(root) groups=0(root),1004310000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scc",
+   "cmd": "oc get pods -l app=box -n academy-anatomy -o 'custom-columns=POD:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc,QOS:.status.qosClass'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "POD                   SCC             QOS\nbox-d46c8ccc4-qtffp   restricted-v2   Burstable\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "caps",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- grep Cap /proc/1/status",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nCapAmb:\t0000000000000000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pid1",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- cat /proc/1/cmdline",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/usr/bin/coreutils\u0000--coreutils-prog-shebang=sleep\u0000/usr/bin/sleep\u0000infinity\u0000",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pid1",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- ls /proc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1\n6\nacpi\nbootconfig\nbuddyinfo\nbus\ncgroups\ncmdline\nconsoles\ncpuinfo\ncrypto\ndevices\ndiskstats\ndma\ndriver\ndynamic_debug\nexecdomains\nfb\nfilesystems\nfs\ninterrupts\niomem\nioports\nirq\nkallsyms\nkcore\nkey-users\nkeys\nkmsg\nkpagecgroup\nkpagecount\nkpageflags\nloadavg\nlocks\nmdstat\nmeminfo\nmisc\nmodules\nmounts\nmtrr\nnet\npagetypeinfo\npartitions\nschedstat\nscsi\nself\nslabinfo\nsoftirqs\nstat\nswaps\nsys\nsysrq-trigger\nsysvipc\nthread-self\ntimer_list\ntty\nuptime\nversion\nvmallocinfo\nvmstat\nzoneinfo\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cgroups",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "134217728\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cgroups",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/cpu.max",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "50000 100000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "change",
+   "cmd": "oc set resources deploy/box -n academy-anatomy --limits=memory=256Mi",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/box resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "change",
+   "cmd": "oc rollout status deploy/box -n academy-anatomy --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"box\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"box\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"box\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "change",
+   "cmd": "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "268435456\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "ready",
+    "title": "box is running",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "scc",
+    "title": "Admitted with restricted-v2",
+    "expect": "openshift.io/scc=restricted-v2",
+    "status": "pass",
+    "observed": "1 of 1 match · box-d46c8ccc4-qtffp: Running [ready, restarts 0]"
+   },
+   {
+    "id": "limit-256",
+    "title": "Template memory limit is 256Mi",
+    "expect": "256Mi",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].resources.limits.memory = '128Mi'"
+   },
+   {
+    "id": "cgroup-256",
+    "title": "The kernel enforces 256Mi in the running container",
+    "expect": "memory.max = 268435456",
+    "status": "fail",
+    "observed": "134217728"
+   }
+  ],
+  "at": 1791999507.7786481
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready",
+    "title": "box is running",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "scc",
+    "title": "Admitted with restricted-v2",
+    "expect": "openshift.io/scc=restricted-v2",
+    "status": "pass",
+    "observed": "1 of 1 match · box-745bfb6fdd-k9p49: Running [ready, restarts 0]"
+   },
+   {
+    "id": "limit-256",
+    "title": "Template memory limit is 256Mi",
+    "expect": "256Mi",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].resources.limits.memory = '256Mi'"
+   },
+   {
+    "id": "cgroup-256",
+    "title": "The kernel enforces 256Mi in the running container",
+    "expect": "memory.max = 268435456",
+    "status": "pass",
+    "observed": "268435456"
+   }
+  ],
+  "at": 1791999527.538829
+ },
+ "seconds": 30,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-anatomy: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

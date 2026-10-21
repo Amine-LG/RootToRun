@@ -1,0 +1,180 @@
+{
+ "lab": "lesson.o1.deploy-apps",
+ "kind": "lesson",
+ "lab_hash": "29612c55c470b04c",
+ "recorded_at": "2026-10-16T16:17:14+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o1-deploy-apps",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment hello --image=registry.access.redhat.com/ubi9/httpd-24:latest --port=8080; oc rollout status deployment/hello --timeout=180s; oc get deployment,replicaset,pods",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello created\nWaiting for deployment \"hello\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"hello\" successfully rolled out\nNAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/hello   1/1     1            1           5s\n\nNAME                              DESIRED   CURRENT   READY   AGE\nreplicaset.apps/hello-b7845bb7c   1         1         1       5s\n\nNAME                        READY   STATUS    RESTARTS   AGE\npod/hello-b7845bb7c-n4gw9   1/1     Running   0          6s\n",
+   "stderr": "",
+   "combined": "deployment.apps/hello created\nWaiting for deployment \"hello\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"hello\" successfully rolled out\nNAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/hello   1/1     1            1           5s\n\nNAME                              DESIRED   CURRENT   READY   AGE\nreplicaset.apps/hello-b7845bb7c   1         1         1       5s\n\nNAME                        READY   STATUS    RESTARTS   AGE\npod/hello-b7845bb7c-n4gw9   1/1     Running   0          6s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose deployment hello --port=8080",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/hello exposed\n",
+   "stderr": "",
+   "combined": "service/hello exposed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose service hello; oc get service,route",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/hello exposed\nNAME            TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE\nservice/hello   ClusterIP   10.217.5.73   <none>        8080/TCP   0s\n\nNAME                             HOST/PORT                                              PATH   SERVICES   PORT   TERMINATION   WILDCARD\nroute.route.openshift.io/hello   hello-academy-lesson-o1-deploy-apps.apps-crc.testing          hello      8080                 None\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/hello exposed\nNAME            TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE\nservice/hello   ClusterIP   10.217.5.73   <none>        8080/TCP   0s\n\nNAME                             HOST/PORT                                              PATH   SERVICES   PORT   TERMINATION   WILDCARD\nroute.route.openshift.io/hello   hello-academy-lesson-o1-deploy-apps.apps-crc.testing          hello      8080                 None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 20; curl -s -o /dev/null -D - http://$(oc get route hello -o jsonpath='{.spec.host}')/ | grep -i -e '^HTTP' -e '^server'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "HTTP/1.1 403 Forbidden\r\nserver: Apache/2.4.62 (Red Hat Enterprise Linux) OpenSSL/3.5.8\r\n",
+   "stderr": "",
+   "combined": "HTTP/1.1 403 Forbidden\r\nserver: Apache/2.4.62 (Red Hat Enterprise Linux) OpenSSL/3.5.8\r\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get service hello -o jsonpath='{.spec.selector}{\"\\n\"}'; oc get pods --show-labels; oc get endpointslices -l kubernetes.io/service-name=hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"app\":\"hello\"}\nNAME                    READY   STATUS    RESTARTS   AGE   LABELS\nhello-b7845bb7c-n4gw9   1/1     Running   0          27s   app=hello,pod-template-hash=b7845bb7c\nNAME          ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nhello-cn67r   IPv4          8080    10.217.0.109   21s\n",
+   "stderr": "",
+   "combined": "{\"app\":\"hello\"}\nNAME                    READY   STATUS    RESTARTS   AGE   LABELS\nhello-b7845bb7c-n4gw9   1/1     Running   0          27s   app=hello,pod-template-hash=b7845bb7c\nNAME          ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nhello-cn67r   IPv4          8080    10.217.0.109   21s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set selector service hello app=hello,tier=web; sleep 5; oc get endpointslices -l kubernetes.io/service-name=hello; curl -s -o /dev/null -w '%{http_code}\\n' http://$(oc get route hello -o jsonpath='{.spec.host}')/",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/hello selector updated\nNAME          ADDRESSTYPE   PORTS     ENDPOINTS   AGE\nhello-cn67r   IPv4          <unset>   <unset>     27s\n503\n",
+   "stderr": "",
+   "combined": "service/hello selector updated\nNAME          ADDRESSTYPE   PORTS     ENDPOINTS   AGE\nhello-cn67r   IPv4          <unset>   <unset>     27s\n503\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set selector service hello app=hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/hello selector updated\n",
+   "stderr": "",
+   "combined": "service/hello selector updated\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 5; oc get endpointslices -l kubernetes.io/service-name=hello; curl -s -o /dev/null -w '%{http_code}\\n' http://$(oc get route hello -o jsonpath='{.spec.host}')/",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME          ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nhello-cn67r   IPv4          8080    10.217.0.109   33s\n403\n",
+   "stderr": "",
+   "combined": "NAME          ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nhello-cn67r   IPv4          8080    10.217.0.109   33s\n403\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-app --name=quick --image=registry.access.redhat.com/ubi9/httpd-24:latest; oc get all -l app=quick",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "--> Found container image 346e3db (2 days old) from registry.access.redhat.com for \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n\n    Apache httpd 2.4 \n    ---------------- \n    Apache httpd 2.4 available as container, is a powerful, efficient, and extensible web server. Apache supports a variety of features, many implemented as compiled modules which extend the core functionality. These can range from server-side programming language support to authentication schemes. Virtual hosting allows one Apache installation to serve many different Web sites.\n\n    Tags: builder, httpd, httpd-24\n\n    * An image stream tag will be created as \"quick:latest\" that will track this image\n\n--> Creating resources ...\n    imagestream.image.openshift.io \"quick\" created\n    deployment.apps \"quick\" created\n    service \"quick\" created\n--> Success\n    Application is not exposed. You can expose services to the outside world by executing one or more of the commands below:\n     'oc expose service/quick' \n    Run 'oc status' to view your app.\nNAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE\nservice/quick   ClusterIP   10.217.4.207   <none>        8080/TCP,8443/TCP   1s\n\nNAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/quick   0/1     0            0           1s\n\nNAME                                   IMAGE REPOSITORY                                                                              TAGS   UPDATED\nimagestream.image.openshift.io/quick   default-route-openshift-image-registry.apps-crc.testing/academy-lesson-o1-deploy-apps/quick          \n",
+   "stderr": "Warning: apps.openshift.io/v1 DeploymentConfig is deprecated in v4.14+, unavailable in v4.10000+\n",
+   "combined": "--> Found container image 346e3db (2 days old) from registry.access.redhat.com for \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n\n    Apache httpd 2.4 \n    ---------------- \n    Apache httpd 2.4 available as container, is a powerful, efficient, and extensible web server. Apache supports a variety of features, many implemented as compiled modules which extend the core functionality. These can range from server-side programming language support to authentication schemes. Virtual hosting allows one Apache installation to serve many different Web sites.\n\n    Tags: builder, httpd, httpd-24\n\n    * An image stream tag will be created as \"quick:latest\" that will track this image\n\n--> Creating resources ...\n    imagestream.image.openshift.io \"quick\" created\n    deployment.apps \"quick\" created\n    service \"quick\" created\n--> Success\n    Application is not exposed. You can expose services to the outside world by executing one or more of the commands below:\n     'oc expose service/quick' \n    Run 'oc status' to view your app.\nWarning: apps.openshift.io/v1 DeploymentConfig is deprecated in v4.14+, unavailable in v4.10000+\nNAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE\nservice/quick   ClusterIP   10.217.4.207   <none>        8080/TCP,8443/TCP   1s\n\nNAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/quick   0/1     0            0           1s\n\nNAME                                   IMAGE REPOSITORY                                                                              TAGS   UPDATED\nimagestream.image.openshift.io/quick   default-route-openshift-image-registry.apps-crc.testing/academy-lesson-o1-deploy-apps/quick          \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deployment hello --replicas=3; oc rollout status deployment/hello --timeout=180s >/dev/null; oc get replicasets -l app=hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello scaled\nNAME              DESIRED   CURRENT   READY   AGE\nhello-b7845bb7c   3         3         3       46s\n",
+   "stderr": "",
+   "combined": "deployment.apps/hello scaled\nNAME              DESIRED   CURRENT   READY   AGE\nhello-b7845bb7c   3         3         3       46s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set resources deployment hello --requests=cpu=20m,memory=32Mi --limits=memory=128Mi; oc rollout status deployment/hello --timeout=180s >/dev/null; oc get replicasets -l app=hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello resource requirements updated\nNAME               DESIRED   CURRENT   READY   AGE\nhello-65c699cddc   3         3         3       14s\nhello-b7845bb7c    0         0         0       60s\n",
+   "stderr": "",
+   "combined": "deployment.apps/hello resource requirements updated\nNAME               DESIRED   CURRENT   READY   AGE\nhello-65c699cddc   3         3         3       14s\nhello-b7845bb7c    0         0         0       60s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc autoscale deployment hello --min=2 --max=5 --cpu=60%; sleep 30; oc get hpa hello; oc describe hpa hello | tail -n 12",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "horizontalpodautoscaler.autoscaling/hello autoscaled\nNAME    REFERENCE          TARGETS              MINPODS   MAXPODS   REPLICAS   AGE\nhello   Deployment/hello   cpu: <unknown>/60%   2         5         3          31s\nMax replicas:                                          5\nDeployment pods:                                       3 current / 0 desired\nConditions:\n  Type           Status  Reason                   Message\n  ----           ------  ------                   -------\n  AbleToScale    True    SucceededGetScale        the HPA controller was able to get the target's current scale\n  ScalingActive  False   FailedGetResourceMetric  the HPA was unable to compute the replica count: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\nEvents:\n  Type     Reason                        Age               From                       Message\n  ----     ------                        ----              ----                       -------\n  Warning  FailedGetResourceMetric       0s (x2 over 15s)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n  Warning  FailedComputeMetricsReplicas  0s (x2 over 15s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n",
+   "stderr": "",
+   "combined": "horizontalpodautoscaler.autoscaling/hello autoscaled\nNAME    REFERENCE          TARGETS              MINPODS   MAXPODS   REPLICAS   AGE\nhello   Deployment/hello   cpu: <unknown>/60%   2         5         3          31s\nMax replicas:                                          5\nDeployment pods:                                       3 current / 0 desired\nConditions:\n  Type           Status  Reason                   Message\n  ----           ------  ------                   -------\n  AbleToScale    True    SucceededGetScale        the HPA controller was able to get the target's current scale\n  ScalingActive  False   FailedGetResourceMetric  the HPA was unable to compute the replica count: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\nEvents:\n  Type     Reason                        Age               From                       Message\n  ----     ------                        ----              ----                       -------\n  Warning  FailedGetResourceMetric       0s (x2 over 15s)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n  Warning  FailedComputeMetricsReplicas  0s (x2 over 15s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deployment hello --replicas=10; sleep 30; oc get deployment hello; oc get events --field-selector reason=SuccessfulRescale -o custom-columns=OBJECT:.involvedObject.name,MESSAGE:.message",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello scaled\nNAME    READY   UP-TO-DATE   AVAILABLE   AGE\nhello   5/5     5            5           2m1s\nOBJECT   MESSAGE\nhello    New size: 5; reason: Current number of replicas above Spec.MaxReplicas\n",
+   "stderr": "",
+   "combined": "deployment.apps/hello scaled\nNAME    READY   UP-TO-DATE   AVAILABLE   AGE\nhello   5/5     5            5           2m1s\nOBJECT   MESSAGE\nhello    New size: 5; reason: Current number of replicas above Spec.MaxReplicas\n",
+   "ok": true
+  }
+ ],
+ "seconds": 137,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,385 @@
+# Containers path, written as teaching flows. Commands are recorded with rootless Podman on a RHEL 9 workstation.
+- id: a.container-is-a-process
+  title: "A container is a process"
+  subtitle: "Looking at one container from inside and from outside"
+  module: f1-containers
+  mode: LOCAL_SIMULATION
+  minutes: 20
+  level: 1
+  supports: "Podman 5.8 (rootless) on RHEL 9, cgroups v2. Outputs recorded on a RHEL 9 workstation as an ordinary user."
+  concepts: [linux.process, linux.namespaces, linux.cgroups, container.podman]
+  prerequisites: [lx.processes-signals]
+  objective: |
+    Run a container with Podman, find its process on the host, explain what namespaces change about its view of
+    the system, show that it shares the host's kernel, and read the memory limit the kernel enforces on it.
+  flow:
+    - kind: ask
+      id: recall-process
+      prompt: "A look back at Linux. What is a process?"
+      recalls: lx.processes-signals
+      choices:
+        - text: "A running program, with its own PID"
+          why: "The kernel gives every running program a PID, and `ps` lists them. The program's file on disk is not a process until it runs."
+        - text: "A program file stored in `/usr/bin`"
+          why: "That is the program on disk. It becomes a process when it is started, and the same file can run as many processes at once."
+        - text: "A user logged in to the machine"
+          why: "Users own processes, but a process is the running program itself, whoever started it."
+      answer: 0
+    - kind: teach
+      id: why-containers
+      title: "Why containers exist"
+      body: |
+        A program installed on a Linux machine depends on the files around it: libraries in particular versions,
+        a language runtime, configuration. Two programs that need different versions of the same library get in
+        each other's way, and a program that works on one machine can fail on another because something
+        underneath differs.
+
+        A **container** runs a program with its own copy of the files it needs, kept apart from the rest of the
+        machine and allowed only the resources it is given. That package travels whole: it runs the same on a
+        laptop, a server or, later in this course, a cluster of machines, as long as they run Linux on the same
+        kind of processor.
+
+        How can one machine keep programs that far apart, cheaply? This lesson takes one container apart to see.
+    - kind: teach
+      id: claim
+      title: "Not a small virtual machine"
+      body: |
+        Containers are often described as "lightweight virtual machines". The description is understandable,
+        and misleading. A virtual machine pretends to be a whole computer: it boots its own operating system,
+        with its own kernel.
+
+        A container is much simpler: **it is an ordinary Linux process**, running on the host's kernel like
+        any other. What makes it a container is that the kernel shows that process a restricted view of the
+        system, and limits what it may use.
+
+        You will check this claim yourself in this lesson, by looking at one container from the inside and
+        from the outside.
+    - kind: teach
+      id: podman-image
+      title: "Running a first container"
+      body: |
+        `podman` is the tool that starts and manages containers on this machine. A container starts from an
+        **image**: a packaged set of files (programs, libraries, configuration) that becomes the container's
+        filesystem. Images are downloaded from **registries**, servers that store them; images get a lesson of
+        their own.
+
+        This lesson uses `busybox`, a tiny image of under 3 MB with the basic Linux commands. The pattern is
+        `podman run <image> <command>`: start a container from the image, and run the command inside it.
+
+        An image address has three parts. In `quay.io/prometheus/busybox:latest`, `quay.io` is the registry,
+        `prometheus/busybox` is the image's name, and `latest` is a tag, a label for one version of the image.
+        Copy the address exactly for now; the image lesson explains tags. The first `podman run` downloads the
+        image from quay.io and keeps it on your machine, so later commands start at once.
+    - kind: show
+      id: hello
+      run: "podman run --rm quay.io/prometheus/busybox:latest echo hello from a container"
+      notice: |
+        Podman created a container from the image, ran `echo` inside it, and showed its output. `--rm` asks
+        Podman to remove the container once it has finished, so nothing is left behind.
+    - kind: ask
+      id: guess-end
+      guess: true
+      prompt: "When `echo` had printed its line, what happened to the container?"
+      choices:
+        - text: "It stopped, because its process ended"
+          why: "A container lives exactly as long as its main process. The next steps build on this."
+        - text: "It kept running in the background"
+          why: "There was nothing left to run: the container's only process, `echo`, had finished. The next steps build on this."
+        - text: "It was paused, ready for the next command"
+          why: "Containers are not paused between commands. The next steps show what keeps one running."
+      answer: 0
+    - kind: teach
+      id: long-running
+      body: |
+        A container lives exactly as long as its main process. `echo` finished at once, so the container
+        ended at once.
+
+        To keep a container around, its process must keep running. `sleep 1000` waits for 1000
+        seconds, which is long enough to look at it. Two options: `-d` (detached) runs it in the background
+        and gives you the prompt back, and `--name demo` gives the container a name to use in later commands.
+    - kind: show
+      id: run-d
+      run: "podman run -d --name demo quay.io/prometheus/busybox:latest sleep 1000"
+      notice: "Podman prints the container's full ID and returns. The container keeps running in the background."
+    - kind: teach
+      id: ps-intro
+      body: |
+        `podman ps` lists the containers that are running. `ps` is also the name of the Linux command that
+        lists processes, and you will use that one in a moment. Here is the Podman one:
+    - kind: show
+      id: show-ps
+      run: podman ps
+      highlight: ["demo"]
+      notice: "One container, `demo`, running `sleep 1000`, created from the busybox image."
+    - kind: try
+      id: try-second
+      body: "Your first `podman run`, typed by you this time: start a second container from the same image, in the background, named `second`, running `sleep 1000`."
+      accept:
+        - "podman run -d --name second quay.io/prometheus/busybox:latest sleep 1000"
+        - "podman run --name second -d quay.io/prometheus/busybox:latest sleep 1000"
+        - "podman run --detach --name second quay.io/prometheus/busybox:latest sleep 1000"
+        - "podman run --name=second -d quay.io/prometheus/busybox:latest sleep 1000"
+        - "podman run -d --name=second quay.io/prometheus/busybox:latest sleep 1000"
+        - "podman container run -d --name second quay.io/prometheus/busybox:latest sleep 1000"
+      hints:
+        - match: "^docker "
+          say: "Docker is another container tool with many of the same commands. This machine uses Podman: start with `podman`."
+        - match: "^podman run (?!.*(-d|--detach))"
+          say: "Without `-d`, the container runs in the foreground and holds your prompt until `sleep` ends. Add `-d` to run it in the background."
+        - match: "^podman run(?!.*--name)"
+          say: "Without `--name second`, Podman picks a random name. Add `--name second` before the image."
+        - match: "^podman run .*--name \\S+"
+          say: "Check the name: the task asks for `second`. The image address and the command `sleep 1000` stay the same as for `demo`."
+      hint: "`podman run`, the option that runs it in the background, the option that names it, then the image and the command it runs."
+      run: "podman run -d --name second quay.io/prometheus/busybox:latest sleep 1000"
+      then: "Podman printed the new container's ID and returned. Both `demo` and `second` now run `sleep 1000`; the rest of the lesson looks at `demo`."
+    - kind: teach
+      id: outside
+      title: "The view from outside"
+      body: |
+        If a container is a process, the host's `ps` should be able to see it. Podman can tell you which
+        process ID the host gave the container's main process. `podman inspect` prints everything Podman knows
+        about a container as **JSON**, a text format of named fields nested inside each other. `--format`
+        prints only what you ask for: in `'{{.State.Pid}}'`, the double braces mark a field to print, and
+        `.State.Pid` is its path, the field `Pid` inside `State`. Text outside the braces is printed as written.
+    - kind: show
+      id: host-pid
+      run: "podman inspect --format '{{.State.Pid}}' demo"
+      notice: "One number: the PID that the host gave to the container's main process. It differs on every machine and every run."
+    - kind: teach
+      id: host-ps-intro
+      body: |
+        Now ask the host's `ps` about that PID. The shell can put the number in for you: `$(...)` runs the
+        inner command and uses its output. The command reads the PID again, so you do not have to copy it, and
+        `-p` limits `ps` to that one process:
+    - kind: show
+      id: host-ps
+      run: "ps -o pid,args -p $(podman inspect --format '{{.State.Pid}}' demo)"
+      highlight: ["sleep 1000"]
+      notice: |
+        The same PID as the number above, and the command `sleep 1000`: an ordinary process on the host,
+        listed by the same `ps` you used in the Linux lessons.
+    - kind: try
+      id: try-pid
+      body: "Your turn: ask Podman for the host PID of the other container, `second`."
+      accept:
+        - "podman inspect --format '{{.State.Pid}}' second"
+        - "podman inspect --format \"{{.State.Pid}}\" second"
+        - "podman inspect --format={{.State.Pid}} second"
+        - "podman inspect --format '{{ .State.Pid }}' second"
+        - "podman inspect --format='{{.State.Pid}}' second"
+        - "podman inspect -f '{{.State.Pid}}' second"
+        - "podman inspect -f \"{{.State.Pid}}\" second"
+        - "podman inspect --format {{.State.Pid}} second"
+        - "podman inspect second --format '{{.State.Pid}}'"
+        - "podman inspect second -f '{{.State.Pid}}'"
+        - "podman container inspect --format '{{.State.Pid}}' second"
+      hints:
+        - match: "\\bdemo\\b"
+          say: "`demo` is the container you looked at above. The task is about `second`."
+        - match: "^podman inspect second$"
+          say: "That prints the whole JSON. Add `--format '{{.State.Pid}}'` so that only the PID is printed."
+        - match: "\\.(state|STATE)\\.|\\.State\\.(pid|PID)\\b"
+          say: "Field names are case-sensitive, exactly as in the JSON: `.State.Pid`, with a capital S and P."
+        - match: "^(ps|pgrep)\\b"
+          say: "`ps` needs the number first. Ask Podman for it: `podman inspect`, `--format`, then the container's name."
+      hint: "The same `podman inspect` command as for `demo`, with the other container's name at the end."
+      then: "A different number from `demo`'s: each container is a separate process on the host, with its own PID. Giving that number to `ps -o pid,args -p` would list the second `sleep 1000`."
+    - kind: ask
+      id: guess-pid
+      guess: true
+      prompt: "Now you run `ps` inside the container, with `podman exec demo ps`. Which PID will `sleep 1000` have there?"
+      choices:
+        - text: "The same PID as on the host"
+          why: "It is the same process, so this is a natural guess. Watch the next step."
+        - text: "PID 1"
+          why: "See the next step for why."
+        - text: "None: `ps` cannot see it from inside"
+          why: "The process is inside the container, so the container can see it. The question is which number it has."
+      answer: 1
+    - kind: show
+      id: inside-ps
+      body: "`podman exec` runs another command inside a container that is already running:"
+      run: "podman exec demo ps"
+      highlight: ["sleep 1000"]
+      notice: |
+        Inside, `sleep 1000` is **PID 1**, the first process, and only two processes exist: `sleep` and the
+        `ps` you started. The host sees the same process with a different number, among hundreds of
+        others.
+
+        The `USER` column says `root` inside the container. That is a separate matter, explained in "Go deeper"
+        once the PID numbering is clear.
+    - kind: teach
+      id: namespaces
+      title: "Namespaces: a restricted view"
+      body: |
+        The kernel gave the container its own **PID namespace**: a separate numbering of processes, which
+        starts at 1 and contains only the container's processes. The process exists once; it has a number
+        in each view.
+
+        Linux has several kinds of namespace, each hiding or separating one part of the system. A container
+        gets several at once. Two more are visible from a shell: its own **hostname**, and its own **filesystem**,
+        built from the image.
+    - kind: show
+      id: hostname
+      run: "hostname; podman exec demo hostname"
+      notice: "The first line is the host's name; the second is the container's own, which Podman set from the container's ID."
+    - kind: show
+      id: inside-root
+      body: "In the first Linux lesson, `ls /` showed the top of the workstation's directory tree. Inside the container:"
+      run: "podman exec demo ls /"
+      notice: |
+        A different, much smaller tree. The container's root filesystem starts from the busybox image, and
+        Podman adds some mounts of its own, such as `/proc` and `/dev`. A host path is not shared into this
+        view unless you ask for it when starting the container.
+    - kind: ask
+      id: read-view
+      prompt: "A file `/srv/data.txt` exists on the host. A process inside the container runs `cat /srv/data.txt`. What happens?"
+      choices:
+        - text: "It fails: the container cannot see that file"
+          why: "The container's mount namespace shows it the image's files. A host directory is visible only if you share it explicitly when starting the container (this container shares none)."
+        - text: "It prints the file, because the container runs on the same host"
+          why: "Running on the same host does not mean seeing the same files. The container's filesystem view starts from the image."
+        - text: "It prints the file if the container runs as root"
+          why: "Being root inside the container does not reveal the host's files: what the process can see is decided by its namespaces, not by its user."
+      answer: 0
+    - kind: teach
+      id: same-kernel
+      title: "One kernel for everyone"
+      body: |
+        A virtual machine would run its own kernel. A container cannot: it is a process, and every process on
+        the machine runs on the same kernel. `uname -r` prints the version of the kernel you are running on.
+        Here it is on the host, then inside the container:
+    - kind: show
+      id: uname
+      run: "uname -r; podman exec demo uname -r"
+      notice: |
+        The same version twice. The container brings its own files, but not its own kernel. That is one
+        reason containers start in a fraction of a second: there is no operating system to boot. It is also
+        why Linux containers need a Linux kernel: on macOS or Windows, Podman and Docker run a small Linux
+        virtual machine to host them.
+    - kind: teach
+      id: cgroups
+      title: "Limits: control groups"
+      body: |
+        Namespaces decide what a process can *see*. A second kernel feature, **control groups** (cgroups),
+        decides how much it may *use*: memory, CPU time, number of processes.
+
+        `--memory 64m` starts a container whose processes may use at most 64 MiB of memory together. The kernel
+        exposes the limit as a file inside the container, `/sys/fs/cgroup/memory.max`:
+    - kind: show
+      id: memory
+      run: "podman run -d --name limited --memory 64m quay.io/prometheus/busybox:latest sleep 1000; podman exec limited cat /sys/fs/cgroup/memory.max"
+      highlight: ["67108864"]
+      notice: |
+        The first line is the new container's ID. The second is the limit in bytes: 67,108,864 bytes is
+        exactly 64 MiB (64 × 1024 × 1024). The kernel enforces it, not Podman.
+
+        Later in the course, the memory limit you give a container on a cluster ends up in this same file: the
+        lab [Anatomy of a container](/lab/lab.container-anatomy) reads it inside a running pod.
+    - kind: ask
+      id: oom
+      prompt: "A program in the `limited` container keeps filling real memory until the container's 64 MiB limit is reached and the kernel cannot reclaim any. What may the kernel do?"
+      choices:
+        - text: "Kill a process in the container"
+          why: "When a cgroup cannot stay under its memory limit and nothing can be reclaimed, the kernel's out-of-memory killer may end a process in that group. An exit status alone does not prove that happened: confirming it takes more evidence, which a later lesson shows."
+        - text: "Podman gives the container more memory"
+          why: "Podman set the limit when it started the container; it does not watch or raise it. The kernel enforces it."
+        - text: "The program gets the memory from the host"
+          why: "The cgroup limit applies whatever the host has free. That is its purpose: one container cannot take memory from the others."
+      answer: 0
+    - kind: reflect
+      id: explain-not-vm
+      prompt: "A colleague says containers are small virtual machines. Using two things you saw in this lesson, explain what a container really is."
+      model: |
+        A container is an ordinary Linux process. On the host, `ps` lists `sleep 1000` with a normal PID, and
+        `uname -r` prints the same kernel version inside and outside: there is no second operating system.
+        What makes it a container is that the kernel gives it namespaces (its own process numbering where it is
+        PID 1, its own hostname, the image's files as `/`) and cgroup limits such as a memory maximum.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can list containers, start one in the background with Podman and find its process on the host, and you
+        have watched how to read its limits. You can explain what namespaces and cgroups change for it. When a
+        container misbehaves later, this is the first question to ask: which process is it, what can it see, and
+        what is it allowed to use?
+
+        Next, you run something useful in a container: a small web server that you can reach from the host, with
+        files shared from your machine and logs you can read. Later in the course, Kubernetes runs containers
+        exactly like these, on many machines at once.
+
+        If you repeated the commands on your machine, `podman rm -f demo second limited` stops and removes the three
+        containers (`-f` because they are still running).
+  sections:
+    - id: namespace-list
+      title: "All the namespaces, and rootless containers"
+      depth: true
+      body: |
+        **Rootless** means Podman was started by an ordinary host user, not by root. In the container's `USER`
+        column, processes show as `root`, but with rootless Podman that root exists only inside the container: the
+        host maps it to your own ordinary user.
+
+        A container usually gets these namespaces: **PID** (process numbers), **mount** (the filesystem tree),
+        **UTS** (hostname), **network** (its own interfaces and ports), **IPC** (shared memory), **cgroup** (its
+        own view of the cgroup tree, private by default on cgroups v2), and, for rootless Podman, **user** (inside
+        the container you can be UID 0, root, which the host maps to your own ordinary user). `lsns` on the host
+        lists them.
+
+        cgroups v2 keeps the limits in a tree under `/sys/fs/cgroup`. Inside the container, the cgroup namespace
+        shows the container its own part of that tree, which is why `memory.max` there is the container's limit.
+        Rootless containers can set memory limits when the systemd user session delegates the memory
+        controller, which RHEL 9 does by default (with `pids`). The `cpu` controller is not delegated by default,
+        so a rootless `--cpus` limit fails until an administrator delegates it.
+
+        **Podman and Docker.** Podman accepts nearly the same commands as Docker (`podman run`, `podman ps`,
+        `podman build`). Underneath they differ: the Docker client sends each command to a background service,
+        the Docker daemon, which runs as root unless it is set up in rootless mode. Podman has no daemon: each
+        `podman` command does the work itself, as the user who typed it.
+  review:
+    - q: "What is a container, in one sentence?"
+      a: "An ordinary Linux process that the kernel shows a restricted view of the system (namespaces) and limits (cgroups)."
+    - q: "Why is the container's main process PID 1 inside but has another PID on the host?"
+      a: "The container has its own PID namespace, a separate numbering of processes. The same process has a number in each view."
+    - q: "Does a container have its own kernel?"
+      a: "No. Every container on a host runs on the host's kernel; `uname -r` prints the same version inside and out."
+    - q: "What do namespaces control, and what do cgroups control?"
+      a: "Namespaces: what a process can see. Cgroups: how much it may use (memory, CPU, number of processes)."
+  commands:
+    - cmd: "podman pull -q quay.io/prometheus/busybox:latest"
+      meaning: "download the image first, so the later outputs do not include download progress (not shown in the lesson)"
+    - cmd: "podman run --rm quay.io/prometheus/busybox:latest echo hello from a container"
+      meaning: "a container that runs echo, prints, and ends"
+    - cmd: "podman run -d --name demo quay.io/prometheus/busybox:latest sleep 1000"
+      meaning: "a container kept alive by a long-running process, in the background"
+    - cmd: podman ps
+      meaning: "the running containers"
+    - cmd: "podman run -d --name second quay.io/prometheus/busybox:latest sleep 1000"
+      meaning: "a second container, started by the learner in the lesson"
+    - cmd: "podman inspect --format '{{.State.Pid}}' demo"
+      meaning: "the host PID of the container's main process"
+    - cmd: "ps -o pid,args -p $(podman inspect --format '{{.State.Pid}}' demo)"
+      meaning: "the container's main process, seen by the host's ps"
+    - cmd: "podman exec demo ps"
+      meaning: "inside the container, the same process is PID 1"
+    - cmd: "hostname; podman exec demo hostname"
+      meaning: "the host's name, then the container's own"
+    - cmd: "podman exec demo ls /"
+      meaning: "the container's filesystem tree comes from the image"
+    - cmd: "uname -r; podman exec demo uname -r"
+      meaning: "the same kernel inside and outside"
+    - cmd: "podman run -d --name limited --memory 64m quay.io/prometheus/busybox:latest sleep 1000; podman exec limited cat /sys/fs/cgroup/memory.max"
+      meaning: "a memory limit of 64 MiB, read from the container's cgroup"
+    - cmd: "podman rm -f -t 0 demo second limited"
+      meaning: "remove the containers without waiting (not shown in the lesson)"
+  references:
+    - {title: "Linux man-pages: namespaces(7)", url: "https://man7.org/linux/man-pages/man7/namespaces.7.html"}
+    - {title: "Linux man-pages: pid_namespaces(7)", url: "https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"}
+    - {title: "Linux man-pages: cgroups(7)", url: "https://man7.org/linux/man-pages/man7/cgroups.7.html"}
+    - {title: "Linux kernel documentation: Control Group v2 (memory.max)", url: "https://docs.kernel.org/admin-guide/cgroup-v2.html"}
+    - {title: "Podman documentation: podman run", url: "https://docs.podman.io/en/latest/markdown/podman-run.1.html"}
+    - {title: "Podman documentation: podman exec", url: "https://docs.podman.io/en/latest/markdown/podman-exec.1.html"}
+    - {title: "Podman documentation: podman inspect (--format, Go templates over the JSON keys)", url: "https://docs.podman.io/en/latest/markdown/podman-inspect.1.html"}
+    - {title: "Podman troubleshooting: resource limits and cgroup delegation for rootless users", url: "https://github.com/containers/podman/blob/main/troubleshooting.md"}
+    - {title: "Docker documentation: rootless mode (the Docker daemon)", url: "https://docs.docker.com/engine/security/rootless/"}
+    - {title: "RHEL 9: Building, running, and managing containers", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/building_running_and_managing_containers/index"}

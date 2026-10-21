@@ -1,0 +1,2653 @@
+# Platform delivery and governance: conceptual teaching flows; no cluster commands are executed.
+- id: g.iac
+  title: Infrastructure as code
+  subtitle: Terraform, Ansible and GitOps around the platform
+  module: p3-delivery
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 30
+  level: 2
+  supports: Conceptual practice using Terraform/OpenTofu, Ansible and Argo CD documentation. No infrastructure
+    or automation runs here; command fields compare text only. OpenShift examples target 4.21.
+  concepts:
+    - iac
+    - gitops.argocd
+  prerequisites:
+    - gx.declarative
+    - gx.argocd
+  objective: |
+    Assign an owning tool to each platform layer, explain state loss and locking, distinguish idempotent
+    execution from change reporting, and plan a controlled handover to GitOps.
+  flow:
+    - kind: teach
+      id: situation
+      title: Rebuild the surroundings
+      body: |
+        Your team can restore application manifests, but a replacement cluster still cannot receive traffic.
+        Nobody knows which DNS records and load balancer settings the old site used.
+
+        Infrastructure as code (IaC) puts those settings in reviewed, versioned files too. You will decide
+        which tool owns each layer, protect the tool’s record of existing resources, and stop two
+        automations undoing each other’s work.
+
+        These are design exercises. Nothing is installed or run here: the commands you type are checked as
+        text, and the examples come from the tools' documentation.
+    - kind: teach
+      id: layers
+      title: Choose an owner before a tool
+      body: |
+        [Declarative management](/lesson/gx.declarative) separates the desired configuration from the
+        current state. Apply that idea around the cluster as well as inside it.
+
+        Terraform or OpenTofu describes infrastructure such as networks, DNS and load balancers. A provider
+        translates its resource definitions into API calls. Ansible runs ordered tasks, such as installing a
+        component and waiting for it. [Argo CD](/lesson/gx.argocd) keeps comparing selected Kubernetes objects
+        with Git.
+
+        These tools overlap in capability. The useful boundary is responsibility: give each managed object,
+        or deliberately separated set of fields, one agreed owner.
+    - kind: ask
+      id: choose-owner
+      recalls: gx.argocd
+      prompt: Someone raises a ResourceQuota by hand in a live project. Which setup restores the Git value without
+        anyone starting a run?
+      choices:
+        - text: Argo CD with self-heal on
+          why: Self-heal syncs again when the live object drifts from Git, so the correction needs no person to
+            start it.
+        - text: A Terraform configuration for the quota
+          why: Terraform compares configuration with reality only when someone runs a plan or apply. Between
+            runs the hand edit stays.
+        - text: An Ansible playbook kept in the repository
+          why: A playbook corrects drift only when it runs, and nothing starts it between scheduled runs.
+      answer: 0
+    - kind: teach
+      id: state
+      title: State connects names to real objects
+      body: |
+        Terraform’s state maps a configuration address to a real object ID. A normal plan refreshes
+        information about tracked resources, then compares it with the configuration to propose changes.
+        Apply executes the reviewed changes.
+
+        With an empty state and no imports, configured managed resources look new even if matching
+        infrastructure already exists. Applying can create duplicates or fail on unique names. Check the
+        backend (where state is stored) and workspace (which state set is selected) first; recover the state
+        or import existing objects before applying.
+    - kind: show
+      id: plan-example
+      code: |
+        $ terraform plan
+      origin: example
+      caption: 'Terraform documentation: State and plan command; command example, not executed'
+      notice: |
+        Run from an initialized infrastructure directory, plan proposes changes without applying them.
+        Review the resource addresses and proposed actions before approving an apply.
+    - kind: ask
+      id: empty-state
+      prompt: A colleague plans in a fresh clone of the repository. The cloud is unchanged, yet the plan proposes
+        to add all 14 resources. What is the likely cause?
+      choices:
+        - text: Terraform found no state for them, so each resource looks new
+          why: Without state bindings or imports, Terraform cannot connect the configuration to the existing
+            objects. Check the backend and workspace, and restore or import before applying.
+        - text: Someone deleted the 14 resources from the cloud
+          why: Resources deleted outside Terraform show up as a plan to recreate them, but the cloud is unchanged
+            here, and the cause would not be the fresh clone.
+        - text: A first plan lists every resource, and apply skips the existing ones
+          why: Apply does not skip objects it has no record of. It tries to create them, which duplicates them or
+            fails on a name that is already taken.
+      answer: 0
+    - kind: teach
+      id: protect-state
+      title: Protect the memory of the estate
+      body: |
+        Use a remote backend with restricted access, encryption, version history and locking support.
+        Locking prevents concurrent writers; an active lock is a reason to wait, not to force an unlock.
+        Force-unlock only a verified stale lock from your own failed operation.
+
+        State and saved plans can contain secrets even when values are marked sensitive: that marking hides
+        display, not storage. Terraform’s supported ephemeral values and write-only arguments can avoid
+        persistence for those values; OpenTofu also offers state and plan encryption. Neither removes the
+        need for access control.
+    - kind: ask
+      id: incident-change
+      prompt: A plan would undo a load balancer timeout increased during an incident. What should the reviewer
+        do?
+      choices:
+        - text: Approve because code always wins
+          why: Desired configuration can be outdated too. Blind approval can reintroduce the incident.
+        - text: Remove the balancer from state
+          why: Forgetting the resource abandons management rather than deciding which timeout is correct.
+        - text: Review the incident fix
+          why: If the fix is still needed, update the configuration and review a fresh plan; otherwise deliberately
+            approve the revert.
+      answer: 2
+    - kind: teach
+      id: idempotence
+      title: Make reruns safe
+      body: |
+        Ansible playbooks are ordered tasks. An idempotent task leaves the target in the same desired state
+        when repeated, reporting no change if nothing needed changing. Many resource modules support that
+        pattern, but check each module’s documented behavior.
+
+        A command or shell task runs a program; it cannot infer whether the program needed to run. Prefer a
+        resource module, or inspect the target and use a condition. File-based creates and removes guards
+        can skip execution. changed_when controls the report and handler notifications after execution; it
+        does not stop the program running.
+    - kind: show
+      id: guard-example
+      code: |
+        - name: Initialize the local application database once
+          ansible.builtin.command:
+            cmd: /usr/local/bin/init-db
+            creates: /var/lib/shop/initialized
+      origin: example
+      caption: 'Written for this course with the creates option of the Ansible command module (see its documentation); not executed'
+      notice: |
+        Assume init-db creates the marker only after successful initialization. The guard skips the program
+        when that file exists. It is meaningful only if the marker reliably represents the desired state.
+    - kind: ask
+      id: report-versus-execution
+      prompt: A bucket-creation script runs nightly even when the bucket exists. Which change prevents needless
+        execution?
+      choices:
+        - text: Set changed_when to false
+          why: That changes reporting after the script runs. It does not prevent repeated side effects.
+        - text: Check the resource before execution
+          why: A module or a prior existence check can decide whether work is needed before changing the target.
+        - text: Hide changed tasks in the job output
+          why: Suppressing output hides the symptom while leaving execution and its risks unchanged.
+      answer: 1
+    - kind: teach
+      id: handover
+      title: Bootstrap, then hand over
+      body: |
+        A typical sequence is infrastructure provisioning, cluster installation, GitOps bootstrap, then
+        continuous reconciliation of selected cluster configuration.
+
+        Ansible or a pipeline can install the GitOps operator, wait for its API kinds, then create a root
+        [Application](/lesson/gx.argocd) pointing to the configuration repository. A root Application can
+        manage other Applications: Argo CD calls this the app-of-apps pattern.
+
+        Document when bootstrap stops managing those objects. Argo CD manages the declared Kubernetes
+        resources, with the permissions you grant; it does not automatically own every object in the
+        cluster. Keep sensitive installer inputs and secret values outside Git. For example, the GitOps
+        repository can declare OAuth settings, operator subscriptions and quotas; secret values come from a
+        separate protected source.
+    - kind: order
+      id: handover-order
+      prompt: Order this team’s handover from an empty site to GitOps-managed configuration.
+      items:
+        - Provision the network, DNS and load balancers with the infrastructure owner.
+        - Install the cluster and check its API is available.
+        - Install GitOps, wait for its APIs, and create the root Application.
+        - Verify sync and end bootstrap writes to the handed-over objects.
+      why: Each phase needs the previous phase to be usable. The final ownership change prevents scheduled bootstrap
+        jobs from undoing GitOps.
+    - kind: teach
+      id: competing-writers
+      title: When a field keeps changing back
+      body: |
+        Suppose a nightly Ansible job writes a quota of 20 CPUs, while Argo CD’s Git configuration specifies
+        10 and self-heal is enabled. The job writes 20; reconciliation restores 10. Repeating the job
+        repeats the conflict.
+
+        Compare the automation schedules, desired definitions and API audit trail. The `managedFields` record
+        that [server-side apply](/lesson/gx.declarative) keeps can help identify writers, but several
+        managers alone do not prove a conflict: controllers often manage different fields legitimately.
+
+        Agree the desired value, remove the competing write without deleting the live object, and verify the
+        chosen owner’s next reconciliation.
+    - kind: show
+      id: diff-example
+      code: |
+        $ oc diff -f quotas.yaml -n shop
+      origin: example
+      caption: 'OpenShift 4.21 CLI documentation: diff; command example, not executed'
+      notice: |
+        Assume quotas.yaml exists in the current directory and defines a ResourceQuota in shop. Diff
+        compares that manifest with live state without applying it. An actual run may show differences or
+        none; it does not resolve ownership.
+    - kind: try
+      id: preview-other-project
+      body: |
+        The current directory contains quotas.yaml defining a ResourceQuota for payments. Type one command
+        to preview its differences in payments without applying it.
+      accept:
+        - oc diff -f quotas.yaml -n payments
+        - oc diff -n payments -f quotas.yaml
+        - oc -n payments diff -f quotas.yaml
+        - oc diff --filename=quotas.yaml --namespace=payments
+        - oc diff --filename quotas.yaml --namespace payments
+        - oc diff -f ./quotas.yaml -n payments
+        - oc diff -n payments -f ./quotas.yaml
+        - oc diff -f quotas.yaml --namespace payments
+        - oc diff -f quotas.yaml --namespace=payments
+        - oc --namespace=payments diff -f quotas.yaml
+        - oc diff --namespace payments -f quotas.yaml
+        - oc --namespace payments diff -f quotas.yaml
+        - oc diff --namespace=payments -f quotas.yaml
+        - oc -n payments diff -f ./quotas.yaml
+        - oc diff -f ./quotas.yaml --namespace payments
+        - oc diff --namespace payments -f ./quotas.yaml
+        - oc --namespace payments diff -f ./quotas.yaml
+        - oc diff -f ./quotas.yaml --namespace=payments
+        - oc diff --namespace=payments -f ./quotas.yaml
+        - oc --namespace=payments diff -f ./quotas.yaml
+        - oc diff -f=quotas.yaml -n payments
+        - oc diff -n payments -f=quotas.yaml
+        - oc -n payments diff -f=quotas.yaml
+        - oc diff -f=quotas.yaml --namespace payments
+        - oc diff --namespace payments -f=quotas.yaml
+        - oc --namespace payments diff -f=quotas.yaml
+        - oc diff -f=quotas.yaml --namespace=payments
+        - oc diff --namespace=payments -f=quotas.yaml
+        - oc --namespace=payments diff -f=quotas.yaml
+        - oc diff --filename quotas.yaml -n payments
+        - oc diff -n payments --filename quotas.yaml
+        - oc -n payments diff --filename quotas.yaml
+        - oc diff --namespace payments --filename quotas.yaml
+        - oc --namespace payments diff --filename quotas.yaml
+        - oc diff --filename quotas.yaml --namespace=payments
+        - oc diff --namespace=payments --filename quotas.yaml
+        - oc --namespace=payments diff --filename quotas.yaml
+        - oc diff --filename=quotas.yaml -n payments
+        - oc diff -n payments --filename=quotas.yaml
+        - oc -n payments diff --filename=quotas.yaml
+        - oc diff --filename=quotas.yaml --namespace payments
+        - oc diff --namespace payments --filename=quotas.yaml
+        - oc --namespace payments diff --filename=quotas.yaml
+        - oc diff --namespace=payments --filename=quotas.yaml
+        - oc --namespace=payments diff --filename=quotas.yaml
+        - oc diff --filename ./quotas.yaml -n payments
+        - oc diff -n payments --filename ./quotas.yaml
+        - oc -n payments diff --filename ./quotas.yaml
+        - oc diff --filename ./quotas.yaml --namespace payments
+        - oc diff --namespace payments --filename ./quotas.yaml
+        - oc --namespace payments diff --filename ./quotas.yaml
+        - oc diff --filename ./quotas.yaml --namespace=payments
+        - oc diff --namespace=payments --filename ./quotas.yaml
+        - oc --namespace=payments diff --filename ./quotas.yaml
+        - oc diff --filename=./quotas.yaml -n payments
+        - oc diff -n payments --filename=./quotas.yaml
+        - oc -n payments diff --filename=./quotas.yaml
+        - oc diff --filename=./quotas.yaml --namespace payments
+        - oc diff --namespace payments --filename=./quotas.yaml
+        - oc --namespace payments diff --filename=./quotas.yaml
+        - oc diff --filename=./quotas.yaml --namespace=payments
+        - oc diff --namespace=payments --filename=./quotas.yaml
+        - oc --namespace=payments diff --filename=./quotas.yaml
+        - kubectl diff -f quotas.yaml -n payments
+        - kubectl diff -f ./quotas.yaml -n payments
+        - kubectl diff --filename=quotas.yaml --namespace=payments
+        - kubectl -n payments diff -f quotas.yaml
+      hints:
+        - match: ^(oc|kubectl) apply
+          say: Apply would write the configuration. The task is to compare it first.
+        - match: ^(oc|kubectl) diff(?!.*(?:-n|--namespace))
+          say: Name payments explicitly so the preview does not depend on the current project.
+        - match: ^(oc|kubectl) get
+          say: Get reads live objects; it does not compare them with the local manifest.
+      hint: Use the diff subcommand with -f for the file and -n for payments.
+      then: |
+        On a connected cluster this would compare the file with payments and leave the objects untouched.
+        Nothing runs in this practice step. Review the differences and the owning tool before making a
+        real change.
+    - kind: reflect
+      id: explain-ownership
+      prompt: A colleague wants one tool for DNS, installation procedures and ongoing quotas. Explain your proposed
+        division and how to handle emergency edits.
+      model: |
+        Use Terraform or OpenTofu for tracked infrastructure, Ansible for checked procedures and bootstrap,
+        and Argo CD for declared cluster configuration. Their capabilities overlap, so record the handover
+        and one owner for each managed field. After an emergency edit, reconcile the owner’s source
+        configuration deliberately so the next run does not undo a needed fix.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can assign ownership across infrastructure and cluster configuration, interpret an empty-state
+        plan, protect state, and distinguish a skipped task from a quiet report. You can preview a manifest
+        change and investigate competing writers.
+
+        Next, [Pipelines and builds](/lesson/n.cicd) follows an application change from source to the image
+        that GitOps deploys.
+  sections:
+    - id: tool-reference
+      title: Tool and ownership reference
+      depth: true
+      body: |
+        | Tool | Operating model | Record of existing resources | Typical responsibility |
+        |---|---|---|---|
+        | Terraform / OpenTofu | Declarative resource graph, plan then apply | State bindings and provider refresh | Infrastructure outside the cluster |
+        | Ansible | Ordered tasks through modules, APIs or SSH | Modules inspect the target; no Terraform-style state mapping | Bootstrap and procedures |
+        | Argo CD / OpenShift GitOps | Continuous comparison and configured sync from Git | Git plus live Kubernetes objects | Declared cluster configuration and apps |
+
+        OpenTofu is a Linux Foundation project forked after Terraform’s license change. Its familiar
+        configuration and workflow do not guarantee all future features remain interchangeable. Ansible
+        Automation Platform adds controlled execution, scheduling and auditing around Ansible.
+
+        These are ownership choices, not capability limits. Terraform has a Kubernetes provider; Ansible has
+        Kubernetes modules; Argo CD can manage custom resources whose controllers provision external
+        infrastructure. Separate infrastructure and cluster-content changes so a routine quota change does
+        not share an approval with cluster replacement.
+    - id: k8s-module
+      title: Ansible Kubernetes module details
+      depth: true
+      body: |
+        | Setting | Meaning |
+        |---|---|
+        | state: present | Create or update the declared object |
+        | state: absent | Delete the object |
+        | state: patched | Patch an existing object; skip a missing object |
+        | apply: true | Compare with the previously supplied definition |
+        | server_side_apply | Use server-side apply with apply enabled; field management and conflict handling occur at the API server |
+        | creates / removes on command | Skip based on a target path; permit partial check-mode prediction |
+        | changed_when | Decide the reported change and handler notifications after execution |
+
+        A playbook repeatedly applying manifests corrects drift only when it runs. Use ordered automation
+        for procedures such as draining, updating and checking a node; use continuous reconciliation where
+        that is the requirement.
+    - id: troubleshooting
+      title: Troubleshooting ownership and state
+      depth: true
+      body: |
+        | Symptom | Inspect | Response |
+        |---|---|---|
+        | Plan creates the estate again | Backend, workspace, state history | Restore the correct state or import; do not apply blindly |
+        | Plan reverses a manual fix | Configuration diff and incident record | Retain the fix in code or deliberately revert it |
+        | Apply cannot acquire a lock | Lock holder and running automation | Wait; unlock only your own verified stale operation |
+        | Playbook always reports changes | Module behavior and script preconditions | Prevent unnecessary execution, then make reporting accurate |
+        | A quota repeatedly changes back | Competing definitions, schedules, managedFields and audit | Remove the competing write and verify the agreed owner |
+
+        Keep versioned state in a protected backend and secrets outside configuration repositories. A local,
+        unprotected state file is unsuitable for shared production automation.
+  review:
+    - q: What does Terraform's state file record, and why does it matter?
+      a: The mapping between configuration and real resources; plans and applies depend on it, so it must be stored
+        safely and locked.
+    - q: Where does GitOps take over from provisioning tools?
+      a: After the cluster exists and GitOps is bootstrapped, the objects assigned to Argo CD are reconciled from
+        their Git configuration.
+    - q: What happens if Terraform runs with an empty state against existing infrastructure?
+      a: It plans to create everything again; recover the state or import the objects instead of applying.
+    - q: Why must Terraform state be protected like a secret?
+      a: State and saved plans can contain readable secret values even when marked sensitive. Protect storage
+        and access; supported ephemeral or write-only values can avoid persistence.
+    - q: What makes an Ansible task idempotent, and what breaks it?
+      a: An idempotent task checks the target and changes only what is needed. Module behavior varies; command/shell
+        tasks need guards or conditions. changed_when only controls reporting.
+    - q: Two tools manage the same object. What do you see, and what is the fix?
+      a: Conflicting writers repeatedly restore different values. Use definitions and audit to confirm; multiple
+        managedFields managers alone are not proof. Choose one owner for the disputed fields.
+  labs: []
+  limits: |
+    No cloud infrastructure or automation tool runs here. Commands are documentation examples and typed
+    practice only. The [drift incident](/lab/inc.gitops-drift) supplies the course’s practical
+    comparison of a manifest and live configuration.
+  enterprise: |
+    Keep infrastructure, bootstrap and cluster configuration under explicit owners and review rules.
+    Protect remote state with encryption, versioning, access control and supported locking. Use
+    controlled automation credentials and hand selected in-cluster objects to GitOps after bootstrap.
+  references:
+    - title: 'Terraform: State'
+      url: https://developer.hashicorp.com/terraform/language/state
+    - title: 'Terraform: State locking'
+      url: https://developer.hashicorp.com/terraform/language/state/locking
+    - title: 'Terraform: Manage sensitive data in state'
+      url: https://developer.hashicorp.com/terraform/language/state/sensitive-data
+    - title: 'Terraform: Import existing resources'
+      url: https://developer.hashicorp.com/terraform/language/import
+    - title: OpenTofu FAQ
+      url: https://opentofu.org/faq/
+    - title: 'OpenTofu: State and plan encryption'
+      url: https://opentofu.org/docs/language/state/encryption/
+    - title: Ansible kubernetes.core collection (k8s module source and documentation)
+      url: https://github.com/ansible-collections/kubernetes.core
+    - title: 'Ansible: command module'
+      url: https://docs.ansible.com/ansible/latest/collections/ansible/builtin/command_module.html
+    - title: 'Argo CD: Cluster bootstrapping (app of apps)'
+      url: https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/
+    - title: 'Ansible: kubernetes.core.k8s module'
+      url: https://docs.ansible.com/ansible/latest/collections/kubernetes/core/k8s_module.html
+    - title: 'Argo CD: Automated sync and self-healing'
+      url: https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/
+    - title: 'Kubernetes: Server-side apply and field management'
+      url: https://kubernetes.io/docs/reference/using-api/server-side-apply/
+- id: n.cicd
+  title: Pipelines and builds
+  subtitle: Tekton, Shipwright and BuildConfig
+  module: p3-delivery
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 35
+  level: 2
+  supports: OpenShift 4.21 BuildConfig; OpenShift Pipelines (Tekton) using 1.20/1.21 documentation; Builds for
+    Red Hat OpenShift 1.7 (Shipwright). Operators are not installed here. Documentation examples are not executed;
+    the labeled build excerpts come from lab.images-builds.
+  concepts:
+    - cicd.pipelines
+    - ocp.imagestreams
+    - gitops.argocd
+  prerequisites:
+    - c.projects-builds
+    - gx.argocd
+  objective: |
+    Place CI, image builds and CD correctly on OpenShift, read and design a Tekton pipeline, choose
+    between BuildConfig and Shipwright builds, and build a delivery flow that promotes one tested image
+    instead of rebuilding it.
+  flow:
+    - kind: teach
+      id: situation
+      title: The tested image changed
+      body: |
+        Staging passes its tests. The release pipeline rebuilds the same commit for production, but the new
+        image behaves differently. A base image or dependency may have changed between builds.
+
+        This lesson follows one image from a commit to production: where builds run, how Tekton connects
+        work, how to find a failed step, and how GitOps promotes a tested digest. The pipeline examples are
+        for reading and typed practice; no pipeline runs here.
+    - kind: teach
+      id: ci-and-cd
+      title: Separate building from deploying
+      body: |
+        Continuous integration (CI) checks source changes and can build, test, scan and sign an image.
+        Continuous delivery (CD) makes a reviewed, tested release available for deployment.
+
+        Kubernetes runs containers but provides no built-in image-build or pipeline API. OpenShift adds
+        BuildConfig, the build API you met in [Projects, builds and ImageStreams](/lesson/c.projects-builds). Two operators add
+        more: OpenShift Pipelines packages Tekton, an open-source engine that runs pipelines as pods, and
+        Builds for Red Hat OpenShift packages Shipwright, an open-source API for building images. External CI
+        runners can produce the same artifacts.
+
+        [Argo CD](/lesson/gx.argocd) supplies the deployment half by comparing Git with the cluster and
+        syncing approved configuration.
+    - kind: ask
+      id: choose-delivery-change
+      prompt: Staging tested app at one digest. Production rebuilds the commit and gets another digest. What should
+        promotion carry instead?
+      choices:
+        - text: The tested digest
+          why: A different digest identifies different image content. Promote the tested artifact rather than
+            assuming a repeat build is identical.
+        - text: The moving latest tag
+          why: A moving tag can point to different content when each environment pulls it. It does not pin what
+            passed tests.
+        - text: The same commit plus a fresh build
+          why: The commit fixes application source, but base layers, dependencies and build metadata can still
+            differ.
+      answer: 0
+    - kind: teach
+      id: task-model
+      title: A Task is a recipe; a TaskRun executes it
+      body: |
+        A Tekton Task defines ordered steps, each run in a container in the same pod.
+
+        A TaskRun is one execution of that Task. For an ordinary container Task, it creates one pod with
+        step containers named step-<step-name>. The controller schedules the work; it does not run build
+        commands inside its own process.
+    - kind: show
+      id: task-example
+      code: |
+        apiVersion: tekton.dev/v1
+        kind: Task
+        metadata:
+          name: check-tools
+        spec:
+          steps:
+            - name: version
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["/bin/sh", "-c"]
+              args: ["cat /etc/os-release"]
+            - name: identity
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["id"]
+      origin: example
+      caption: 'Tekton Tasks and TaskRuns documentation: adapted teaching manifest, not executed'
+      notice: |
+        There are two steps in one Task. An ordinary TaskRun executes them sequentially in one pod. These
+        moving tool-image tags keep the example readable; production task definitions should pin approved
+        tool images too.
+    - kind: ask
+      id: count-pods
+      prompt: The example Task gains a third container step. How many pods does one ordinary TaskRun need?
+      choices:
+        - text: Three, one per step
+          why: Steps of the same Task share a pod. Separate ordinary Tasks generally use separate pods.
+        - text: One, containing the steps
+          why: The TaskRun groups the ordered step containers into one pod and can share volumes between them.
+        - text: None, because the controller executes it
+          why: The controller creates and observes the workload pod; it does not execute the commands itself.
+      answer: 1
+    - kind: teach
+      id: task-data
+      title: Pass inputs, values and files
+      body: |
+        Tasks can take params (input values), publish results (small output values) and use workspaces
+        (shared files). For example, an image destination can be a parameter, its built digest a result, and
+        the checked-out source a workspace. A Pipeline connects these interfaces between Tasks.
+    - kind: teach
+      id: pipeline-model
+      title: Connect Tasks into a Pipeline
+      body: |
+        A Pipeline connects Task recipes; a PipelineRun supplies one execution’s inputs. `runAfter` requires
+        named Tasks to finish first. Results can pass the built digest into later Tasks. Workspaces pass
+        files, often backed by a persistent volume claim (PVC).
+
+        Shared Tasks can be resolved from a cluster namespace, Git or OCI bundles rather than copied into
+        every repository. OpenShift Pipelines removed ClusterTask in 1.17; use the cluster resolver for
+        shared namespace Tasks. Version shared definitions so their changes are reviewed.
+    - kind: show
+      id: pipeline-example
+      code: |
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: checked-build
+        spec:
+          tasks:
+            - name: test
+              taskRef:
+                name: unit-tests
+            - name: build
+              runAfter: [test]
+              taskRef:
+                name: build-image
+      origin: example
+      caption: 'OpenShift Pipelines 1.21 creating pipelines documentation: adapted dependency example, not executed'
+      notice: |
+        Assume unit-tests and build-image are compatible Tasks already installed in the same project,
+        requiring no additional bindings for this sketch. The build waits for test. A real pipeline also
+        binds its source, parameters, workspaces and image destination.
+    - kind: ask
+      id: read-dependency
+      prompt: What happens to build after test fails under normal failure behavior?
+      choices:
+        - text: It starts because both Tasks exist
+          why: Existence is not the dependency. runAfter requires the preceding Task to complete successfully
+            under this normal failure behavior.
+        - text: It reruns the tests inside its own pod
+          why: runAfter expresses ordering; it neither copies steps nor implements a retry policy.
+        - text: It does not start
+          why: The failed dependency prevents the normal build Task from running. Inspect the test TaskRun and
+            its step log.
+      answer: 2
+      evidence: |
+        # Excerpt of the example Pipeline, with no failure overrides or finally Tasks
+        tasks:
+          - name: test
+            taskRef: {name: unit-tests}
+          - name: build
+            runAfter: [test]
+            taskRef: {name: build-image}
+    - kind: teach
+      id: choose-build-api
+      title: Choose the build API for the destination
+      body: |
+        BuildConfig is an OpenShift API with Dockerfile, Source-to-Image and Custom strategies. It remains
+        supported in 4.21; its Jenkins pipeline strategy is deprecated. Its Build capability can be omitted
+        during installation.
+
+        Shipwright defines Build (the source, strategy and output) and BuildRun (an execution). Builds for
+        Red Hat OpenShift packages it with reusable strategies, including Buildah, Source-to-Image and
+        buildpacks. The upstream Shipwright project can run on Kubernetes outside OpenShift; that does not
+        extend Red Hat product support to every distribution.
+    - kind: ask
+      id: portable-builds
+      prompt: A partner runs upstream Kubernetes and needs the same build API as your OpenShift team. Which option
+        should you evaluate?
+      choices:
+        - text: Upstream Shipwright
+          why: Its custom-resource build API can be installed on Kubernetes. Verify the target platform and strategy
+            requirements separately.
+        - text: BuildConfig without its operator
+          why: BuildConfig belongs to OpenShift, not the standard Kubernetes API. Removing an operator does not
+            make that API portable.
+        - text: Kubernetes built-in BuildRun
+          why: Kubernetes has no built-in BuildRun kind. Shipwright adds it through its controllers and custom
+            resources.
+      answer: 0
+    - kind: show
+      id: build-recording
+      code: |
+        $ oc get istag hello:latest -n academy-builds
+        NAME           IMAGE REFERENCE                                                                                                                                 UPDATED
+        hello:latest   image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:9c3f0be923a237d7df969f3cb35187f6da1a60ed211bdb756b647e22d7eb13a5   3 seconds ago
+
+        $ oc get deploy hello -n academy-builds -o jsonpath='{.spec.template.spec.containers[0].image}'
+        image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:a2cbc9dd4d5c47febd0ea4fe7ce71e07d4de621c6334e5856f68c9efd2c1fe9f
+      origin: lab
+      caption: 'Images and builds lab (lab.images-builds): two exact command/output excerpts'
+      notice: |
+        The first excerpt reads the first built image’s ImageStream tag. The second reads the Deployment’s
+        image after the second build and image-change trigger. Both builds used the same Dockerfile, yet the
+        sha256 values differ. OpenShift writes per-build environment variables into the image, such as
+        `OPENSHIFT_BUILD_NAME`, and timestamps and base images can change too: a rebuild is a different image,
+        which is why rebuilding is not promotion.
+    - kind: teach
+      id: promotion
+      title: Approve the same artifact at each stage
+      body: |
+        Build once, then scan and test the image, push it to the registry, and sign its digest with
+        provenance (evidence of its build inputs and process). The pipeline opens a pull request changing
+        the first environment’s digest in the GitOps repository.
+
+        After Argo CD syncs that change and environment tests pass, another reviewed pull request carries
+        the same digest to the next environment. Production approval is the protected merge. Give CI scoped
+        image-push and pull-request rights; keep production deployment rights with GitOps. Protect merge
+        rules too, so CI cannot approve its own release.
+    - kind: ask
+      id: separate-credentials
+      prompt: CI can push images and open pull requests. Which extra permission would defeat this production approval
+        boundary?
+      choices:
+        - text: Read the source repository
+          why: CI needs source access to build it. Read access alone does not authorize a production change.
+        - text: Change production Deployments
+          why: A compromised pipeline could bypass the protected Git approval path and deploy directly.
+        - text: Publish its test report
+          why: Publishing results supplies reviewers with evidence. It does not authorize changes to production
+            workloads.
+      answer: 1
+    - kind: teach
+      id: debug-path
+      title: Follow a failed run down to the step
+      body: |
+        Start with the PipelineRun to identify the failed TaskRun. Read that TaskRun’s status to find its
+        podName, failing step, termination reason and exit code. Then read the named step container’s log in
+        that pod.
+
+        A Pending pod needs events: a workspace claim may be unbound, quota may reject creation, or
+        scheduling may lack resources. A registry push denial needs the push step’s log and the run
+        identity’s scoped credentials. Controller logs describe the controller, not your test program’s
+        output.
+    - kind: show
+      id: logs-example
+      code: |
+        $ oc get taskrun unit-tests-7 -n delivery -o yaml
+        $ oc logs unit-tests-7-pod -c step-run -n delivery
+      origin: example
+      caption: 'Tekton TaskRuns documentation and OpenShift 4.21 CLI: inspection examples, not executed'
+      notice: |
+        Assume the TaskRun status names unit-tests-7-pod and its failing step is run. The first command
+        supplies status; the second reads the test process’s output. No example output is presented as a
+        recording.
+    - kind: try
+      id: read-build-log
+      body: |
+        In project release-ci, TaskRun build-9 names pod build-9-pod. Its failed step is push. Type one
+        command to read that step container’s log.
+      accept:
+        - oc logs build-9-pod -c step-push -n release-ci
+        - oc logs -n release-ci build-9-pod -c step-push
+        - oc -n release-ci logs build-9-pod -c step-push
+        - oc logs build-9-pod -n release-ci -c step-push
+        - oc logs pod/build-9-pod -c step-push -n release-ci
+        - oc logs build-9-pod --container=step-push --namespace=release-ci
+        - oc logs build-9-pod --container step-push --namespace release-ci
+        - oc logs -c step-push build-9-pod -n release-ci
+        - oc logs -c step-push -n release-ci build-9-pod
+        - oc logs -n release-ci -c step-push build-9-pod
+        - oc -n release-ci logs -c step-push build-9-pod
+        - oc logs build-9-pod -c step-push --namespace release-ci
+        - oc logs build-9-pod --namespace release-ci -c step-push
+        - oc logs -c step-push build-9-pod --namespace release-ci
+        - oc logs -c step-push --namespace release-ci build-9-pod
+        - oc logs --namespace release-ci build-9-pod -c step-push
+        - oc logs --namespace release-ci -c step-push build-9-pod
+        - oc --namespace release-ci logs build-9-pod -c step-push
+        - oc --namespace release-ci logs -c step-push build-9-pod
+        - oc logs build-9-pod -c step-push --namespace=release-ci
+        - oc logs build-9-pod --namespace=release-ci -c step-push
+        - oc logs -c step-push build-9-pod --namespace=release-ci
+        - oc logs -c step-push --namespace=release-ci build-9-pod
+        - oc logs --namespace=release-ci build-9-pod -c step-push
+        - oc logs --namespace=release-ci -c step-push build-9-pod
+        - oc --namespace=release-ci logs build-9-pod -c step-push
+        - oc --namespace=release-ci logs -c step-push build-9-pod
+        - oc logs build-9-pod --container step-push -n release-ci
+        - oc logs build-9-pod -n release-ci --container step-push
+        - oc logs --container step-push build-9-pod -n release-ci
+        - oc logs --container step-push -n release-ci build-9-pod
+        - oc logs -n release-ci build-9-pod --container step-push
+        - oc logs -n release-ci --container step-push build-9-pod
+        - oc -n release-ci logs build-9-pod --container step-push
+        - oc -n release-ci logs --container step-push build-9-pod
+        - oc logs build-9-pod --namespace release-ci --container step-push
+        - oc logs --container step-push build-9-pod --namespace release-ci
+        - oc logs --container step-push --namespace release-ci build-9-pod
+        - oc logs --namespace release-ci build-9-pod --container step-push
+        - oc logs --namespace release-ci --container step-push build-9-pod
+        - oc --namespace release-ci logs build-9-pod --container step-push
+        - oc --namespace release-ci logs --container step-push build-9-pod
+        - oc logs build-9-pod --container step-push --namespace=release-ci
+        - oc logs build-9-pod --namespace=release-ci --container step-push
+        - oc logs --container step-push build-9-pod --namespace=release-ci
+        - oc logs --container step-push --namespace=release-ci build-9-pod
+        - oc logs --namespace=release-ci build-9-pod --container step-push
+        - oc logs --namespace=release-ci --container step-push build-9-pod
+        - oc --namespace=release-ci logs build-9-pod --container step-push
+        - oc --namespace=release-ci logs --container step-push build-9-pod
+        - oc logs build-9-pod --container=step-push -n release-ci
+        - oc logs build-9-pod -n release-ci --container=step-push
+        - oc logs --container=step-push build-9-pod -n release-ci
+        - oc logs --container=step-push -n release-ci build-9-pod
+        - oc logs -n release-ci build-9-pod --container=step-push
+        - oc logs -n release-ci --container=step-push build-9-pod
+        - oc -n release-ci logs build-9-pod --container=step-push
+        - oc -n release-ci logs --container=step-push build-9-pod
+        - oc logs build-9-pod --container=step-push --namespace release-ci
+        - oc logs build-9-pod --namespace release-ci --container=step-push
+        - oc logs --container=step-push build-9-pod --namespace release-ci
+        - oc logs --container=step-push --namespace release-ci build-9-pod
+        - oc logs --namespace release-ci build-9-pod --container=step-push
+        - oc logs --namespace release-ci --container=step-push build-9-pod
+        - oc --namespace release-ci logs build-9-pod --container=step-push
+        - oc --namespace release-ci logs --container=step-push build-9-pod
+        - oc logs build-9-pod --namespace=release-ci --container=step-push
+        - oc logs --container=step-push build-9-pod --namespace=release-ci
+        - oc logs --container=step-push --namespace=release-ci build-9-pod
+        - oc logs --namespace=release-ci build-9-pod --container=step-push
+        - oc logs --namespace=release-ci --container=step-push build-9-pod
+        - oc --namespace=release-ci logs build-9-pod --container=step-push
+        - oc --namespace=release-ci logs --container=step-push build-9-pod
+        - oc logs pod/build-9-pod -n release-ci -c step-push
+        - oc logs -c step-push pod/build-9-pod -n release-ci
+        - oc logs -c step-push -n release-ci pod/build-9-pod
+        - oc logs -n release-ci pod/build-9-pod -c step-push
+        - oc logs -n release-ci -c step-push pod/build-9-pod
+        - oc -n release-ci logs pod/build-9-pod -c step-push
+        - oc -n release-ci logs -c step-push pod/build-9-pod
+        - oc logs pod/build-9-pod -c step-push --namespace release-ci
+        - oc logs pod/build-9-pod --namespace release-ci -c step-push
+        - oc logs -c step-push pod/build-9-pod --namespace release-ci
+        - oc logs -c step-push --namespace release-ci pod/build-9-pod
+        - oc logs --namespace release-ci pod/build-9-pod -c step-push
+        - oc logs --namespace release-ci -c step-push pod/build-9-pod
+        - oc --namespace release-ci logs pod/build-9-pod -c step-push
+        - oc --namespace release-ci logs -c step-push pod/build-9-pod
+        - oc logs pod/build-9-pod -c step-push --namespace=release-ci
+        - oc logs pod/build-9-pod --namespace=release-ci -c step-push
+        - oc logs -c step-push pod/build-9-pod --namespace=release-ci
+        - oc logs -c step-push --namespace=release-ci pod/build-9-pod
+        - oc logs --namespace=release-ci pod/build-9-pod -c step-push
+        - oc logs --namespace=release-ci -c step-push pod/build-9-pod
+        - oc --namespace=release-ci logs pod/build-9-pod -c step-push
+        - oc --namespace=release-ci logs -c step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container step-push -n release-ci
+        - oc logs pod/build-9-pod -n release-ci --container step-push
+        - oc logs --container step-push pod/build-9-pod -n release-ci
+        - oc logs --container step-push -n release-ci pod/build-9-pod
+        - oc logs -n release-ci pod/build-9-pod --container step-push
+        - oc logs -n release-ci --container step-push pod/build-9-pod
+        - oc -n release-ci logs pod/build-9-pod --container step-push
+        - oc -n release-ci logs --container step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container step-push --namespace release-ci
+        - oc logs pod/build-9-pod --namespace release-ci --container step-push
+        - oc logs --container step-push pod/build-9-pod --namespace release-ci
+        - oc logs --container step-push --namespace release-ci pod/build-9-pod
+        - oc logs --namespace release-ci pod/build-9-pod --container step-push
+        - oc logs --namespace release-ci --container step-push pod/build-9-pod
+        - oc --namespace release-ci logs pod/build-9-pod --container step-push
+        - oc --namespace release-ci logs --container step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container step-push --namespace=release-ci
+        - oc logs pod/build-9-pod --namespace=release-ci --container step-push
+        - oc logs --container step-push pod/build-9-pod --namespace=release-ci
+        - oc logs --container step-push --namespace=release-ci pod/build-9-pod
+        - oc logs --namespace=release-ci pod/build-9-pod --container step-push
+        - oc logs --namespace=release-ci --container step-push pod/build-9-pod
+        - oc --namespace=release-ci logs pod/build-9-pod --container step-push
+        - oc --namespace=release-ci logs --container step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container=step-push -n release-ci
+        - oc logs pod/build-9-pod -n release-ci --container=step-push
+        - oc logs --container=step-push pod/build-9-pod -n release-ci
+        - oc logs --container=step-push -n release-ci pod/build-9-pod
+        - oc logs -n release-ci pod/build-9-pod --container=step-push
+        - oc logs -n release-ci --container=step-push pod/build-9-pod
+        - oc -n release-ci logs pod/build-9-pod --container=step-push
+        - oc -n release-ci logs --container=step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container=step-push --namespace release-ci
+        - oc logs pod/build-9-pod --namespace release-ci --container=step-push
+        - oc logs --container=step-push pod/build-9-pod --namespace release-ci
+        - oc logs --container=step-push --namespace release-ci pod/build-9-pod
+        - oc logs --namespace release-ci pod/build-9-pod --container=step-push
+        - oc logs --namespace release-ci --container=step-push pod/build-9-pod
+        - oc --namespace release-ci logs pod/build-9-pod --container=step-push
+        - oc --namespace release-ci logs --container=step-push pod/build-9-pod
+        - oc logs pod/build-9-pod --container=step-push --namespace=release-ci
+        - oc logs pod/build-9-pod --namespace=release-ci --container=step-push
+        - oc logs --container=step-push pod/build-9-pod --namespace=release-ci
+        - oc logs --container=step-push --namespace=release-ci pod/build-9-pod
+        - oc logs --namespace=release-ci pod/build-9-pod --container=step-push
+        - oc logs --namespace=release-ci --container=step-push pod/build-9-pod
+        - oc --namespace=release-ci logs pod/build-9-pod --container=step-push
+        - oc --namespace=release-ci logs --container=step-push pod/build-9-pod
+        - oc logs pods/build-9-pod -c step-push -n release-ci
+        - oc logs pods/build-9-pod -n release-ci -c step-push
+        - oc logs -c step-push pods/build-9-pod -n release-ci
+        - oc logs -c step-push -n release-ci pods/build-9-pod
+        - oc logs -n release-ci pods/build-9-pod -c step-push
+        - oc logs -n release-ci -c step-push pods/build-9-pod
+        - oc -n release-ci logs pods/build-9-pod -c step-push
+        - oc -n release-ci logs -c step-push pods/build-9-pod
+        - oc logs pods/build-9-pod -c step-push --namespace release-ci
+        - oc logs pods/build-9-pod --namespace release-ci -c step-push
+        - oc logs -c step-push pods/build-9-pod --namespace release-ci
+        - oc logs -c step-push --namespace release-ci pods/build-9-pod
+        - oc logs --namespace release-ci pods/build-9-pod -c step-push
+        - oc logs --namespace release-ci -c step-push pods/build-9-pod
+        - oc --namespace release-ci logs pods/build-9-pod -c step-push
+        - oc --namespace release-ci logs -c step-push pods/build-9-pod
+        - oc logs pods/build-9-pod -c step-push --namespace=release-ci
+        - oc logs pods/build-9-pod --namespace=release-ci -c step-push
+        - oc logs -c step-push pods/build-9-pod --namespace=release-ci
+        - oc logs -c step-push --namespace=release-ci pods/build-9-pod
+        - oc logs --namespace=release-ci pods/build-9-pod -c step-push
+        - oc logs --namespace=release-ci -c step-push pods/build-9-pod
+        - oc --namespace=release-ci logs pods/build-9-pod -c step-push
+        - oc --namespace=release-ci logs -c step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container step-push -n release-ci
+        - oc logs pods/build-9-pod -n release-ci --container step-push
+        - oc logs --container step-push pods/build-9-pod -n release-ci
+        - oc logs --container step-push -n release-ci pods/build-9-pod
+        - oc logs -n release-ci pods/build-9-pod --container step-push
+        - oc logs -n release-ci --container step-push pods/build-9-pod
+        - oc -n release-ci logs pods/build-9-pod --container step-push
+        - oc -n release-ci logs --container step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container step-push --namespace release-ci
+        - oc logs pods/build-9-pod --namespace release-ci --container step-push
+        - oc logs --container step-push pods/build-9-pod --namespace release-ci
+        - oc logs --container step-push --namespace release-ci pods/build-9-pod
+        - oc logs --namespace release-ci pods/build-9-pod --container step-push
+        - oc logs --namespace release-ci --container step-push pods/build-9-pod
+        - oc --namespace release-ci logs pods/build-9-pod --container step-push
+        - oc --namespace release-ci logs --container step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container step-push --namespace=release-ci
+        - oc logs pods/build-9-pod --namespace=release-ci --container step-push
+        - oc logs --container step-push pods/build-9-pod --namespace=release-ci
+        - oc logs --container step-push --namespace=release-ci pods/build-9-pod
+        - oc logs --namespace=release-ci pods/build-9-pod --container step-push
+        - oc logs --namespace=release-ci --container step-push pods/build-9-pod
+        - oc --namespace=release-ci logs pods/build-9-pod --container step-push
+        - oc --namespace=release-ci logs --container step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container=step-push -n release-ci
+        - oc logs pods/build-9-pod -n release-ci --container=step-push
+        - oc logs --container=step-push pods/build-9-pod -n release-ci
+        - oc logs --container=step-push -n release-ci pods/build-9-pod
+        - oc logs -n release-ci pods/build-9-pod --container=step-push
+        - oc logs -n release-ci --container=step-push pods/build-9-pod
+        - oc -n release-ci logs pods/build-9-pod --container=step-push
+        - oc -n release-ci logs --container=step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container=step-push --namespace release-ci
+        - oc logs pods/build-9-pod --namespace release-ci --container=step-push
+        - oc logs --container=step-push pods/build-9-pod --namespace release-ci
+        - oc logs --container=step-push --namespace release-ci pods/build-9-pod
+        - oc logs --namespace release-ci pods/build-9-pod --container=step-push
+        - oc logs --namespace release-ci --container=step-push pods/build-9-pod
+        - oc --namespace release-ci logs pods/build-9-pod --container=step-push
+        - oc --namespace release-ci logs --container=step-push pods/build-9-pod
+        - oc logs pods/build-9-pod --container=step-push --namespace=release-ci
+        - oc logs pods/build-9-pod --namespace=release-ci --container=step-push
+        - oc logs --container=step-push pods/build-9-pod --namespace=release-ci
+        - oc logs --container=step-push --namespace=release-ci pods/build-9-pod
+        - oc logs --namespace=release-ci pods/build-9-pod --container=step-push
+        - oc logs --namespace=release-ci --container=step-push pods/build-9-pod
+        - oc --namespace=release-ci logs pods/build-9-pod --container=step-push
+        - oc --namespace=release-ci logs --container=step-push pods/build-9-pod
+      hints:
+        - match: (?:-c|--container[ =])\s*push\b
+          say: The step is push, but Tekton names its container step-push.
+        - match: logs (?:taskrun/)?build-9(?:\s|$)
+          say: Logs come from the pod, build-9-pod, rather than the TaskRun object.
+        - match: ^oc describe
+          say: Describe is useful for status and events; the command output is in the container log.
+      hint: Use logs on the pod, select container step-push, and name release-ci.
+      then: |
+        On a connected cluster this would read the push step’s output, where a registry authentication or
+        authorization error may explain the failure. This text task does not fetch logs or assume a
+        particular error.
+    - kind: teach
+      id: operate-pipelines
+      title: Retain evidence before cleaning runs
+      body: |
+        Pipelines as Code keeps PipelineRuns in .tekton/ in the source repository and reacts to configured
+        pull-request, push and comment events. Tekton Chains can sign images and attest to completed runs.
+        Tekton Results can store execution history and, when configured, logs outside the run objects.
+
+        Set timeouts and retention deliberately. Tekton’s global default timeout is 60 minutes. By default,
+        the pod of a timed-out TaskRun is deleted and its logs go with it. The keep-pod-on-cancel feature
+        flag is documented for cancelled TaskRuns, not for timeouts. Collect logs independently, before runs
+        time out or are pruned.
+        The operator’s pruner removes old PipelineRuns and TaskRuns; separately check ownership and
+        retention of workspace PVCs. Do not assume every claim is deleted with a run.
+    - kind: reflect
+      id: design-for-teams
+      prompt: Outline a delivery service for twenty teams, including what happens to old runs and credentials.
+      model: |
+        Publish shared, versioned Tasks and let teams keep their pipeline definitions with source. CI builds
+        one artifact, tests and scans it, pushes it, and signs its digest with provenance. Reviewed GitOps
+        changes promote that digest; CI cannot write production or approve its own merge. Retain run history
+        and logs before pruning, manage workspace claims explicitly, and give each run only the credentials
+        its tasks need.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can separate builds from deployments, read a Task and a Pipeline dependency, choose a build API,
+        and locate a failed step’s log. You can design promotion around one tested digest and keep CI
+        outside the production deployment boundary.
+
+        Next, [Trust your images](/lesson/n.supply-chain) checks what evidence should accompany that digest
+        and where the cluster can enforce trust.
+  sections:
+    - id: tekton-reference
+      title: Tekton objects and supporting services
+      depth: true
+      body: |
+        | Object or service | Responsibility |
+        |---|---|
+        | Task / TaskRun | Ordered container steps / one execution, usually one pod |
+        | Pipeline / PipelineRun | Dependencies, inputs, results and workspaces / one execution |
+        | Resolvers | Fetch approved Tasks and Pipelines from a cluster namespace, Git, OCI bundles, hubs or HTTP |
+        | Pipelines as Code | Repository .tekton/ PipelineRuns and event-driven execution |
+        | Tekton Chains | Configured signing and provenance capture |
+        | Tekton Results | Persist run history and configured log collection beyond run deletion |
+        | tkn | CLI for pipeline and run inspection |
+
+        Red Hat’s shared Tasks live in openshift-pipelines and can be referenced with the cluster resolver.
+        Migrate ClusterTask references before upgrading to OpenShift Pipelines 1.17 or later. Check the
+        compatibility matrix in the release notes of the version you install: the 1.20 release notes list
+        OpenShift 4.21 explicitly, and a later release has to be checked in the same way.
+    - id: build-reference
+      title: Build API reference
+      depth: true
+      body: |
+        | Feature | BuildConfig | Shipwright / Builds for Red Hat OpenShift 1.7 |
+        |---|---|---|
+        | API | build.openshift.io | shipwright.io Build, BuildRun, BuildStrategy and ClusterBuildStrategy |
+        | Platform | OpenShift | Upstream Shipwright on Kubernetes; Red Hat product on its supported OpenShift versions |
+        | Strategies | Dockerfile, Source-to-Image, Custom | Buildah, Source-to-Image (linux/amd64), buildpacks and buildpacks-extender |
+        | Destination | Internal ImageStream tag or external registry | Configured registry destination |
+        | Availability | Build capability must be installed | Add-on operator and its dependencies must be installed |
+
+        Builds 1.7 provides a BuildConfig migration tool. Migration still needs review of the strategies,
+        credentials and output references; it is not permission to change production build infrastructure
+        during this lesson.
+    - id: pipeline-troubleshooting
+      title: Pipeline troubleshooting reference
+      depth: true
+      body: |
+        | Symptom | Evidence to inspect | Response |
+        |---|---|---|
+        | Cannot resolve task after upgrade | TaskRun reference and status | Replace removed ClusterTask references with supported resolvers |
+        | No pod or Pending pod | TaskRun status, pod events, workspace claims and quota | Fix storage, quota or scheduling constraints |
+        | StepFailed or StepOOM | Termination state and failing step log | Fix the command or its resources |
+        | Registry push denied | Push log, ServiceAccount and registry authorization | Use scoped push credentials rather than a personal token |
+        | TaskRunTimeout and missing pod | Timeout configuration and retained logs | Choose realistic timeouts and collect logs before pod deletion |
+        | Completed runs accumulate | Run retention and pruner configuration | Retain evidence, then prune runs and verify PVC lifecycle separately |
+
+        Keep credentials in Secret-backed mounts or workspaces rather than params that appear in API objects
+        and logs. Application teams own repository pipelines; platform teams own shared Tasks, signing,
+        identities, quotas and retention.
+  review:
+    - q: What is the relation between a Tekton Task, its steps and pods?
+      a: For an ordinary container Task, one TaskRun executes the steps as ordered containers in one pod.
+    - q: What replaced ClusterTasks in OpenShift Pipelines 1.17 and later?
+      a: Tasks in the openshift-pipelines namespace referenced through the cluster resolver.
+    - q: What does Pipelines as Code add?
+      a: PipelineRuns stored in the repository (.tekton/) and triggered by pull requests, pushes and comments.
+    - q: Name two differences between BuildConfig and Shipwright builds.
+      a: BuildConfig is OpenShift-only and usually outputs to ImageStreams; Shipwright is portable, uses Build/BuildRun
+        with strategies (buildah, S2I, buildpacks) and pushes to any registry.
+    - q: Why promote by digest rather than rebuild?
+      a: Only the same digest guarantees production runs exactly what was tested.
+  labs:
+    - lab.images-builds
+  limits: |
+    Tekton and Shipwright are not installed here, and this lesson performs no cluster operations. The
+    linked [images and builds lab](/lab/lab.images-builds) records BuildConfig builds and an
+    ImageStream-triggered rollout; the two excerpts above come from that recording. Operator
+    installation and pipeline execution require a suitable separate cluster.
+  enterprise: |
+    Platform teams usually own a catalogue of approved, versioned tasks and pipeline templates, the
+    runners' identities and quotas, and the signing setup; application teams own their pipeline
+    definitions in their repositories. Production deployment rights stay with GitOps, never with CI.
+  references:
+    - title: 'OpenShift Pipelines 1.21: Release notes'
+      url: https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.21/html/release_notes/op-release-notes-1-21
+    - title: 'OpenShift Pipelines 1.21: Remote pipelines and tasks with resolvers'
+      url: https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.21/html/creating_cicd_pipelines/remote-pipelines-tasks-resolvers
+    - title: 'OpenShift Pipelines 1.21: About Pipelines as Code'
+      url: https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.21/html/pipelines_as_code/about-pipelines-as-code
+    - title: 'Builds for Red Hat OpenShift 1.7: About builds'
+      url: https://docs.redhat.com/en/documentation/builds_for_red_hat_openshift/1.7/html-single/about_builds/
+    - title: 'OpenShift 4.21: Understanding image builds (BuildConfig)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/builds_using_buildconfig/understanding-image-builds
+    - title: 'Tekton: Deprecations (ClusterTask)'
+      url: https://tekton.dev/docs/pipelines/deprecations/
+    - title: 'Tekton: TaskRuns (step containers, status reasons, timeouts)'
+      url: https://tekton.dev/docs/pipelines/taskruns/
+    - title: 'Tekton Operator: TektonConfig (pruner)'
+      url: https://tekton.dev/docs/operator/tektonconfig/
+    - title: Red Hat OpenShift Pipelines 1.20 release notes (compatibility matrix)
+      url: https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.20/html/release_notes/op-release-notes-1-20
+    - title: 'Tekton: Tasks'
+      url: https://tekton.dev/docs/pipelines/tasks/
+    - title: 'Tekton: Pipelines (dependencies and failure behavior)'
+      url: https://tekton.dev/docs/pipelines/pipelines/
+    - title: 'Tekton Results: execution and log retention'
+      url: https://tekton.dev/docs/results/
+    - title: 'Builds 1.7: About Builds (complete document)'
+      url: https://docs.redhat.com/en/documentation/builds_for_red_hat_openshift/1.7/html-single/about_builds/index
+- id: n.supply-chain
+  title: Trust your images
+  subtitle: Provenance, signatures and enforcement
+  module: p3-delivery
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 30
+  level: 3
+  supports: OpenShift 4.21 sigstore policies (ClusterImagePolicy and namespaced ImagePolicy), registry configuration
+    and mirrors; Sigstore, Tekton Chains, Trusted Artifact Signer and RHACS documentation. No signing service
+    or enforcement is configured here; all commands are examples or text practice.
+  concepts:
+    - sec.signing
+    - sec.supplychain
+    - container.images
+  prerequisites:
+    - a.images-registries
+    - n.cicd
+  objective: |
+    Match an image digest to inventory, provenance, signer and vulnerability evidence; distinguish node
+    pull verification from admission checks; and diagnose registry-scope, identity and mirror failures.
+  flow:
+    - kind: teach
+      id: situation
+      title: The release has no evidence
+      body: |
+        An auditor asks which commit produced a running image, which dependencies it contains, and why the
+        platform trusted it. The team can show a release tag, but that tag has moved since deployment.
+
+        You will use the image digest as the common identifier, choose evidence for each question, and
+        distinguish a rejected API request from a node refusing an image. Nothing here configures a policy
+        or signs an image on the course cluster.
+    - kind: teach
+      id: digest-evidence
+      title: Anchor evidence to the tested digest
+      body: |
+        [Pipelines and builds](/lesson/n.cicd) promoted one tested digest between environments. Attach
+        evidence to that same identifier.
+
+        An SBOM (software bill of materials) inventories components. Provenance is a statement linking the
+        artifact to build inputs and a build process, often written in a standard format such as in-toto or
+        SLSA. A signature binds signed content to a signing key or identity. Verification checks it against
+        a trusted key or identity.
+
+        A signature alone does not prove the signer actually built the image. Trusted provenance provides
+        the build claim; vulnerability scans answer a different question about known flaws.
+    - kind: ask
+      id: select-evidence
+      prompt: A developer builds an image on a laptop and signs its digest with the team's approved key, which they
+        hold. Verification against that key succeeds. What does that show?
+      choices:
+        - text: That the approved pipeline built the image
+          why: Verification checks the key, not the build. Anyone who holds the key can sign any image, so a
+            build claim needs verified provenance from the pipeline's identity.
+        - text: That the key holder signed this exact digest
+          why: A signature binds content to a key and detects later changes. It says nothing about where or how
+            the image was built.
+        - text: That the image has no known vulnerabilities
+          why: Signature verification never consults vulnerability data. A scan answers that question.
+      answer: 1
+    - kind: teach
+      id: key-signing
+      title: Trust a signer deliberately
+      body: |
+        Cosign, the Sigstore command-line tool for container images, can sign image digests and store the
+        signature alongside the image in an OCI registry. With key-based signing, verification uses the public
+        key; keep the private key in a managed key service (KMS) or hardware security module (HSM).
+
+        Trust is a decision about a particular key or identity. A cryptographically valid signature from an
+        unknown signer is not approval to deploy. Plan where signatures are stored and copied as part of the
+        release flow.
+    - kind: show
+      id: verify-example
+      code: |
+        $ cosign verify --key signing.pub quay.corp.example/dev/app@sha256:1111111111111111111111111111111111111111111111111111111111111111
+      origin: example
+      caption: 'Sigstore Cosign: Verifying Signatures; key-based command example, not executed'
+      notice: |
+        Assume signing.pub is an approved public key in the current directory and the example digest stands
+        for an image in your registry. The command checks signatures for that exact image against that key.
+        It does not scan vulnerabilities or create cluster enforcement.
+    - kind: try
+      id: verify-other-image
+      body: |
+        The current directory contains approved public key release.pub. Type a Cosign command to verify
+        quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+        against that key.
+      accept:
+        - cosign verify --key release.pub quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+        - cosign verify --key=release.pub quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+        - cosign verify --key ./release.pub quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+        - cosign verify quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          --key release.pub
+        - cosign verify quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          --key=release.pub
+        - cosign verify --key=./release.pub quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+        - cosign verify quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          --key ./release.pub
+        - cosign verify quay.corp.example/prod/payments@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          --key=./release.pub
+      hints:
+        - match: ^cosign sign
+          say: Signing creates evidence with a private key. This task verifies existing evidence with a public
+            key.
+        - match: :latest\b
+          say: A tag may move. Verify the specified digest so the evidence refers to the intended artifact.
+        - match: --key\s+signing.pub
+          say: Use release.pub, the approved key for this release, rather than the demonstration key.
+      hint: Use Cosign verify, select release.pub with --key, and name the complete digest reference.
+      then: |
+        An actual verification would succeed only if the image and retrievable signature satisfy the
+        approved key and verification requirements. This field checks the command text only; it supplies no
+        verification result or security approval.
+    - kind: teach
+      id: keyless
+      title: Short certificates need durable time evidence
+      body: |
+        Keyless signing uses an OpenID Connect (OIDC) identity, such as a pipeline's, to obtain a short-lived
+        certificate from Fulcio, the Sigstore certificate authority. Rekor is an append-only transparency log
+        that records signing evidence. Verification checks the expected identity and issuer as well as the
+        cryptographic and log evidence.
+
+        Evidence of signing within the certificate’s validity window allows later verification after expiry,
+        provided the required evidence and trust material remain available. Short-lived certificates avoid
+        maintaining a long-lived signing key in every pipeline; they do not remove the need to restrict
+        which identities are trusted.
+    - kind: ask
+      id: expired-certificate
+      prompt: A keyless certificate expired after signing. Verified transparency evidence places signing inside
+        its validity window. Must you rebuild solely because of expiry?
+      choices:
+        - text: Yes, the signature is invalid once the certificate expires
+          why: Verification can rely on evidence of the signing time. Expiry alone does not require changing the
+            artifact.
+        - text: No, verification never looks at certificate validity
+          why: The verifier does check validity, but at the time recorded in the transparency evidence. Identity,
+            issuer and that evidence all still have to check out.
+        - text: No, verification can use the logged signing time
+          why: Expiry now is not the same as invalidity when the image was signed, provided the evidence and
+            trust material remain available.
+      answer: 2
+    - kind: teach
+      id: node-check
+      title: A node can refuse the pull
+      body: |
+        OpenShift 4.21 has ClusterImagePolicy for cluster scope and ImagePolicy for a namespace, both in
+        config.openshift.io/v1. A policy names the image scopes it covers and a root of trust: a public key,
+        a Fulcio identity checked against Rekor, or a certificate from your own public key infrastructure
+        (PKI). The 4.21 release notes make that PKI root of trust generally available (the nodes guide's example
+        still shows an older `v1alpha1` manifest). OpenShift 4.21 also activates a default policy named
+        `openshift`, which verifies the release images; a cluster that already has its own policy with that name
+        reports `Upgradeable=False` until that policy is removed (it can be recreated under another name).
+
+        The Machine Config Operator writes node policy files. CRI-O, the node's container runtime, checks an
+        in-scope image at pull time; a failed signature check can leave an accepted pod unable to start.
+        Admission checks are separate: they run when the API server receives a request, before it is stored. A
+        signature policy in Red Hat Advanced Cluster Security for Kubernetes (RHACS) or a policy engine can
+        reject matching requests there.
+    - kind: ask
+      id: locate-refusal
+      prompt: Only a ClusterImagePolicy applies. An unsigned image matches its scope. Where should you look when
+        the Deployment exists but pods cannot start?
+      choices:
+        - text: The pod pull events
+          why: The runtime enforces this policy at image pull time. An accepted Deployment does not prove the
+            node trusts its image.
+        - text: A rejected Deployment create response
+          why: That would be evidence of an admission-time rejection. The Deployment in this scenario was accepted.
+        - text: The build pipeline controller log
+          why: The build system does not enforce the node policy. Start at the affected pod and the runtime pull
+            failure.
+      answer: 0
+    - kind: show
+      id: inspect-policy
+      code: |
+        $ oc get clusterimagepolicy openshift -o yaml
+        $ oc describe pod payments-7 -n payments
+      origin: example
+      caption: 'OpenShift 4.21: Manage secure signatures with sigstore and CLI documentation; read-only examples,
+        not executed'
+      notice: |
+        An authorized administrator can inspect the platform policy; a user allowed to read the pod can
+        inspect pull events. OpenShift 4.21 includes the openshift policy for release images. Do not edit or
+        remove that reserved policy.
+    - kind: teach
+      id: signed-identity
+      title: Repository identity travels with the signature
+      body: |
+        A signature records the image reference it was made for: its signed identity. The default
+        signedIdentity matching policy, MatchRepoDigestOrExact, requires that identity to be in the same
+        repository as the image being pulled. Copying the same image to a different repository can therefore
+        fail verification even when its digest is unchanged and the signature was copied too.
+
+        Sign for the destination repository, or deliberately configure a supported identity mapping.
+        RemapIdentity is intended for mirrors preserving a vendor’s repository layout. Check trust roots,
+        scopes, identity rules and signature availability before weakening a policy.
+    - kind: ask
+      id: repository-mismatch
+      prompt: The same digest and its signature move from team-a/app to prod/app. Default repository matching
+        fails. What should you inspect first?
+      choices:
+        - text: Whether image bytes changed on every copy
+          why: The stated digest is unchanged. The problem can be the signed repository identity rather than altered
+            image content.
+        - text: The identity named by the signature
+          why: Default matching checks the repository identity as well as the digest. Copying signature material
+            alone does not rewrite that identity.
+        - text: Whether copying restarted the certificate lifetime
+          why: Copying changes neither the original signing time nor its certificate. It does not create a new
+            signature.
+      answer: 1
+    - kind: teach
+      id: registries
+      title: An allow-list is a separate control
+      body: |
+        The cluster Image configuration’s registrySources chooses allowedRegistries or blockedRegistries,
+        not both. An allow-list blocks unlisted registries, including ones used by platform components and
+        the internal registry. It controls sources, not signer trust.
+
+        ImageDigestMirrorSet and ImageTagMirrorSet configure mirror locations. Disconnected release
+        procedures must mirror required sigstore signatures too; missing release signatures can block node
+        updates under the default openshift policy. Test source and trust configuration together on a
+        disposable cluster.
+    - kind: ask
+      id: allow-list
+      prompt: An administrator allows only quay.corp.example. What happens when a new pod needs an image from
+        the unlisted internal registry?
+      choices:
+        - text: The pull is blocked
+          why: The allow-list applies literally. Include the registries the platform and workloads require before
+            enabling it.
+        - text: The internal registry is automatically exempt
+          why: The internal registry must be included too. Being part of the cluster does not bypass the list.
+        - text: The pull succeeds whenever the image is signed
+          why: A valid signature cannot override a blocked registry source. These are different controls.
+      answer: 0
+    - kind: teach
+      id: rescan
+      title: Trust evidence does not freeze vulnerability knowledge
+      body: |
+        A valid signature can remain valid after a new vulnerability is discovered: the image and signer did
+        not change. Scan at build time, enforce suitable deployment rules, and keep rescanning running
+        images against updated vulnerability data.
+
+        RHACS combines scanning, deploy-time policy, runtime detection and compliance reporting. Assign an
+        owner and fix deadline to findings. Rebuild with patched dependencies or base images, then test,
+        sign and promote the new digest through the usual process.
+    - kind: ask
+      id: new-vulnerability
+      prompt: A signed image passed its build scan. A critical library flaw is published two weeks later. Which
+        control reveals the new risk?
+      choices:
+        - text: Repeating signature verification alone
+          why: The image is still the same signed artifact. Cryptographic verification does not consult vulnerability
+            intelligence.
+        - text: Continuous scanning with updated vulnerability data
+          why: New knowledge about unchanged components is why scanning must continue after deployment.
+        - text: Reading the original green build report
+          why: That report captures the earlier knowledge. It cannot contain a flaw that had not yet been published.
+      answer: 1
+    - kind: reflect
+      id: explain-signing
+      prompt: Explain to a manager what a verified signature permits you to claim, and which evidence you still
+        need.
+      model: |
+        It binds this artifact to an approved signing key or identity and detects content changes. It does
+        not by itself prove the signer built it or that it is safe. Verify build provenance for the build
+        claim, use an SBOM for inventory and current scans for known flaws, and apply deployment policy to
+        decide whether the image is acceptable.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can match a digest to the right evidence, describe key-based and keyless verification, and
+        distinguish admission rejection from runtime pull refusal. You can investigate repository and mirror
+        mismatches and explain why valid signatures still need current scans.
+
+        The next enterprise module starts with [High availability and failure
+        domains](/lesson/i.ha-architecture), moving from release integrity to keeping the platform available
+        when components fail.
+  sections:
+    - id: evidence-reference
+      title: Evidence and supporting services
+      depth: true
+      body: |
+        | Question | Evidence or service |
+        |---|---|
+        | What components are present? | SBOM tied to the image digest |
+        | Which inputs and process produced it? | Verified provenance (for example in-toto / SLSA) |
+        | Which trusted identity signed it? | Signature, approved key or certificate identity and issuer |
+        | Why could it run? | Configured verification and admission policy, plus enforcement evidence |
+        | What vulnerabilities are known now? | Current scan of that digest |
+        | How can signing be automated? | Tekton Chains signing and provenance configuration |
+        | How can Sigstore be hosted internally? | Red Hat Trusted Artifact Signer: Fulcio, Rekor and supporting trust services |
+        | Where can SBOMs be analyzed? | Red Hat Trusted Profile Analyzer |
+
+        Registry storage, signer authentication and policy configuration are separate dependencies. An
+        internal Sigstore service or KMS-held key must be operated and monitored as part of the delivery
+        service.
+    - id: policy-reference
+      title: Enforcement and troubleshooting reference
+      depth: true
+      body: |
+        | Control or symptom | Inspect or decide |
+        |---|---|
+        | ClusterImagePolicy / ImagePolicy | Cluster / namespace scope; rootOfTrust and signedIdentity; the cluster policy wins overlapping scopes |
+        | Unsigned image cannot start | Pod pull events, matching policy scope, trust root and retrievable signature |
+        | Copy to another repository fails | Default MatchRepoDigestOrExact identity matching; sign at destination or review a deliberate mirror mapping |
+        | Release updates stall on a disconnected cluster | Mirror the release signatures as well as images; retain the default openshift policy |
+        | Many platform pulls fail | Registry allow-list must include required Red Hat, internal and mirror registries |
+        | Signed image has a new critical finding | Rebuild from patched inputs and promote new evidence with the new digest |
+
+        ImagePolicy is namespaced; authorized application developers as well as administrators can configure
+        it. ClusterImagePolicy and cluster registry configuration require broader permissions. In either
+        case node distribution is real configuration, never exercised by this lesson.
+
+        Registry-source changes such as an allow-list are applied by the MCO, which cordons nodes, restarts
+        CRI-O and uncordons them without a reboot. Mirror sets behave differently: creating an
+        ImageDigestMirrorSet does not drain or reboot nodes, but creating an ImageTagMirrorSet, or modifying
+        or deleting any mirror set, drains and reboots them. Check the specific procedure before changing any of them.
+  review:
+    - q: What do SBOM, provenance and signature each answer?
+      a: 'SBOM: component inventory. Provenance: build inputs and process. Signature: the signed artifact is bound
+        to a key or identity and has not changed; a signature alone is not proof of who built it.'
+    - q: What do Fulcio and Rekor do in keyless signing?
+      a: Fulcio issues a short-lived certificate bound to an OIDC identity; Rekor records the signature in a transparency
+        log.
+    - q: Which OpenShift objects make CRI-O verify image signatures?
+      a: ClusterImagePolicy (cluster-wide) and ImagePolicy (namespaced), config.openshift.io/v1.
+    - q: What is the risk of setting allowedRegistries?
+      a: Every unlisted registry is blocked, including registry.redhat.io, quay.io and the internal registry.
+    - q: Does a valid signature mean an image is safe to run?
+      a: No. It establishes signer authenticity and integrity under the configured trust policy. Provenance supports
+        build claims; current scanning and deployment policy assess acceptability.
+  labs: []
+  limits: |
+    No signature policy or registry configuration is applied here, and no signer or registry is
+    contacted. ClusterImagePolicy and registry rules require administrative privileges; ImagePolicy is
+    namespaced and can be delegated. Both signature-policy types are distributed to nodes. Real
+    enforcement practice belongs on a disposable cluster with a controlled registry and signer.
+  enterprise: |
+    Regulated organisations increasingly require signed images with provenance for production, an
+    internal Sigstore (Trusted Artifact Signer) or KMS-held keys, registry allow-lists with mirrors for
+    disconnected sites, and vulnerability fix deadlines by severity, with evidence collected
+    automatically by the pipeline.
+  references:
+    - title: 'OpenShift 4.21: Manage secure signatures with sigstore'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/nodes/nodes-sigstore-using
+    - title: 'OpenShift 4.21 release notes: sigstore BYOPKI and the default openshift cluster image policy generally available'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/release_notes/ocp-4-21-release-notes
+    - title: 'OpenShift 4.21: Image configuration (registry sources and mirrors)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/image-configuration-classic
+    - title: 'OpenShift Pipelines 1.21: Using Tekton Chains for supply chain security'
+      url: https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.21/html/securing_openshift_pipelines/using-tekton-chains-for-openshift-pipelines-supply-chain-security
+    - title: 'Red Hat Trusted Artifact Signer: Release notes'
+      url: https://docs.redhat.com/en/documentation/red_hat_trusted_artifact_signer/1/html-single/release_notes/index
+    - title: 'RHACS 4.11: Verifying image signatures'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.11/html/operating/verify-image-signatures
+    - title: 'Sigstore: Certificate authority (Fulcio) overview'
+      url: https://docs.sigstore.dev/certificate_authority/overview/
+    - title: 'Sigstore: Rekor transparency log overview'
+      url: https://docs.sigstore.dev/logging/overview/
+    - title: 'Sigstore: Verifying signatures with Cosign'
+      url: https://docs.sigstore.dev/cosign/verifying/verify/
+    - title: 'Sigstore: Signature and attestation security model'
+      url: https://docs.sigstore.dev/about/security/
+    - title: 'SLSA: Provenance'
+      url: https://slsa.dev/spec/v1.2/provenance
+- id: f.secrets-supplychain
+  title: Secrets, tokens, supply chain and audit
+  subtitle: What protects a Secret, how workloads prove who they are, and how you prove what happened
+  module: p4-enterprise
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 35
+  level: 2
+  supports: Kubernetes 1.34 ServiceAccount tokens and Secret security; OpenShift 4.21 etcd encryption and audit
+    profiles; External Secrets Operator, Secrets Store CSI and RHACS documentation. No configuration or audit-log
+    retrieval runs here; commands are documentation examples or text practice.
+  concepts:
+    - sec.secrets
+    - sec.serviceaccounts
+    - sec.supplychain
+    - sec.audit
+  prerequisites:
+    - f.rbac
+    - o1.config-secrets
+    - o2.service-accounts
+    - n.supply-chain
+  objective: |
+    Explain what really protects a Secret and every path that can read it, choose how secrets reach the
+    cluster without living in Git, describe how workload tokens are bound and how long they last, and
+    use audit logs and supply-chain controls as evidence.
+  flow:
+    - kind: teach
+      id: situation
+      title: A password escaped without a Secret read
+      body: |
+        A production password appears in a pipeline log. The pipeline’s role cannot read Secrets, so the
+        team assumes Kubernetes was bypassed. Yet that same role can create a Deployment in the password’s
+        namespace.
+
+        You will trace direct and indirect access, decide where secret values should live, handle rotation
+        and stolen tokens, and identify what audit logs can prove. Commands here are examples or text
+        exercises; they do not access passwords or change security settings.
+    - kind: teach
+      id: three-controls
+      title: Encoding does not protect the value
+      body: |
+        [Configuration and Secrets](/lesson/o1.config-secrets) showed how a Secret reaches a container. Its
+        data field is base64-encoded, not encrypted. Anyone authorized to read that object can decode the
+        value.
+
+        RBAC controls API access: view excludes Secrets but can read ConfigMaps; edit and admin normally
+        include Secret access. etcd encryption protects selected stored values on disk and in backups, once
+        enabled. It does not prevent an authorized API read. Keeping secret values out of Git prevents a
+        separate disclosure through repository history.
+    - kind: show
+      id: encryption-setting
+      code: |
+        # Excerpt of APIServer/cluster, not a complete manifest to apply
+        spec:
+          encryption:
+            type: aesgcm
+      origin: example
+      caption: 'OpenShift 4.21: Enabling etcd encryption; configuration excerpt, not applied'
+      notice: |
+        An administrator enables aesgcm or aescbc and waits for encryption to finish before taking a
+        protected backup. Encryption is not enabled by default. This setting does not remove API permissions
+        from a user who can read the object.
+    - kind: ask
+      id: configmap-password
+      prompt: A view-only user reads a password stored in a ConfigMap on an encrypted cluster. Why did encryption
+        not prevent it?
+      choices:
+        - text: ConfigMaps are never encrypted
+          why: OpenShift's etcd encryption covers ConfigMaps as well as Secrets. The API server decrypts a value
+            for any caller that RBAC allows, and view allows ConfigMap reads.
+        - text: An authorized API read
+          why: RBAC protects resource types rather than detecting passwords. Encryption at rest is transparent
+            to an authorized API request.
+        - text: Base64 decoding bypassed RBAC
+          why: RBAC decided access before any decoding. Encoding is reversible but grants no API permission.
+      answer: 1
+    - kind: teach
+      id: indirect-access
+      title: Creating workloads is a path to Secrets
+      body: |
+        [RBAC](/lesson/f.rbac) asks who may call which API. A workload creator can often reach Secrets
+        without calling the Secret API: its pod can mount a same-namespace Secret and send the value
+        elsewhere. The kubelet retrieves the value for that pod.
+
+        Exec permission can expose values already available to a target container. A usable ServiceAccount
+        token can fetch anything that account may read. Restrictions on workload creation and admission can
+        narrow these paths, but withholding direct Secret reads alone is insufficient. Separate workloads
+        with different trust levels into different namespaces.
+    - kind: show
+      id: access-examples
+      code: |
+        $ oc auth can-i get secrets -n shop
+        $ oc policy who-can get secrets -n shop
+        $ oc policy who-can create pods -n shop
+      origin: example
+      caption: 'OpenShift 4.21: Using RBAC to define and apply permissions; command examples, not executed'
+      notice: |
+        can-i checks the current identity’s permission; who-can reports identities granted the requested
+        action, where the caller is authorized to review them. Include workload creation as well as direct
+        reads. Do not infer the answer from the role’s name.
+    - kind: try
+      id: check-workload-right
+      body: |
+        For your current identity, check whether it may create Deployments in payments. Type one
+        permission-check command; do not create a workload.
+      accept:
+        - oc auth can-i create deployments -n payments
+        - oc auth can-i create deployment -n payments
+        - oc auth can-i create deploy -n payments
+        - oc auth can-i create deployments.apps -n payments
+        - oc auth can-i create deployments --namespace=payments
+        - oc auth can-i create deployments --namespace payments
+        - oc -n payments auth can-i create deployments
+        - oc auth can-i -n payments create deployments
+        - oc -n payments auth can-i create deployment
+        - oc -n payments auth can-i create deploy
+        - oc -n payments auth can-i create deployments.apps
+        - oc -n payments auth can-i create deployment.apps
+        - oc --namespace payments auth can-i create deployments
+        - oc --namespace payments auth can-i create deployment
+        - oc --namespace payments auth can-i create deploy
+        - oc --namespace payments auth can-i create deployments.apps
+        - oc --namespace payments auth can-i create deployment.apps
+        - oc --namespace=payments auth can-i create deployments
+        - oc --namespace=payments auth can-i create deployment
+        - oc --namespace=payments auth can-i create deploy
+        - oc --namespace=payments auth can-i create deployments.apps
+        - oc --namespace=payments auth can-i create deployment.apps
+        - oc auth can-i create deployment.apps -n payments
+        - oc auth can-i create deployment --namespace payments
+        - oc auth can-i create deploy --namespace payments
+        - oc auth can-i create deployments.apps --namespace payments
+        - oc auth can-i create deployment.apps --namespace payments
+        - oc auth can-i create deployment --namespace=payments
+        - oc auth can-i create deploy --namespace=payments
+        - oc auth can-i create deployments.apps --namespace=payments
+        - oc auth can-i create deployment.apps --namespace=payments
+        - oc auth can-i -n payments create deployment
+        - oc auth can-i -n payments create deploy
+        - oc auth can-i -n payments create deployments.apps
+        - oc auth can-i -n payments create deployment.apps
+        - oc auth can-i --namespace payments create deployments
+        - oc auth can-i --namespace payments create deployment
+        - oc auth can-i --namespace payments create deploy
+        - oc auth can-i --namespace payments create deployments.apps
+        - oc auth can-i --namespace payments create deployment.apps
+        - oc auth can-i --namespace=payments create deployments
+        - oc auth can-i --namespace=payments create deployment
+        - oc auth can-i --namespace=payments create deploy
+        - oc auth can-i --namespace=payments create deployments.apps
+        - oc auth can-i --namespace=payments create deployment.apps
+        - kubectl auth can-i create deployments -n payments
+        - kubectl auth can-i create deployment -n payments
+        - kubectl auth can-i create deploy -n payments
+        - kubectl auth can-i create deployments.apps -n payments
+        - kubectl -n payments auth can-i create deployments
+      hints:
+        - match: ^(oc|kubectl) create
+          say: That would create an object. Permission checks use auth can-i before the verb being checked.
+        - match: can-i get secrets
+          say: That tests direct reads. The task checks the indirect path through creating a Deployment.
+        - match: who-can
+          say: who-can asks about other identities. This task is about the current identity.
+      hint: Use auth can-i with verb create, resource deployments, and project payments.
+      then: |
+        On a connected cluster the answer would report the current identity’s authorization for creating
+        Deployments. A yes identifies a potential Secret exposure path through workload configuration; it
+        does not read a Secret or prove admission will accept any particular workload. This practice runs
+        nothing.
+    - kind: teach
+      id: external-values
+      title: Choose where values are materialized
+      body: |
+        An ExternalSecret is a custom resource that names a key in an external store such as HashiCorp Vault
+        or a cloud provider's secret manager, and it can live in Git because it holds no value. External
+        Secrets Operator fetches the value and creates a Kubernetes Secret. That keeps values out of Git, but
+        they still enter etcd.
+
+        Secrets Store CSI mounts values from an external store into a pod volume. Without Secret
+        synchronization, the values need not enter the Kubernetes Secret API or etcd. The store and provider
+        must be reachable when needed, especially at pod start.
+
+        Sealed Secrets is a community alternative: Git holds encrypted values, and a controller decrypts
+        them into Secrets. Back up and rotate the controller’s keys.
+    - kind: ask
+      id: choose-store
+      prompt: Passwords rotate in Vault, and policy forbids storing their values in etcd. Which design fits?
+      choices:
+        - text: CSI-mounted files without Secret sync
+          why: That path mounts values without creating a Kubernetes Secret. Check provider access, rotation support
+            and application reload behavior.
+        - text: External Secrets syncing into Secrets
+          why: It solves keeping values out of Git, but creates Secret objects that are stored in etcd.
+        - text: Sealed Secrets decrypted into Secrets
+          why: Encryption in Git does not prevent the controller from writing plaintext Secret values through
+            the API.
+      answer: 0
+    - kind: teach
+      id: rotation
+      title: Rotation must reach the process
+      body: |
+        [Configuration and Secrets](/lesson/o1.config-secrets) distinguishes environment variables from
+        mounted files. An environment value is set when the container starts; changing the Secret does not
+        change that process’s environment.
+
+        Secret volume updates propagate eventually, except for mounts such as subPath that do not receive
+        automatic updates. An application must still re-read a changed file. For external CSI mounts, check
+        the driver’s configured rotation and provider support. Design the restart or reload procedure before
+        the first password rotation.
+    - kind: ask
+      id: old-password
+      prompt: The Secret changed successfully, but the app still uses the old password from its environment. What
+        should the rotation procedure include?
+      choices:
+        - text: Wait, because the kubelet refreshes environment variables
+          why: Only Secret volumes are refreshed, and eventually. A running container's environment is fixed when
+            the container starts.
+        - text: Restart the affected containers
+          why: The new containers receive the updated environment. Coordinate the rollout with the credential
+            validity window.
+        - text: A wider Secret-read role for the app
+          why: More permissions do not replace the environment of an existing process. Only an explicit application
+            fetch would use them.
+      answer: 1
+    - kind: teach
+      id: bound-identity
+      title: A token has a subject, audience and binding
+      body: |
+        A projected ServiceAccount token authenticates a pod as its ServiceAccount. The kubelet requests it
+        through TokenRequest and mounts it as a file. The audience identifies the intended recipient, which
+        should validate it.
+
+        A pod-bound token is tied to the pod’s identity and stops authenticating to the Kubernetes API
+        shortly after that pod is deleted. While valid, it is a **bearer credential**: the API accepts whoever
+        presents it, so a stolen copy works from anywhere that can reach an accepting API. Limit the ServiceAccount’s rights and
+        disable automatic mounting where workloads do not need API access.
+    - kind: show
+      id: projection-example
+      code: |
+        # Excerpt of a pod spec; not a complete pod to create
+        volumes:
+          - name: api-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    path: token
+                    expirationSeconds: 3600
+      origin: example
+      caption: 'Kubernetes projected token and OpenShift 4.21 bound-token documentation: adapted excerpt'
+      notice: |
+        3600 seconds is also the default when `expirationSeconds` is left out. The kubelet starts rotating a
+        projected token once it is older than 80 percent of its lifetime or older than 24 hours. The
+        one-year extension that OpenShift’s documentation describes, for compatibility and not changeable,
+        applies to the token mounted automatically in every pod (`kube-api-access-…`), which is requested
+        with a default of 3607 seconds so that the API server can recognise it. As far as we can tell from
+        the Kubernetes behaviour, an explicitly requested 3600-second token like this one is not extended;
+        check your version’s documentation. For the automatically mounted token, rotating the file therefore
+        does not make a copied token stop working. Applications should re-read the file.
+    - kind: ask
+      id: stolen-token
+      prompt: A stolen pod-bound token still authenticates to the Kubernetes API. Its pod is deleted during a
+        rollout. What happens next?
+      choices:
+        - text: It always works until the extended year ends
+          why: The expiry extension does not remove the pod binding. The API checks the bound object’s continued
+            validity.
+        - text: It was unusable outside the cluster anyway
+          why: A bearer token can be used anywhere that can reach an accepting endpoint. Its location is not its
+            protection.
+        - text: It stops authenticating shortly after deletion
+          why: Deleting the bound pod invalidates it for Kubernetes API authentication; its account rights limit
+            exposure before then.
+      answer: 2
+    - kind: teach
+      id: token-lifetimes
+      title: Avoid creating permanent credentials
+      body: |
+        OpenShift’s compatibility extension to the expiry of the automatically mounted token cannot be
+        changed with the usual server setting. Do not assume a stolen token dies when the kubelet replaces its local file.
+
+        OpenShift stopped automatically creating long-lived token Secrets for ServiceAccounts in 4.16.
+        Upgraded clusters can retain older ones, and users can still create them deliberately. Prefer
+        TokenRequest for outside consumers that need a token with a requested duration; the server decides
+        the granted duration. Its output is a credential and is not generated in this lesson.
+    - kind: teach
+      id: backup-boundary
+      title: Know what an encrypted backup protects
+      body: |
+        OpenShift encrypts values of selected resource types, not the whole etcd snapshot. Resource types,
+        names and namespaces remain visible. After encryption completes, a snapshot without its encryption
+        keys does not expose those protected values directly.
+
+        The static_kuberesources backup archive contains the encryption keys. Store it apart from the
+        snapshot and restrict access to both. Encryption enabled today does not protect a snapshot copied
+        before it was enabled.
+    - kind: ask
+      id: backup-exposure
+      prompt: An etcd snapshot was taken after encryption completed. It leaks without the encryption-key archive.
+        Which information remains readable?
+      choices:
+        - text: Object names, namespaces and resource types
+          why: etcd encryption protects values of selected resources, not all metadata. The separate key archive
+            is needed to decrypt those protected values.
+        - text: Every Secret value, because base64 is reversible
+          why: Base64 alone offers no protection, but the stated snapshot has encryption applied. Decoding does
+            not bypass that encryption.
+        - text: Nothing, because the snapshot file is wholly encrypted
+          why: The encryption is selective rather than whole-file encryption. Metadata and other unprotected data
+            can still disclose information.
+      answer: 0
+    - kind: teach
+      id: audit-evidence
+      title: Record API actions without copying credentials
+      body: |
+        Audit logs record API activity: identity, verb, resource, time and response. OpenShift configures
+        audit profiles in APIServer/cluster. Default records metadata with a documented OAuth token-request
+        exception; WriteRequestBodies adds write bodies; AllRequestBodies adds read and write bodies.
+
+        Sensitive objects such as Secrets stay at metadata level regardless of the body-logging profile. An
+        auditor can identify who changed a Secret without receiving its value. The log does not show every
+        read of a mounted password inside an application: those are not necessarily API requests.
+    - kind: show
+      id: audit-config
+      code: |
+        # Excerpt of APIServer/cluster, not a complete manifest to apply
+        spec:
+          audit:
+            profile: WriteRequestBodies
+      origin: example
+      caption: 'OpenShift 4.21: Configuring the audit log policy; configuration excerpt, not applied'
+      notice: |
+        This requests write-body logging subject to sensitive-resource exclusions. It neither forwards logs
+        nor sets their retention. An administrator must separately arrange collection from control-plane
+        nodes to an access-controlled, off-cluster store.
+    - kind: ask
+      id: secret-audit
+      prompt: WriteRequestBodies audit logs were retained for last month. What can you provide about a Secret
+        update?
+      choices:
+        - text: The old and new password values
+          why: Sensitive Secret bodies are omitted. A body-logging profile is not a password history service.
+        - text: Identity, Secret name, time and outcome
+          why: Metadata supplies an API trail while keeping Secret values out of the audit store.
+        - text: Nothing, because Secret requests are excluded entirely
+          why: The exclusion concerns bodies. Metadata still records the request and its outcome.
+      answer: 1
+    - kind: teach
+      id: identity-and-artifacts
+      title: Connect credentials with release evidence
+      body: |
+        [Trust your images](/lesson/n.supply-chain) separates signer identity, provenance and current
+        vulnerability evidence. Protect those signing identities as carefully as database credentials. A
+        pipeline with both a signing key and unrestricted production access can bypass a weak approval
+        design.
+
+        Red Hat Advanced Cluster Security for Kubernetes (RHACS) adds build and deploy policy, continuous image
+        scanning, runtime detection and compliance reports. OpenShift’s node signature policies and registry controls complement it. Tie each deployed
+        digest to its reviewed release and retain API audit evidence for configuration changes.
+    - kind: reflect
+      id: explain-leak
+      prompt: Explain how the opening pipeline could leak a Secret, what to contain, and what evidence can establish
+        the path.
+      model: |
+        Its Deployment could mount the same-namespace Secret and send the value without a direct Secret read
+        by the pipeline identity. Restrict the workload-creation path, rotate the exposed credential and
+        investigate workload definitions and execution evidence. Audit can identify API creates and updates,
+        but not every in-container file read. Protect backups and logs too, and keep production changes
+        behind reviewed identities.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can trace direct and workload-mediated Secret access, distinguish encoding from storage
+        encryption, and choose a secret-delivery pattern that meets Git and etcd requirements. You can plan
+        rotation, explain a stolen token’s limits, and use audit metadata without promising password
+        histories.
+
+        Next, [Running many clusters](/lesson/i.multicluster) extends configuration and access decisions
+        across a fleet.
+  sections:
+    - id: access-reference
+      title: Secret access and encryption reference
+      depth: true
+      body: |
+        | Access path | Exposure to consider |
+        |---|---|
+        | get, list or watch Secrets | API responses contain values |
+        | Create pods or workload controllers | Same-namespace Secrets can be mounted unless further controls restrict that use |
+        | pods/exec | Values and tokens available to the target container |
+        | Usable ServiceAccount identity | Everything the account is allowed to read |
+        | Unencrypted etcd storage or backups | Stored values as well as metadata |
+
+        | OpenShift 4.21 encryption detail | Meaning |
+        |---|---|
+        | aesgcm / aescbc | Supported encryption types, enabled by an administrator |
+        | Protected resource values | Secrets, ConfigMaps, Routes, OAuth access and authorize tokens |
+        | Metadata | Names, namespaces and resource types remain visible |
+        | Key rotation | Every seven days; up to ten historical keys retained |
+        | Backup keys | Keep static_kuberesources archive apart from the snapshot; both are needed for restoration |
+        | External KMS plugin | Technology Preview in 4.21 |
+
+        Protect older backups too: enabling encryption today does not rewrite an already copied snapshot.
+        Wait for initial encryption to finish before taking a new backup.
+    - id: secret-patterns
+      title: Secret delivery reference
+      depth: true
+      body: |
+        | Pattern | What Git contains | Where usable values end up | Rotation responsibility |
+        |---|---|---|---|
+        | External Secrets Operator for Red Hat OpenShift | ExternalSecret and store references | Kubernetes Secrets in etcd | Store refresh policy plus app restart or reload |
+        | Secrets Store CSI | Volume/provider configuration | Pod-mounted files; etcd too if synchronization is enabled | Supported driver/provider rotation plus app reload |
+        | Sealed Secrets (community) | Ciphertext | Controller-created Secrets in etcd | Controller key backup/rotation and app restart or reload |
+
+        External Secrets Operator for Red Hat OpenShift is generally available from 1.0. Product-supported
+        providers and CSI features must be checked for the installed release; upstream capabilities alone do
+        not establish support. A mounted value is still available to the consuming process and anyone able
+        to inspect it.
+    - id: audit-reference
+      title: Audit profiles and investigation reference
+      depth: true
+      body: |
+        | Profile | Recorded content, subject to sensitive-resource exclusions |
+        |---|---|
+        | Default | Request metadata; special treatment for OAuth access token requests |
+        | WriteRequestBodies | Metadata plus write request bodies |
+        | AllRequestBodies | Metadata plus read and write request bodies; highest overhead |
+        | None | No requests; custom rules ignored |
+
+        Secret, Route and OAuthClient objects remain at metadata level. customRules can select profiles by
+        group and are evaluated in order. The policy covers the Kubernetes, OpenShift and OAuth API servers
+        and OAuth server. Reading node audit logs requires node-administration rights; configuration changes
+        require appropriate administrative access.
+
+        | Symptom | Investigation and response |
+        |---|---|
+        | view user reads password | Inspect ConfigMap content; move credentials to an appropriate store and rotate exposed values |
+        | No direct Secret role, yet a leak | Review workload-create and exec paths, ServiceAccount grants and workload definitions |
+        | Pods retain old password | Check environment injection or file reload behavior; coordinate rollout/reload with rotation |
+        | No Route deletion trail | Check forwarding and retention rather than assuming bodies were needed |
+        | A signed image gains a new CVE | Reassess using current scan data and its responsible owner |
+
+        Forward audit logs deliberately to a controlled off-cluster store with suitable retention, for
+        example a SIEM (security information and event management system). Keeping logs on the same nodes as
+        the administrators being audited is not a durable independent record.
+  review:
+    - q: Is a Kubernetes Secret encrypted by default?
+      a: Its data is base64-encoded; on OpenShift etcd encryption at rest must be enabled on the API server (aescbc
+        or aesgcm).
+    - q: What does RHACS add beyond image scanning?
+      a: Deploy-time policy enforcement (admission), runtime detection and compliance reporting.
+    - q: Which audit profile logs request bodies for write requests only?
+      a: WriteRequestBodies.
+    - q: Which rights, besides get on secrets, expose a namespace's Secrets?
+      a: Workload creation can expose same-namespace Secrets; exec exposes values available to its target container;
+        usable ServiceAccount credentials expose their granted reads. Admission restrictions can narrow these
+        paths.
+    - q: What limits a stolen projected ServiceAccount token on OpenShift?
+      a: For Kubernetes API authentication, the pod binding ends validity shortly after deletion, and RBAC limits
+        actions while valid. OpenShift extends default token expiry to one year; file rotation alone does not
+        revoke a stolen copy.
+    - q: Which pattern keeps secret values out of etcd entirely?
+      a: The Secrets Store CSI driver mounting values from an external store, without syncing them into Secrets.
+  labs:
+    - lab.config-secrets
+    - lab.image-pullers
+  limits: |
+    The permission examples and typed task run nothing. The linked labs show Secret injection and
+    image-pull identities on OpenShift Local. Encryption, audit configuration and node audit-log
+    retrieval require privileged access; the external secret and RHACS services are not installed here.
+  references:
+    - title: 'Kubernetes: Secrets good practices'
+      url: https://kubernetes.io/docs/concepts/security/secrets-good-practices/
+    - title: 'Kubernetes: Managing service accounts (bound tokens)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/
+    - title: 'OpenShift 4.21: Using bound service account tokens'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/bound-service-account-tokens
+    - title: 'OpenShift 4.21: Enabling etcd encryption'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/etcd/etcd-encrypt
+    - title: 'OpenShift 4.21: Configuring the audit log policy'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/audit-log-policy-config
+    - title: 'OpenShift 4.21: External Secrets Operator for Red Hat OpenShift'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/external-secrets-operator-for-red-hat-openshift
+    - title: 'OpenShift 4.21: Secrets Store CSI Driver Operator'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/storage/using-container-storage-interface-csi#persistent-storage-csi-secrets-store
+    - title: Red Hat Advanced Cluster Security for Kubernetes documentation
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/
+    - title: 'OpenShift 4.21: Understanding and creating service accounts (no generated token Secrets since 4.16)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-and-creating-service-accounts
+    - title: 'Kubernetes: User-facing roles (edit allows accessing Secrets)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles
+    - title: 'Kubernetes: Secret volumes and environment updates'
+      url: https://kubernetes.io/docs/concepts/configuration/secret/
+    - title: 'Secrets Store CSI Driver: Secret auto rotation'
+      url: https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation
+    - title: 'Sealed Secrets: controller and key management'
+      url: https://github.com/bitnami-labs/sealed-secrets
+- id: n.policy-governance
+  title: Policy as code
+  subtitle: Admission policies, policy engines and fleet governance
+  module: p4-enterprise
+  mode: REAL_LAB
+  minutes: 45
+  level: 3
+  supports: "Kubernetes 1.34 ValidatingAdmissionPolicy on OpenShift 4.21. The policy, its binding and every request
+    in the first part were run on OpenShift Local 4.21 by the cluster administrator (kubeadmin) and by the ordinary
+    user developer in a temporary project; the policy, the binding and the namespace label were then removed and the
+    cluster's admission policies were compared with the list taken before (experiment X-VAP-01). Gatekeeper,
+    Kyverno, ACM 2.16 governance and the Compliance Operator are not installed there: those parts use documented
+    examples. MutatingAdmissionPolicy is beta and off by default in Kubernetes 1.34."
+  concepts:
+    - sec.policy
+    - sec.scc
+    - ent.multicluster
+  prerequisites:
+    - f.scc
+    - i.multicluster
+  record_on: cluster-admin
+  files:
+    lab-require-owner.yaml: |
+      apiVersion: admissionregistration.k8s.io/v1
+      kind: ValidatingAdmissionPolicy
+      metadata:
+        name: lab-require-owner
+      spec:
+        failurePolicy: Fail
+        matchConstraints:
+          namespaceSelector:
+            matchLabels:
+              lab-tenant: "true"
+          resourceRules:
+            - apiGroups: ["apps"]
+              apiVersions: ["v1"]
+              operations: ["CREATE", "UPDATE"]
+              resources: ["deployments"]
+        validations:
+          - expression: "has(object.metadata.labels) && 'owner' in object.metadata.labels"
+            message: "Deployments need an owner label"
+    lab-require-owner-binding.yaml: |
+      apiVersion: admissionregistration.k8s.io/v1
+      kind: ValidatingAdmissionPolicyBinding
+      metadata:
+        name: lab-require-owner
+      spec:
+        policyName: lab-require-owner
+        validationActions: [Warn, Audit]
+        matchResources:
+          namespaceSelector:
+            matchLabels:
+              lab-tenant: "true"
+  objective: |
+    Choose an enforcement layer, read a CEL validation and its binding, stage enforcement without
+    surprising existing workloads, and distinguish admission, background checks and ACM fleet
+    remediation.
+  flow:
+    - kind: teach
+      id: situation
+      title: A rule blocks a routine change
+      body: |
+        The platform team requires an owner label on every Deployment that a tenant (a team sharing the
+        cluster) creates. It enables a rule and expects only new applications to be affected. The next routine
+        restart of an older Deployment is refused.
+
+        You will follow that rule from validation to binding, work out what happens to existing objects, and
+        plan a staged rollout across clusters. The built-in policy was created for real on a lab cluster
+        (OpenShift Local 4.21) by its administrator, with the ordinary user developer as the tenant; the prompt
+        in front of each command names who ran it. Policy engines and fleet governance are not installed there:
+        those parts are documented examples.
+    - kind: teach
+      id: rule-layer
+      title: Permission and acceptable content are different
+      body: |
+        [Security Context Constraints](/lesson/f.scc) showed that permission to create a workload does not
+        mean every pod configuration is acceptable. RBAC decides whether an identity may request an action.
+        Admission is the next stage: after authentication and authorization, the API server checks, and
+        sometimes changes, the submitted object before storing it.
+
+        Other layers answer other questions: the node enforces runtime and image-pull restrictions, network
+        policy limits connections, and audit records activity. Choose the layer that can observe and control
+        the thing the rule actually concerns: who is asking, what the object contains, what runs on a node, or
+        what connects to what.
+    - kind: ask
+      id: choose-layer
+      prompt: A developer may create Deployments, but each submitted Deployment must carry an owner label. Where
+        should that content check run?
+      choices:
+        - text: Admission validation
+          why: RBAC grants the action; admission can validate the object being submitted before it is stored.
+        - text: A broader edit RoleBinding
+          why: More permission changes who can make the request, not which fields the resulting object must contain.
+        - text: An extra NetworkPolicy rule
+          why: NetworkPolicy governs allowed network traffic, not Deployment metadata in API requests.
+      answer: 0
+    - kind: teach
+      id: cel
+      title: Express one validation in the API server
+      body: |
+        ValidatingAdmissionPolicy evaluates CEL (Common Expression Language) inside the API server. It is GA
+        in Kubernetes 1.30 and available in OpenShift from 4.17. No external webhook service is needed for
+        this check.
+
+        A policy says which requests it matches and which expressions must be true. A binding activates it
+        for a selected scope and specifies the response to failed validation. You need both; storing a
+        policy alone does not enforce it.
+
+        OpenShift's own components already use this API. The administrator lists the policies on the lab
+        cluster:
+    - kind: show
+      id: platform-policies
+      run: "oc get validatingadmissionpolicies"
+      notice: |
+        Nine policies, all installed with the platform (age 200d), each with one validation or two. Most have
+        no parameter kind; `managed-bootimages-platform-check` reads its parameters from the `Infrastructure`
+        object. The kind is cluster-scoped: no project is named.
+    - kind: show
+      id: owner-policy
+      body: "The administrator writes the owner rule in a file:"
+      code: |
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicy
+        metadata:
+          name: lab-require-owner
+        spec:
+          failurePolicy: Fail
+          matchConstraints:
+            namespaceSelector:
+              matchLabels:
+                lab-tenant: "true"
+            resourceRules:
+              - apiGroups: ["apps"]
+                apiVersions: ["v1"]
+                operations: ["CREATE", "UPDATE"]
+                resources: ["deployments"]
+          validations:
+            - expression: "has(object.metadata.labels) && 'owner' in object.metadata.labels"
+              message: "Deployments need an owner label"
+      caption: 'lab-require-owner.yaml, adapted from the Kubernetes Validating Admission Policy documentation'
+      notice: |
+        The expression safely handles a missing labels map, then requires the owner key. It checks presence
+        only: an empty owner value still passes. CREATE and UPDATE are both included; pods are not checked.
+        The policy itself only matches namespaces labelled `lab-tenant=true`: even a binding written without
+        a selector could not reach the platform's own namespaces.
+    - kind: ask
+      id: scope-intersection
+      prompt: The policy matches only namespaces labelled lab-tenant=true. Someone later binds it without any namespace
+        selector. Which Deployments can the rule check?
+      choices:
+        - text: Only those in labelled namespaces
+          why: A binding's selection is intersected with the policy's own match constraints. It can narrow the policy,
+            never widen it.
+        - text: Every Deployment in the cluster
+          why: The binding has no selector of its own, but the policy's selector still applies to every request.
+        - text: None, because the two selectors conflict
+          why: An absent selector in the binding matches everything; the intersection is the policy's labelled
+            namespaces.
+      answer: 0
+    - kind: show
+      id: create-policy
+      run: "oc create -f lab-require-owner.yaml"
+      notice: "The policy is stored. Nothing binds it yet."
+    - kind: teach
+      id: tenant-label
+      title: The namespace label marks a tenant
+      body: |
+        The policy and its binding select namespaces by a label, `lab-tenant=true`. The administrator sets it
+        on the team's namespace. The developer administers that project, but the Namespace object itself is
+        not theirs to change, so they cannot remove the label to escape the rule.
+    - kind: show
+      id: label-namespace
+      run: "oc label namespace academy-lesson-n-policy-governance lab-tenant=true"
+      notice: "`namespace/academy-lesson-n-policy-governance labeled`: this is the developer's project, a temporary project
+        the recording created for developer. To reproduce the lesson, use your own test project's name wherever this
+        name appears, here and in the audit-log filter later; the policy and binding files name no project, because
+        they select namespaces by the label."
+    - kind: show
+      id: tenant-cannot-unlabel
+      body: "The developer tries to remove the label:"
+      run: "oc label namespace academy-lesson-n-policy-governance lab-tenant-"
+      notice: |
+        Forbidden: `developer` cannot patch the resource `namespaces`. Project administration does not include
+        changing the Namespace object.
+    - kind: ask
+      id: unbound-policy
+      guess: true
+      prompt: The policy is stored and the namespace is labelled, but no binding names the policy. The developer
+        creates an owner-less Deployment. What does the policy do?
+      choices:
+        - text: Reject it in every namespace
+          why: The policy still needs a binding to activate its validation and define actions and scope.
+        - text: It performs no validation
+          why: The API can store an unbound policy. A binding is the separate configuration that makes it take
+            effect.
+        - text: Insert the missing owner label
+          why: A validating policy accepts or rejects according to its actions; it does not mutate the submitted
+            object.
+      answer: 1
+    - kind: show
+      id: old-shop-created
+      run: "oc create deployment old-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity && oc rollout status deployment/old-shop --timeout=180s"
+      notice: |
+        Created without a word, and its pod is running. The stored policy does nothing until a binding
+        activates it. old-shop is now the "older Deployment" of the opening story.
+    - kind: teach
+      id: bind-scope
+      title: Start with a narrow reporting scope
+      body: |
+        A ValidatingAdmissionPolicyBinding names the policy and can select namespaces. In the binding below,
+        `lab-tenant: "true"` is a label on the namespace, not on the Deployment.
+
+        Warn returns a warning to the client; Audit records an audit annotation. Together they report
+        violations without denying the request. Deny rejects failed validation. Deny and Warn cannot be
+        combined in one binding; Deny and Audit can. Observe impact and fix existing violations before
+        enforcing.
+    - kind: show
+      id: owner-binding
+      code: |
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicyBinding
+        metadata:
+          name: lab-require-owner
+        spec:
+          policyName: lab-require-owner
+          validationActions: [Warn, Audit]
+          matchResources:
+            namespaceSelector:
+              matchLabels:
+                lab-tenant: "true"
+      caption: 'lab-require-owner-binding.yaml, adapted from the Kubernetes Validating Admission Policy documentation'
+      notice: |
+        This binds the owner check only in labelled tenant namespaces. It does not add the label or fix a
+        Deployment. Reporting is a rollout stage, and collecting its audit evidence still requires audit
+        retention.
+    - kind: show
+      id: create-binding
+      run: "oc create -f lab-require-owner-binding.yaml"
+      notice: "The binding is stored. It does not take effect at the same instant: the API server compiles policies and bindings into its admission cache."
+    - kind: show
+      id: binding-in-force
+      body: "In the developer's terminal, a server dry run (nothing is stored) repeated every two seconds until the policy reports, to see when the binding takes effect:"
+      run: "start=$(date +%s); until oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name 2>&1 | grep -q Warning; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'no warning after 2 minutes'; exit 1; }; sleep 2; done; echo \"the binding was in force after $(( $(date +%s) - start )) seconds\""
+      notice: "The binding took effect a few seconds after it was created. An administrator who tests a new binding at once can wrongly conclude that it does nothing."
+    - kind: ask
+      id: warn-outcome
+      guess: true
+      prompt: What happens when an owner-less Deployment is created in a namespace selected by this binding?
+      choices:
+        - text: The API refuses to create it
+          why: This binding does not include Deny. Reporting a violation and rejecting it are different actions.
+        - text: The API adds an owner automatically
+          why: Validation does not infer or insert an owner. A mutating mechanism would be a different design.
+        - text: Creation succeeds with reporting
+          why: Warn returns a client warning and Audit adds audit evidence; neither action denies this request.
+      answer: 2
+      evidence: |
+        # Excerpt of lab-require-owner-binding.yaml
+        spec:
+          policyName: lab-require-owner
+          validationActions: [Warn, Audit]
+          matchResources:
+            namespaceSelector:
+              matchLabels: {lab-tenant: "true"}
+    - kind: show
+      id: new-shop-warned
+      body: "The developer creates a second Deployment, again without an owner label:"
+      run: "oc create deployment new-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity"
+      notice: |
+        A `Warning:` line names the policy, the binding and the message, and the next line says
+        `deployment.apps/new-shop created`. Warn reports; it does not refuse.
+    - kind: show
+      id: audit-annotation
+      body: |
+        The Audit action leaves its evidence in the API server's audit log, on the node. The administrator
+        reads it and keeps only the developer's request in this project:
+      run: "oc adm node-logs crc --path=kube-apiserver/audit.log | grep -F lab-require-owner | jq -c 'select(.objectRef.namespace == \"academy-lesson-n-policy-governance\" and .objectRef.name == \"new-shop\" and .verb == \"create\") | {user: .user.username, verb, resource: .objectRef.resource, name: .objectRef.name, code: .responseStatus.code, failure: .annotations[\"validation.policy.admission.k8s.io/validation_failure\"]}'"
+      notice: |
+        Each line is one audit event for a create of `new-shop` in this project; this recording printed two identical
+        lines. The filter prints no timestamp, so the output does not say when each request was made. Every line says
+        the same thing: `developer` created the Deployment new-shop, the response code was 201 (created), and the
+        `validation_failure` annotation records the message, the policy, the binding and the actions Warn and Audit.
+        A report can be built from these events without refusing anyone; add `.requestReceivedTimestamp` to the
+        filter when you need to tell the requests apart.
+    - kind: try
+      id: inspect-owner-binding
+      body: |
+        As the administrator (kubeadmin), who may read cluster-scoped bindings, type one command to inspect the
+        binding lab-require-owner as YAML, including its scope and actions. An ordinary user such as developer
+        normally cannot read them.
+      accept:
+        - oc get validatingadmissionpolicybinding lab-require-owner -o yaml
+        - oc get validatingadmissionpolicybindings lab-require-owner -o yaml
+        - oc get validatingadmissionpolicybinding/lab-require-owner -o yaml
+        - oc get validatingadmissionpolicybinding lab-require-owner --output=yaml
+        - oc get validatingadmissionpolicybinding lab-require-owner --output yaml
+        - oc get -o yaml validatingadmissionpolicybinding lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner -o yaml
+        - oc get --output yaml validatingadmissionpolicybinding lab-require-owner
+        - oc get --output=yaml validatingadmissionpolicybinding lab-require-owner
+        - oc get validatingadmissionpolicybinding lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybinding lab-require-owner
+        - oc get -o yaml validatingadmissionpolicybindings lab-require-owner
+        - oc get validatingadmissionpolicybindings lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybindings lab-require-owner
+        - oc get validatingadmissionpolicybindings lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybindings lab-require-owner
+        - oc get validatingadmissionpolicybindings lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybindings lab-require-owner
+        - oc get -o yaml validatingadmissionpolicybinding/lab-require-owner
+        - oc get validatingadmissionpolicybinding/lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybinding/lab-require-owner
+        - oc get validatingadmissionpolicybinding/lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybinding/lab-require-owner
+        - oc get validatingadmissionpolicybinding/lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybinding/lab-require-owner
+        - oc get validatingadmissionpolicybindings/lab-require-owner -o yaml
+        - oc get -o yaml validatingadmissionpolicybindings/lab-require-owner
+        - oc get validatingadmissionpolicybindings/lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybindings/lab-require-owner
+        - oc get validatingadmissionpolicybindings/lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybindings/lab-require-owner
+        - oc get validatingadmissionpolicybindings/lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybindings/lab-require-owner
+        - oc get -o yaml validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybindings.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner -o yaml
+        - oc get -o yaml validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybinding.admissionregistration.k8s.io lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner -o yaml
+        - oc get -o yaml validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybindings.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner -o yaml
+        - oc get -o yaml validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner --output yaml
+        - oc get --output yaml validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner --output=yaml
+        - oc get --output=yaml validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner
+        - oc get validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner -oyaml
+        - oc get -oyaml validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner
+      hints:
+        - match: \bvalidatingadmissionpolic(?:y|ies)(?:\s|/)
+          say: That inspects the expression, not the binding. Scope and validationActions belong to ValidatingAdmissionPolicyBinding.
+        - match: ^oc (?:apply|edit|delete)
+          say: The task is to inspect configuration, not change enforcement.
+        - match: ^oc get(?!.*(?:yaml))
+          say: The default table does not show all matching and action fields. Request YAML output.
+      hint: Use get on validatingadmissionpolicybinding, name lab-require-owner, and select YAML output.
+      run: "oc get validatingadmissionpolicybinding lab-require-owner -o yaml"
+      then: |
+        The administrator's output: `policyName`, `validationActions` and `matchResources` with the namespace
+        selector, as written in the file, plus the fields the API server added. Read the three together;
+        the policy's name alone tells you nothing about where or how it is enforced.
+    - kind: teach
+      id: existing-objects
+      title: Admission evaluates the next request
+      body: |
+        Enabling Deny does not sweep the stored Deployments or delete violations. The next matching UPDATE
+        is checked against the new rule, including an image change or rollout restart that leaves the owner
+        label absent.
+
+        A Deployment passing admission also does not guarantee its pods will pass. The ReplicaSet controller
+        submits separate pod-create requests. If a pod-level rule rejects those, investigate FailedCreate
+        events on the ReplicaSet; the [SCC incident](/lab/inc.scc-root) demonstrates that separate request
+        path.
+
+        After the report, the administrator switches the binding to Deny:
+    - kind: show
+      id: enable-deny
+      run: "oc patch validatingadmissionpolicybinding lab-require-owner --type=merge -p '{\"spec\":{\"validationActions\":[\"Deny\"]}}'"
+      notice: "The binding now lists one action, Deny. The policy is unchanged."
+    - kind: show
+      id: deny-in-force
+      body: "Again, the change reaches admission after a short delay. The developer's dry run is repeated until it is refused:"
+      run: "start=$(date +%s); while oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name >/dev/null 2>&1; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'still allowed after 2 minutes'; exit 1; }; sleep 2; done; echo \"Deny was in force after $(( $(date +%s) - start )) seconds\""
+      notice: "From now on, owner-less Deployments are refused in the labelled namespace."
+    - kind: show
+      id: still-running
+      body: "In the developer's project, nothing was removed:"
+      run: "oc get deployments"
+      notice: "old-shop and new-shop are still there. Enabling Deny checks the next request; it does not touch stored objects."
+    - kind: ask
+      id: old-deployment
+      guess: true
+      prompt: Deny is enabled. The existing owner-less Deployment old-shop is running. The developer restarts it
+        with a routine rollout restart, which leaves its owner label absent. What happens?
+      choices:
+        - text: The update is rejected
+          why: It is a new matching UPDATE. Add the required owner label in the submitted update to satisfy this
+            rule.
+        - text: The existing pods are deleted immediately
+          why: This validating policy evaluates requests; it does not delete existing workloads when enabled.
+        - text: The update is exempt because the object is old
+          why: Creation time does not exempt later matching updates. This is why stored violations should be found
+            before enforcement.
+      answer: 0
+    - kind: show
+      id: restart-refused
+      run: "oc rollout restart deployment/old-shop"
+      notice: |
+        Refused: the error names the policy, the binding and the message `Deployments need an owner label`. A
+        restart is a change to the Deployment's pod template, so it is an UPDATE like any other.
+    - kind: show
+      id: create-refused
+      body: "A new owner-less Deployment is refused too:"
+      run: "oc create deployment cart --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity"
+      notice: "The same denial, for a CREATE. No Deployment named cart exists."
+    - kind: show
+      id: other-namespace
+      body: |
+        The scope is the label. The administrator sends the same kind of request to an unlabelled namespace,
+        `default`, as a server-side dry run: the API server runs admission but stores nothing.
+      run: "oc create deployment scope-check --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n default --dry-run=server"
+      notice: "`created (server dry run)`, with no warning and no denial: the policy matches only labelled namespaces."
+    - kind: try
+      id: comply-and-restart
+      body: |
+        Make old-shop compliant: give the Deployment the label `owner=team-shop`. Then the restart is a valid
+        update.
+      accept:
+        - oc label deployment old-shop owner=team-shop
+        - oc label deployment/old-shop owner=team-shop
+        - oc label deploy old-shop owner=team-shop
+        - oc label deploy/old-shop owner=team-shop
+        - oc label deployments old-shop owner=team-shop
+        - oc label deployments/old-shop owner=team-shop
+        - oc label deployment.apps old-shop owner=team-shop
+        - oc label deployment.apps/old-shop owner=team-shop
+        - oc label deployments.apps old-shop owner=team-shop
+        - oc label deployments.apps/old-shop owner=team-shop
+      hints:
+        - match: "^oc label (?:pods?|po)\\b"
+          say: The rule checks the Deployment's own labels, not its pods'. Label the Deployment.
+        - match: "^oc annotate"
+          say: An annotation is not a label. The expression looks for the key in `metadata.labels`.
+        - match: "^oc (?:set|patch|edit)"
+          say: That can work, but `oc label` is the direct way to add one label.
+        - match: "owner:"
+          say: On the command line a label is written `key=value`.
+      hint: "`oc label`, the Deployment old-shop, and the label `owner=team-shop`."
+      run: "oc label deployment old-shop owner=team-shop && oc rollout restart deployment/old-shop"
+      then: |
+        The label change is itself an UPDATE, and the object it would produce has an owner label, so it is
+        accepted. The restart that follows is accepted too.
+    - kind: teach
+      id: engines
+      title: An external engine adds capabilities and a dependency
+      body: |
+        When a built-in validation is not enough, you can add a policy engine. Gatekeeper writes rules in
+        Rego, the Open Policy Agent language, as ConstraintTemplates and Constraints, and audits resources that
+        already exist. Kyverno writes policies as Kubernetes-style YAML and can also mutate objects, generate
+        them and verify image signatures.
+
+        Both work through admission webhooks: services that the API server calls for each matching request and
+        that answer allow or deny. That makes them a dependency of API writes. failurePolicy: Fail rejects
+        matching requests when the webhook cannot be called; Ignore lets the request continue without that
+        check. Restrict the match scope, keep the service available, and monitor it as part of API write
+        availability.
+    - kind: show
+      id: webhook-failure-setting
+      code: |
+        # Excerpt from one ValidatingWebhookConfiguration webhooks entry
+        failurePolicy: Fail
+        rules:
+          - apiGroups: ["apps"]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["deployments"]
+      origin: example
+      caption: 'Kubernetes: Dynamic admission control, webhook rules and failure policy; excerpt, not applied'
+      notice: |
+        Assume no other selector excludes the request. This webhook lies on matching Deployment writes.
+        Restrict it to intended tenants so platform recovery does not depend on an unavailable tenant-policy
+        service.
+    - kind: ask
+      id: unavailable-webhook
+      prompt: The shown webhook is unreachable. An authorized user submits a matching Deployment update. What
+        happens?
+      choices:
+        - text: It is allowed because RBAC already passed
+          why: Authorization is only one stage. A later admission dependency can still reject the request.
+        - text: It is rejected while the call fails
+          why: Fail makes availability of the matching webhook part of write availability; restore it and review
+            the match scope.
+        - text: Only namespace creation is affected
+          why: The rules match Deployment creates and updates, not namespace creation. The failure follows the
+            selected requests.
+      answer: 1
+    - kind: teach
+      id: fleet
+      title: Distribute rules and report across clusters
+      body: |
+        [Running many clusters](/lesson/i.multicluster) introduced the hub and the managed clusters. ACM
+        governance wraps templates in a Policy. A Placement selects clusters; a PlacementBinding connects
+        that selection to the Policy or PolicySet.
+
+        The templates say what to check. ConfigurationPolicy describes objects that must or must not exist.
+        OperatorPolicy checks operator installation and versions. CertificatePolicy reports certificate
+        issues and never repairs them.
+    - kind: teach
+      id: remediation
+      body: |
+        Each template also has a remediation action. inform reports whether the clusters comply. enforce
+        asks the supported controllers to change the cluster until it does.
+
+        For a rule that says an object must not exist, enforcement can mean deleting that object, so review
+        its scope carefully before switching from inform to enforce.
+    - kind: show
+      id: inform-example
+      code: |
+        # Excerpt of an ACM ConfigurationPolicy template inside a Policy
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: require-default-deny
+        spec:
+          remediationAction: inform
+          severity: medium
+          # The reviewed object templates and namespace selection go here.
+      origin: example
+      caption: 'Red Hat ACM 2.16 Governance: configuration policy; partial example, not applied'
+      notice: |
+        Assume the omitted template requires a specific default-deny NetworkPolicy in selected tenant
+        namespaces. inform reports whether it exists and matches. This partial excerpt is for reading the
+        remediation choice, not a deployable rule.
+    - kind: ask
+      id: fleet-inform
+      prompt: Three selected clusters lack the required NetworkPolicy. The effective remediationAction is inform.
+        What does governance do?
+      choices:
+        - text: Create the missing policies on all three
+          why: That requires supported enforcement configuration. inform reports the difference without creating
+            the missing objects.
+        - text: Delete the three noncompliant namespaces
+          why: Reporting noncompliance does not authorize namespace deletion. Deletion requires an explicit enforce
+            rule targeting an unwanted object.
+        - text: Report those clusters as NonCompliant
+          why: inform supplies visibility without remediation. Review the finding and its effect before changing
+            to enforce.
+      answer: 2
+    - kind: teach
+      id: stage-policy
+      title: Give each rule an owner and a rollout
+      body: |
+        Use a reviewed repository, named rule owner and exception process. Start on selected tenant
+        namespaces or clusters. Collect warnings, background reports and compliance results; correct stored
+        violations and test controller-created workloads as well as direct requests.
+
+        Expand enforcement after the report matches your intent. For webhooks, test service failure and
+        recovery too. A PodDisruptionBudget helps with voluntary disruption, but does not guarantee service
+        availability; use suitable replicas, placement and monitoring.
+    - kind: order
+      id: rollout-order
+      prompt: Order this rollout of a new required-label rule.
+      items:
+        - Review the rule, intended tenants, owner and exception process.
+        - Bind it in Warn/Audit mode to a small selected scope.
+        - Collect evidence, fix violations and test controller requests and recovery.
+        - Enable Deny for the tested scope, monitor it, then expand deliberately.
+      why: Enforcement comes after scope and impact are verified. Admission does not discover every stored violation
+        on its own, so collect background or fleet evidence too.
+    - kind: teach
+      id: compliance
+      title: A benchmark is another kind of evidence
+      body: |
+        The Compliance Operator uses OpenSCAP-based scans of supported node and platform configuration
+        against benchmark profiles, such as CIS or DISA STIG, and can propose remediations. Available
+        profiles and checks depend on the version and platform.
+
+        That complements admission and ACM compliance; it does not prove every workload is safe. Keep the
+        benchmark results, rule outcomes and the decisions about exceptions together as evidence of what was
+        actually checked.
+    - kind: reflect
+      id: choose-policy-tool
+      prompt: Explain when you would use a built-in validation, an external engine and ACM, including the availability
+        trade-off.
+      model: |
+        Use ValidatingAdmissionPolicy for suitable CEL validations without a separate webhook service.
+        Choose an engine for needed features such as policy libraries, mutation, image checks or background
+        reports, and operate its webhook dependency deliberately. ACM distributes selected policies and
+        reports across clusters. Start with reporting, correct violations, test recovery and then enforce
+        the intended scope.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can write a validation and its binding, scope them to labelled namespaces, read the warning and the
+        audit evidence of report mode, and explain why an old Deployment fails its next update once Deny is on.
+        You can assess webhook failure risk and separate fleet reporting from remediation and benchmark scanning.
+
+        Next, [The platform team](/lesson/i.platform-team) turns these technical controls into a service
+        teams can use, with owners and an exception process.
+  sections:
+    - id: layer-reference
+      title: Enforcement layer reference
+      depth: true
+      body: |
+        | Layer | Question | Examples |
+        |---|---|---|
+        | RBAC | May this identity request this action? | Roles and bindings |
+        | Admission | Is this submitted object acceptable? | SCCs, quotas, LimitRanges, CEL policies, webhooks |
+        | Node | May this image run and touch the host? | CRI-O signature policies, SELinux |
+        | Network | May these endpoints communicate? | NetworkPolicy, AdminNetworkPolicy |
+        | Detection and audit | What happened or differs from a baseline? | Audit logs, runtime detection, compliance scans |
+
+        ValidatingAdmissionPolicy is stable from Kubernetes 1.30, shipped in OpenShift 4.17.
+        MutatingAdmissionPolicy is beta and disabled by default in Kubernetes 1.34. OpenShift 4.21 exposes
+        that preview through TechPreviewNoUpgrade; enabling that feature set cannot be undone and prevents
+        minor-version upgrades. Use supported production mechanisms instead of enabling it for these
+        examples.
+    - id: engine-reference
+      title: Policy engines and fleet objects
+      depth: true
+      body: |
+        | Tool or object | Role and boundary |
+        |---|---|
+        | Gatekeeper | Rego ConstraintTemplates and Constraints; admission validation and background audit |
+        | Gatekeeper Operator | Red Hat support with the applicable ACM or Platform Plus subscription; custom policy behavior remains the author’s responsibility |
+        | Kyverno | Community policy engine with validation, mutation, generation and image verification; check support with the chosen vendor |
+        | ACM Policy / PolicySet | Wrap templates / group policies for governance |
+        | Placement / PlacementBinding | Select managed clusters / associate policies with that selection |
+        | ConfigurationPolicy | Required or forbidden objects and content; supported enforce rules can change or delete objects |
+        | OperatorPolicy | Desired operator installation/version and compliance |
+        | CertificatePolicy | Certificate health reporting; no enforced repair |
+        | Policy Generator | Kustomize plugin that generates policies from YAML, including supported Gatekeeper distribution |
+        | Compliance Operator | OpenSCAP-based supported benchmark scans and proposed remediations |
+
+        Start with reporting, keep an exception process and keep platform namespaces out of tenant webhook
+        scope using suitable selectors. Namespace labels and selectors need careful administration; do not
+        assume a name prefix is automatically an admission exclusion.
+    - id: policy-troubleshooting
+      title: Policy troubleshooting reference
+      depth: true
+      body: |
+        | Symptom | Evidence | Response |
+        |---|---|---|
+        | Correct validation has no effect | Missing or mismatched binding | Inspect policyName, actions and namespace selector |
+        | Warnings but no rejection | Binding uses Warn/Audit | This is reporting; move to Deny only after reviewing impact |
+        | Deployment exists but no pods appear | ReplicaSet FailedCreate events | Inspect the separate pod-level rejection and fix the template or rule |
+        | Matching writes fail across namespaces | Named webhook cannot be called | Restore service, review scope and ensure resilient deployment |
+        | Old workload cannot update or restart | New UPDATE fails the label rule | Submit a compliant update; audit other stored violations |
+        | ACM reports NonCompliant without changes | Effective remediationAction is inform | Review impact before supported enforcement |
+
+        Admission validation does not retrospectively delete objects. A governance controller enforcing a
+        must-not-have rule can delete them: these mechanisms have different consequences.
+  review:
+    - q: Which Kubernetes version made ValidatingAdmissionPolicy GA, and which OpenShift version first shipped
+        it?
+      a: Kubernetes 1.30; OpenShift 4.17.
+    - q: What does validationActions [Warn, Audit] do?
+      a: Returns a warning to the client and records an audit annotation, without rejecting the request.
+    - q: What does Red Hat support in the Gatekeeper world?
+      a: The Gatekeeper Operator (with ACM or OpenShift Platform Plus), not the individual policies you write.
+    - q: Difference between ACM inform and enforce?
+      a: Inform reports compliance; enforce changes clusters to match the policy.
+    - q: What does the Compliance Operator check?
+      a: Nodes and platform configuration against benchmarks such as CIS, PCI-DSS, NIST 800-53 or DISA STIG, using
+        OpenSCAP.
+  labs:
+    - inc.scc-root
+  limits: |
+    The ValidatingAdmissionPolicy, its binding and the namespace label were created by the cluster
+    administrator on OpenShift Local for the recording and removed afterwards (experiment X-VAP-01); both
+    the policy and the binding select one labelled namespace, because a mistaken cluster-wide rule can block
+    platform writes. No policy engine, governance controller or Compliance Operator is installed: the
+    webhook, ACM and Compliance Operator parts are documented examples. Fleet practice needs a separate hub
+    and managed clusters. The [SCC incident](/lab/inc.scc-root) provides real practice locating a rejected
+    pod-create request.
+  enterprise: |
+    Platform and security teams keep policies in Git with owners and an exception process, roll them out
+    in inform or warn mode first, distribute them with ACM, and use the compliance views and Compliance
+    Operator reports as audit evidence.
+  references:
+    - title: 'Kubernetes: Validating Admission Policy'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+    - title: 'Kubernetes 1.34: Mutating Admission Policy'
+      url: https://v1-34.docs.kubernetes.io/docs/reference/access-authn-authz/mutating-admission-policy/
+    - title: 'Red Hat Advanced Cluster Management 2.16: Governance'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.16/html-single/governance/index
+    - title: 'OpenShift 4.21: Compliance Operator'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/compliance-operator
+    - title: Kyverno documentation
+      url: https://kyverno.io/docs/
+    - title: Open Policy Agent Gatekeeper
+      url: https://open-policy-agent.github.io/gatekeeper/website/docs/
+    - title: 'Kubernetes: Dynamic admission control (webhook failure policy)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
+    - title: 'Kubernetes 1.34: Validating Admission Policy'
+      url: https://v1-34.docs.kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+    - title: 'OpenShift 4.21: Feature gates and TechPreviewNoUpgrade'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/nodes/working-with-clusters#nodes-cluster-enabling-features
+    - title: 'Kubernetes: Auditing (audit annotations)'
+      url: https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+    - title: 'OpenShift 4.21: Viewing audit logs (oc adm node-logs)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/audit-log-view
+  commands:
+    - {cmd: "oc get validatingadmissionpolicies", as: admin, meaning: "the admission policies that OpenShift's own components installed"}
+    - {cmd: "oc create -f lab-require-owner.yaml", as: admin, meaning: "store the owner rule; nothing binds it yet"}
+    - {cmd: "oc label namespace academy-lesson-n-policy-governance lab-tenant=true", as: admin, meaning: "mark the team's namespace as a tenant namespace"}
+    - {cmd: "oc label namespace academy-lesson-n-policy-governance lab-tenant-", as: developer, expect: fail, meaning: "the tenant cannot remove the label: project administration does not include the Namespace object"}
+    - {cmd: "oc create deployment old-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity && oc rollout status deployment/old-shop --timeout=180s", as: developer, timeout: 240, meaning: "an owner-less Deployment while the policy is unbound: accepted silently"}
+    - {cmd: "oc create -f lab-require-owner-binding.yaml", as: admin, meaning: "bind the policy to labelled namespaces in report mode (Warn, Audit)"}
+    - {cmd: "start=$(date +%s); until oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name 2>&1 | grep -q Warning; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'no warning after 2 minutes'; exit 1; }; sleep 2; done; echo \"the binding was in force after $(( $(date +%s) - start )) seconds\"", as: developer, timeout: 180, meaning: "how long the new binding takes to reach admission (a server dry run, repeated)"}
+    - {cmd: "oc create deployment new-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity", as: developer, meaning: "created, with a warning that names the policy"}
+    - {cmd: "oc adm node-logs crc --path=kube-apiserver/audit.log | grep -F lab-require-owner | jq -c 'select(.objectRef.namespace == \"academy-lesson-n-policy-governance\" and .objectRef.name == \"new-shop\" and .verb == \"create\") | {user: .user.username, verb, resource: .objectRef.resource, name: .objectRef.name, code: .responseStatus.code, failure: .annotations[\"validation.policy.admission.k8s.io/validation_failure\"]}'", as: admin, meaning: "the audit event of that request, with its validation_failure annotation"}
+    - {cmd: "oc get validatingadmissionpolicybinding lab-require-owner -o yaml", as: admin, meaning: "the binding: policy, actions and namespace selector"}
+    - {cmd: "oc patch validatingadmissionpolicybinding lab-require-owner --type=merge -p '{\"spec\":{\"validationActions\":[\"Deny\"]}}'", as: admin, meaning: "switch the binding from report mode to Deny"}
+    - {cmd: "start=$(date +%s); while oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name >/dev/null 2>&1; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'still allowed after 2 minutes'; exit 1; }; sleep 2; done; echo \"Deny was in force after $(( $(date +%s) - start )) seconds\"", as: developer, timeout: 180, meaning: "how long the switch to Deny takes to reach admission"}
+    - {cmd: "oc get deployments", as: developer, meaning: "stored Deployments are untouched by enabling Deny"}
+    - {cmd: "oc rollout restart deployment/old-shop", as: developer, expect: fail, meaning: "the next update of the old owner-less Deployment is refused"}
+    - {cmd: "oc create deployment cart --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity", as: developer, expect: fail, meaning: "a new owner-less Deployment is refused"}
+    - {cmd: "oc create deployment scope-check --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n default --dry-run=server", as: admin, meaning: "the same request in an unlabelled namespace, as a server dry run: admission runs, nothing is stored"}
+    - {cmd: "oc label deployment old-shop owner=team-shop && oc rollout restart deployment/old-shop", as: developer, meaning: "a compliant update, then the restart is accepted"}
+  experiment:
+    id: X-VAP-01
+    objective: "Create a ValidatingAdmissionPolicy and its binding scoped to one labelled tenant namespace, show report mode (warning and audit annotation) and then Deny on the developer's requests, and remove both, leaving the cluster's admission policies as they were."
+    changes:
+      - "ValidatingAdmissionPolicy lab-require-owner (created, deleted)"
+      - "ValidatingAdmissionPolicyBinding lab-require-owner (created, patched from Warn/Audit to Deny, deleted)"
+      - "Label lab-tenant=true on the developer's temporary namespace academy-lesson-n-policy-governance (added, removed; the recorder deletes the project afterwards)"
+      - "Deployments old-shop and new-shop in that temporary project"
+    preflight:
+      - {cmd: "found=$(oc get validatingadmissionpolicy lab-require-owner --ignore-not-found -o name) || exit 1; test -z \"$found\""}
+      - {cmd: "found=$(oc get validatingadmissionpolicybinding lab-require-owner --ignore-not-found -o name) || exit 1; test -z \"$found\""}
+      - {cmd: "found=$(oc get namespaces -l lab-tenant -o name) || exit 1; test -z \"$found\""}
+    snapshot:
+      - "oc get validatingadmissionpolicies -o name"
+      - "oc get validatingadmissionpolicybindings -o name"
+      - "oc get namespaces -l lab-tenant -o name"
+      - "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations -o name"
+    rollback:
+      - "oc delete validatingadmissionpolicybinding lab-require-owner --ignore-not-found"
+      - "oc delete validatingadmissionpolicy lab-require-owner --ignore-not-found"
+      - "oc label namespace academy-lesson-n-policy-governance lab-tenant- >/dev/null 2>&1 || true"
+    verify:
+      - {cmd: "oc get --raw /readyz"}
+      - {cmd: "oc wait co/kube-apiserver --for=condition=Available=True --timeout=60s && oc wait co/kube-apiserver --for=condition=Degraded=False --timeout=60s"}

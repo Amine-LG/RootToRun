@@ -1,0 +1,1182 @@
+# Developer self-service, recorded on the training cluster as administration: what a requested project contains (the
+# project request template), who may request one (self-provisioning), and a budget across all of a user's projects
+# (ClusterResourceQuota). Experiments X-SELF-03 (template and self-provisioning) and X-SELF-02 (cluster quota).
+- id: n.project-templates
+  title: Project templates and self-provisioning
+  subtitle: "What every requested project contains, and who may request one"
+  module: b5-governance
+  mode: REAL_LAB
+  minutes: 40
+  level: 2
+  supports: "OpenShift 4.21 project request template (project.config.openshift.io/cluster) and the self-provisioners ClusterRoleBinding. Every command was run on OpenShift Local 4.21 by the cluster administrator (kubeadmin) and by the ordinary user developer; the template, the project configuration, the binding and every project were then restored and checked against copies taken before the change (experiment X-SELF-03). The project configuration change restarts the single openshift-apiserver pod of this one-node cluster."
+  concepts:
+    - ocp.projects
+    - ocp.templates
+    - k8s.quota
+    - sec.rbac
+  prerequisites:
+    - o2.quotas-limits
+    - f.rbac
+    - n.templates
+    - d.networkpolicy-ovn
+  record_on: cluster-admin
+  objective: |
+    Give every self-service project the same guardrails with a project request template, check which projects receive
+    them, decide who may request projects at all, and restore both settings with evidence that the cluster is as it was.
+  flow:
+    - kind: ask
+      id: recall-who-sets
+      recalls: o2.quotas-limits
+      prompt: "In lab-shop, developer administered the project. Who created its quota and LimitRange?"
+      choices:
+        - text: "developer, as the project's administrator"
+          why: "The project's `admin` role can read quotas and LimitRanges, not create them. developer's patch was Forbidden."
+        - text: "The cluster administrator, by hand"
+          why: "kubeadmin created both after the project existed. With many teams requesting projects themselves, that hand work is what gets forgotten."
+        - text: "OpenShift, when the project was created"
+          why: "Nothing was configured to add them. This lesson configures exactly that."
+      answer: 1
+    - kind: teach
+      id: situation
+      title: Every new project, the same guardrails
+      body: |
+        On a shared cluster, people create their own projects with `oc new-project` or the web console. Two cluster
+        settings decide what that self-service means: **who** may request a project, and **what** a requested project
+        contains. Both are the cluster administrator's.
+
+        As in [Quotas and LimitRanges](/lesson/o2.quotas-limits), everything here was done on a lab cluster (OpenShift
+        Local 4.21) by `kubeadmin` and by `developer`, each with their own login. The prompt in front of each command names who ran it.
+    - kind: show
+      id: can-request
+      body: "First, may developer request projects?"
+      run: "oc auth can-i create projectrequests"
+      notice: |
+        `yes`. `oc new-project` does not create a Project directly: it sends a **ProjectRequest**, and the server
+        creates the project for the requester. The warning only says that the resource belongs to no project.
+    - kind: show
+      id: sp-describe
+      body: "Where the permission comes from, in the administrator's terminal:"
+      run: "oc describe clusterrolebinding.rbac self-provisioners"
+      notice: |
+        The ClusterRole `self-provisioner` is bound to the group `system:authenticated:oauth`: everyone who logged in
+        through the OAuth server. Note the annotation `rbac.authorization.kubernetes.io/autoupdate: true`; it matters
+        later.
+    - kind: ask
+      id: who-may-request
+      prompt: "With this binding, who may request a project?"
+      choices:
+        - text: "Anyone who logged in through the OAuth server"
+          why: "The subject is the group every OAuth login belongs to. Service accounts and certificate users are not in it."
+        - text: "Only users who already administer a project"
+          why: "No project role is involved: the permission is cluster-wide and comes from the group."
+        - text: "Only users named in the binding"
+          why: "The binding names a group, not individual users."
+      answer: 0
+    - kind: teach
+      id: what-a-request-makes
+      title: What a project request creates
+      body: |
+        The API server builds the project from a **template**. Unless an administrator names one, it uses a built-in
+        template that creates two objects: the Project, and a RoleBinding that makes the requester `admin` of it.
+
+        The template's name lives in the cluster's project configuration, `project.config.openshift.io/cluster`, in
+        `spec.projectRequestTemplate`. Read it before changing anything:
+    - kind: show
+      id: project-config
+      run: "oc get project.config.openshift.io/cluster -o yaml"
+      notice: "`spec: {}`: no template is named, so the built-in one is used."
+    - kind: ask
+      id: guess-before
+      guess: true
+      prompt: "developer requests a project now. Which guardrails does it get?"
+      choices:
+        - text: "None: only the project and developer's admin binding"
+          why: "The built-in template creates nothing else. The next steps show it."
+        - text: "The same quota and LimitRange as lab-shop"
+          why: "lab-shop's guardrails were created by hand, in that project only."
+        - text: "The quota of the project developer used last"
+          why: "Projects do not inherit from one another."
+      answer: 0
+    - kind: show
+      id: before-project
+      run: "oc new-project lab-before"
+      notice: "`Now using project \"lab-before\"`: developer is its administrator, and their own terminal now points at it."
+    - kind: show
+      id: before-empty
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-before"
+      notice: "`No resources found`: a requested project starts with no budget, no defaults and no network isolation."
+    - kind: teach
+      id: bootstrap
+      title: Start from the built-in template
+      body: |
+        A **Template**, as in [Templates](/lesson/n.templates), is a list of objects with `${PARAMETERS}` filled in
+        when it is processed. `oc adm create-bootstrap-project-template` prints the built-in project request template,
+        so that you change a working copy instead of writing one from nothing. It only prints: it creates nothing on
+        the cluster.
+    - kind: try
+      id: try-bootstrap
+      body: "As the administrator, print the built-in project request template as YAML."
+      accept:
+        - "oc adm create-bootstrap-project-template -o yaml"
+        - "oc adm create-bootstrap-project-template -oyaml"
+        - "oc adm create-bootstrap-project-template --output=yaml"
+        - "oc adm create-bootstrap-project-template --output yaml"
+        - "oc adm create-bootstrap-project-template -o=yaml"
+      hints:
+        - match: "^oc (adm )?create-bootstrap-project-template$|^oc adm create-bootstrap-project-template$"
+          say: "Without `-o yaml` the command prints JSON, its default format. Ask for YAML."
+        - match: "^oc (get|describe) (template|project)"
+          say: "Nothing to read on the cluster yet: the built-in template is not an object. `oc adm create-bootstrap-project-template` prints it."
+        - match: "^oc create-bootstrap"
+          say: "It is an administrator command: `oc adm create-bootstrap-project-template`."
+      hint: "`oc adm create-bootstrap-project-template`, and the output format."
+      run: "oc adm create-bootstrap-project-template -o yaml"
+      then: |
+        A Template named `project-request` with two objects, a Project and a RoleBinding named `admin`, and five
+        parameters that the server fills in for each request: `PROJECT_NAME`, `PROJECT_DISPLAYNAME`,
+        `PROJECT_DESCRIPTION`, `PROJECT_ADMIN_USER` and `PROJECT_REQUESTING_USER`. The requester's name becomes the
+        annotation `openshift.io/requester`.
+    - kind: teach
+      id: edit
+      title: Add the guardrails
+      body: |
+        The administrator saves that output as `project-request.yaml`, gives the template its own name, and appends
+        objects to its `objects` list. Each object uses `${PROJECT_NAME}` for its namespace, so it lands in the new
+        project: a ResourceQuota and a LimitRange like lab-shop's, and two NetworkPolicies.
+
+        The NetworkPolicies accept traffic from pods of the same project and from the router. A policy that allowed
+        only the same project would also cut off the router, and every Route of the new project would stop working
+        ([NetworkPolicies](/lesson/d.networkpolicy-ovn)).
+    - kind: show
+      id: template-diff
+      body: "What changed compared with the built-in template, line by line (`diff` exits with status 1 when files differ):"
+      run: "oc adm create-bootstrap-project-template -o yaml > bootstrap.yaml; diff bootstrap.yaml project-request.yaml"
+      notice: "A new name, `lab-project-request`, and four appended objects. The Project and the RoleBinding are kept: without them a request would create no project and give the requester no access."
+    - kind: show
+      id: process-local
+      body: "Before the cluster sees it, check that the template processes, on this machine only (`--local`), with example values for the parameters:"
+      run: "oc process --local -f project-request.yaml -p PROJECT_NAME=lab-check -p PROJECT_ADMIN_USER=developer -p PROJECT_REQUESTING_USER=developer -o name"
+      notice: "Six objects, in the order a project request will create them. A typo in a parameter or in the YAML would stop here."
+    - kind: ask
+      id: why-validate
+      prompt: "Why check the template before the cluster uses it?"
+      choices:
+        - text: "Once named, a broken template makes every project request fail"
+          why: "Each request instantiates the template; one invalid object stops all of them, for every user."
+        - text: "Because a template cannot be deleted after it is created"
+          why: "It can be deleted like any object, once nothing names it."
+        - text: "Because existing projects are rebuilt from it"
+          why: "Existing projects are never revisited by the template."
+      answer: 0
+    - kind: show
+      id: dry-run
+      body: "Then a server-side dry run of the Template object itself, in `openshift-config`, where the template must live:"
+      run: "oc create -f project-request.yaml -n openshift-config --dry-run=server"
+      notice: "`created (server dry run)`: valid, and nothing stored."
+    - kind: try
+      id: template-created
+      body: "As the administrator, create the template from `project-request.yaml` in the project where the cluster looks for it."
+      accept:
+        - "oc create -f project-request.yaml -n openshift-config"
+        - "oc create -f project-request.yaml --namespace=openshift-config"
+        - "oc create -f project-request.yaml --namespace openshift-config"
+        - "oc create -n openshift-config -f project-request.yaml"
+        - "oc -n openshift-config create -f project-request.yaml"
+        - "oc create --filename=project-request.yaml -n openshift-config"
+        - "oc apply -f project-request.yaml -n openshift-config"
+        - "oc apply -f project-request.yaml --namespace=openshift-config"
+        - "oc -n openshift-config apply -f project-request.yaml"
+      hints:
+        - match: "--dry-run"
+          say: "The dry run passed; this time create it for real."
+        - match: "(-n|--namespace)[ =]openshift(?!-config)"
+          say: "Templates for project requests live in `openshift-config`, not in `openshift`, where the shared application templates are."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n openshift-config` the template lands in your current project, where the project configuration will not find it."
+      hint: "`oc create -f`, the file, and `-n openshift-config`."
+      run: "oc create -f project-request.yaml -n openshift-config"
+      then: "`template.template.openshift.io/lab-project-request created`. Nothing uses it yet."
+    - kind: teach
+      id: point-to-it
+      title: Point the cluster at the template
+      body: |
+        `spec.projectRequestTemplate.name` names the template in `openshift-config`. The same `spec` holds
+        `projectRequestMessage`, the text shown to someone who may not request projects. The administrator sets both
+        in one change, so that the API server restarts once. `oc edit project.config.openshift.io/cluster` is the
+        documented way; a merge patch makes the same change in one line.
+
+        A merge patch changes only the fields it names, replaces a list whole, and removes a field set to `null`. It
+        needs `--type=merge` here: cluster configuration objects are custom resources, which do not accept the default
+        strategic merge patch.
+    - kind: show
+      id: patch-config
+      run: "oc patch project.config.openshift.io/cluster --type=merge -p '{\"spec\":{\"projectRequestTemplate\":{\"name\":\"lab-project-request\"},\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\"}}'"
+      notice: "`patched`."
+    - kind: show
+      id: config-spec
+      run: "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'"
+      notice: "The two fields are set."
+    - kind: ask
+      id: guess-when
+      guess: true
+      prompt: "The patch was accepted a second ago. When does a new project request use the template?"
+      choices:
+        - text: "At once: the server reads the setting on each request"
+          why: "The setting is read by the openshift-apiserver from its own configuration file, which an operator generates."
+        - text: "After the openshift-apiserver pods restart with the new configuration"
+          why: "The openshift-apiserver operator copies the setting into the server's configuration and rolls out its pods. The next steps show it."
+        - text: "Only after every node reboots"
+          why: "No node configuration changed. Only the API server's pods are replaced."
+      answer: 1
+    - kind: show
+      id: wait-progressing
+      run: "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s"
+      notice: "`condition met`: the operator is rolling out the change."
+    - kind: show
+      id: apiserver-pods
+      run: "oc get pods -n openshift-apiserver"
+      notice: |
+        Only the old pod is listed, `Terminating`. This one-node cluster runs a single openshift-apiserver pod, and
+        its Deployment replaces it without a surge: the old pod stops before the new one is ready. Until then, the OpenShift API groups it serves (projects,
+        templates, routes, builds) do not answer. Plan such a change for a quiet moment.
+    - kind: ask
+      id: during-rollout
+      prompt: "While the only openshift-apiserver pod is being replaced, which command fails?"
+      choices:
+        - text: "`oc get projects`"
+          why: "Projects belong to an OpenShift API group that the openshift-apiserver serves behind the main API server; with no pod ready, that group does not answer."
+        - text: "`oc get pods -n openshift-apiserver`"
+          why: "Pods are served by the Kubernetes API server itself, which keeps running."
+        - text: "`oc get clusteroperators`"
+          why: "Cluster operators are custom resources served by the Kubernetes API server, which is how `oc wait` keeps working."
+      answer: 0
+    - kind: show
+      id: wait-settled
+      run: "oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s"
+      notice: "The rollout has finished."
+    - kind: show
+      id: observed-config
+      body: "The operator's copy of the setting, which is what the server now runs with:"
+      run: "oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}{\"\\n\"}'"
+      notice: "The template is named with its project, `openshift-config/lab-project-request`, next to the message."
+    - kind: show
+      id: after-project
+      body: "developer requests a new project, exactly as before:"
+      run: "oc new-project lab-after"
+      notice: "Same command, same answer. The difference is inside."
+    - kind: try
+      id: try-after-guardrails
+      body: "As developer, list the ResourceQuotas, LimitRanges and NetworkPolicies of `lab-after` in one command."
+      accept:
+        - "oc get resourcequotas,limitranges,networkpolicies -n lab-after"
+        - "oc get quota,limits,netpol -n lab-after"
+        - "oc get quota,limitrange,networkpolicy -n lab-after"
+        - "oc get resourcequota,limitrange,networkpolicy -n lab-after"
+        - "oc get quota,limitranges,networkpolicies -n lab-after"
+        - "oc get resourcequotas,limitranges,networkpolicies --namespace=lab-after"
+        - "oc get resourcequotas,limitranges,networkpolicies --namespace lab-after"
+        - "oc -n lab-after get resourcequotas,limitranges,networkpolicies"
+        - "oc -n lab-after get quota,limits,netpol"
+        - "oc get quota,limits,netpol --namespace=lab-after"
+      hints:
+        - match: "(resourcequotas?|quota|limitranges?|limits|networkpolic(y|ies)|netpol), "
+          say: "Several kinds in one `oc get` are joined by commas, without spaces."
+        - match: "^oc get (resourcequotas?|quota|limitranges?|limits|networkpolic(y|ies)|netpol)( |$)"
+          say: "That lists one kind. Join the three kinds with commas."
+        - match: "^oc get all"
+          say: "`all` covers workloads and Services, not quotas, LimitRanges or NetworkPolicies."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Name the project with `-n lab-after`."
+      hint: "`oc get`, the three kinds separated by commas, and the project."
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-after"
+      then: "`project-quota`, `project-limits` and the two NetworkPolicies, created with the project by the request itself."
+    - kind: show
+      id: before-still-empty
+      body: "And the project developer requested before the change?"
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-before"
+      notice: "Still nothing. The template is used when a project is requested; it never revisits existing projects."
+    - kind: ask
+      id: template-boundary
+      prompt: A project existed before the new request template. What adds the new guardrails there?
+      choices:
+        - text: Wait for the template controller to reconcile it
+          why: The project request template is not a controller that continuously updates every project.
+        - text: Restart its pods to recreate the namespace
+          why: Pod replacement neither recreates the namespace nor instantiates the project template.
+        - text: Apply the reviewed guardrail objects to that project
+          why: The template is a provisioning mechanism for future requests; an existing project needs a separate
+            update.
+      answer: 2
+    - kind: show
+      id: dev-keeps-quota
+      body: "developer is the administrator of lab-after. Can they remove its budget?"
+      run: "oc delete quota project-quota -n lab-after"
+      notice: "Forbidden, as in lab-shop: the template's quota binds developer like a hand-made one."
+    - kind: show
+      id: dev-netpol
+      run: "oc auth can-i delete networkpolicies -n lab-after"
+      notice: "`yes`: the project's `admin` role may create and delete NetworkPolicies."
+    - kind: ask
+      id: what-binds
+      prompt: "What does that mean for the NetworkPolicies the template adds?"
+      choices:
+        - text: "They are a starting point the project's admin may change"
+          why: "The template creates objects; RBAC decides who may change them later. Quotas and LimitRanges are out of the admin role's reach, NetworkPolicies are not."
+        - text: "The template recreates them if someone deletes them"
+          why: "The template is used once, at the request. Nothing watches the objects afterwards."
+        - text: "Nobody can delete them, because the template created them"
+          why: "Who created an object does not protect it. The roles bound in the project decide."
+      answer: 0
+      explain: "The template creates objects once; RBAC decides who may change them later. A network rule that must hold whatever the project's admin does belongs in an AdminNetworkPolicy, which only cluster administrators manage and which OVN-Kubernetes evaluates first ([NetworkPolicies and OVN-Kubernetes](/lesson/d.networkpolicy-ovn))."
+    - kind: show
+      id: raw-namespace
+      body: "The template belongs to project requests. A namespace created directly does not go through it:"
+      run: "oc create namespace lab-raw"
+      notice: "`namespace/lab-raw created`, by the administrator."
+    - kind: show
+      id: raw-empty
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-raw"
+      notice: "`No resources found`: no template objects in a namespace that was never requested as a project."
+    - kind: show
+      id: raw-delete
+      run: "oc delete namespace lab-raw"
+      notice: "Removed."
+    - kind: teach
+      id: self-provisioning
+      title: Who may request projects
+      body: |
+        Some organisations want projects created only through a request process. The administrator then takes the
+        `self-provisioner` role away from `system:authenticated:oauth`. The `autoupdate: true` annotation seen earlier
+        lets the API server restore the binding's default subjects when it starts, so the documented procedure also
+        sets it to `false`. The administrator sets it first, so that a restart in between cannot bring the subject
+        back.
+
+        The documentation empties the subjects with a patch. `oc adm policy remove-cluster-role-from-group` also
+        exists, but when it removes a binding's last subject it deletes the whole binding, unless the binding's
+        `autoupdate` annotation is already `false`; a deleted binding leaves nothing to annotate. In oc 4.21 the
+        `oc adm policy` commands honour only `--dry-run=client`: with `--dry-run=server` they make the change. Treat
+        such helpers as real changes.
+    - kind: try
+      id: sp-annotate-off
+      body: "As the administrator, set the annotation `rbac.authorization.kubernetes.io/autoupdate` of the ClusterRoleBinding `self-provisioners` to `false`. It already has a value."
+      accept:
+        - "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite"
+        - "oc annotate clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite"
+        - "oc annotate clusterrolebinding/self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite"
+        - "oc annotate clusterrolebinding.rbac/self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite"
+        - "oc annotate --overwrite clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=false"
+        - "oc annotate --overwrite clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate=false"
+        - "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate='false' --overwrite"
+        - "oc annotate clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate='false' --overwrite"
+        - "oc annotate clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate=\"false\" --overwrite"
+      hints:
+        - match: "^(?!.*--overwrite).*$"
+          say: "The annotation already exists with the value `true`. Without `--overwrite`, `oc annotate` refuses to change it."
+        - match: "^oc label"
+          say: "It is an annotation, not a label: `oc annotate`."
+        - match: "autoupdate[ :]"
+          say: "The annotation is written `key=value`, with no space: `rbac.authorization.kubernetes.io/autoupdate=false`."
+        - match: "(^| )(-n|--namespace)( |=)"
+          say: "A ClusterRoleBinding belongs to no project. Leave out `-n`."
+      hint: "`oc annotate`, the kind and name, `key=value`, and `--overwrite`."
+      run: "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite"
+      then: "`annotated`. The API server will now leave the binding's subjects as the administrator sets them, even after a restart."
+    - kind: show
+      id: sp-remove
+      run: "oc patch clusterrolebinding.rbac self-provisioners -p '{\"subjects\":null}'"
+      notice: "`patched`: the binding still exists, with no subjects."
+    - kind: show
+      id: sp-off-describe
+      run: "oc describe clusterrolebinding.rbac self-provisioners"
+      notice: "No subjects, and `autoupdate: false`."
+    - kind: ask
+      id: guess-denied
+      guess: true
+      prompt: "developer runs `oc new-project lab-denied` now. What happens?"
+      choices:
+        - text: "The request is refused, with the administrator's message"
+          why: "Without `create projectrequests`, the request stops at authorisation, and the configured message is returned. The next steps show it."
+        - text: "The project is created, but developer is not its admin"
+          why: "No project is created at all: the request itself is refused."
+        - text: "It works: developer already administers several projects"
+          why: "Administering existing projects grants nothing about requesting new ones."
+      answer: 0
+    - kind: show
+      id: cannot-request
+      run: "oc auth can-i create projectrequests"
+      notice: "`no`."
+    - kind: show
+      id: denied
+      run: "oc new-project lab-denied"
+      notice: "`Forbidden`, and the text is the administrator's `projectRequestMessage`, in place of the default `You may not request a new project via this API.` No project was created."
+    - kind: show
+      id: admin-provisions
+      body: "Projects now come from the administrator, who creates one for the team and names its administrator:"
+      run: "oc adm new-project lab-team --admin=developer"
+      notice: "`Created project lab-team`."
+    - kind: show
+      id: team-guardrails
+      body: "Does a project the administrator creates this way get the template's objects?"
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-team"
+      notice: |
+        `No resources found`. `oc adm new-project` creates the project directly, without the request template, even
+        while one is configured. A project made this way needs its guardrails applied separately.
+    - kind: order
+      id: order-template
+      prompt: "Put the administrator's procedure for a project request template in order."
+      items:
+        - "Print the built-in template with `oc adm create-bootstrap-project-template -o yaml`"
+        - "Rename it and append the guardrail objects"
+        - "Check it with `oc process --local` and a server dry run"
+        - "Create it in `openshift-config`"
+        - "Name it in `spec.projectRequestTemplate` of `project.config.openshift.io/cluster`"
+        - "Wait for the openshift-apiserver rollout to finish"
+        - "Request a test project and list its objects"
+      why: "The template must exist before the configuration names it, or every project request fails. Testing before the rollout ends tests the old configuration."
+    - kind: teach
+      id: restore
+      title: Putting both settings back
+      body: |
+        The lab cluster must end as it started. Self-provisioning comes back first: the group is added to the same
+        binding (`--rolebinding-name` names it, instead of letting `oc` create a new one), and the annotation returns to
+        `true`. Then the template is unnamed, and deleted only after the rollout, because a configuration that names a
+        missing template breaks every project request.
+    - kind: show
+      id: sp-add
+      run: "oc adm policy add-cluster-role-to-group self-provisioner system:authenticated:oauth --rolebinding-name=self-provisioners"
+      notice: "`self-provisioner added`. The warning is expected: `system:authenticated:oauth` is a virtual group that every OAuth login belongs to, never stored as a Group object."
+    - kind: show
+      id: sp-annotate-on
+      run: "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=true --overwrite"
+      notice: "`annotated`."
+    - kind: show
+      id: sp-back-describe
+      run: "oc describe clusterrolebinding.rbac self-provisioners"
+      notice: "The same subject and annotation as at the start of the lesson."
+    - kind: try
+      id: can-again
+      body: "As developer, check whether you may request projects again."
+      accept:
+        - "oc auth can-i create projectrequests"
+        - "oc auth can-i create projectrequest"
+        - "oc auth can-i create projectrequests.project.openshift.io"
+      hints:
+        - match: "create projects?( |$)"
+          say: "`oc new-project` creates a ProjectRequest, not a Project: ask about `projectrequests`. Even a self-provisioner gets `no` for `projects`."
+        - match: "(^| )(-n|--namespace)( |=)"
+          say: "A project request belongs to no project. Leave out `-n`."
+        - match: "--as"
+          say: "The check is for your own identity: no impersonation."
+      hint: "`oc auth can-i`, the verb `create` and the resource `projectrequests`."
+      run: "oc auth can-i create projectrequests"
+      then: "`yes`: developer may request projects again."
+    - kind: ask
+      id: merge-or-json
+      prompt: "The spec was `{}` at the start. Does a merge patch sending `{\"spec\":{}}` remove the two fields?"
+      choices:
+        - text: "No: a merge patch only changes the fields it names"
+          why: "An empty object names no field, so nothing changes. A JSON patch `remove`, or a merge patch setting each field to `null`, removes them."
+        - text: "Yes: the spec is replaced by the empty object"
+          why: "That is what a JSON patch `replace` of `/spec` does. A merge patch merges."
+        - text: "Yes, but only after the next rollout"
+          why: "The patch changes the stored object at once, or not at all; the rollout comes after."
+      answer: 0
+    - kind: show
+      id: unpatch-config
+      body: "A JSON patch removes the two fields, which a merge patch cannot do by sending `{}`:"
+      run: "oc patch project.config.openshift.io/cluster --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/projectRequestTemplate\"},{\"op\":\"remove\",\"path\":\"/spec/projectRequestMessage\"}]'"
+      notice: "`patched`."
+    - kind: show
+      id: wait-rollback
+      run: "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s && oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s"
+      notice: "A second rollout started and finished."
+    - kind: show
+      id: template-deleted
+      run: "oc delete template lab-project-request -n openshift-config"
+      notice: "Deleted, now that nothing names it."
+    - kind: show
+      id: config-spec-restored
+      run: "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'"
+      notice: "`{}`, as at the start."
+    - kind: ask
+      id: guess-again
+      guess: true
+      prompt: "developer requests one more project now. What will it contain?"
+      choices:
+        - text: "Only the project and developer's admin binding"
+          why: "The built-in template is back in use. The next steps show it."
+        - text: "The template's objects: the Template object was deleted but its objects are cached"
+          why: "Nothing is cached: each request uses the template the server is configured with."
+        - text: "Nothing: requests fail without a template"
+          why: "With no template named, the built-in one is used."
+      answer: 0
+    - kind: show
+      id: again-project
+      run: "oc new-project lab-again"
+      notice: "A project request works again."
+    - kind: show
+      id: again-empty
+      run: "oc get resourcequotas,limitranges,networkpolicies -n lab-again"
+      notice: "`No resources found`: the built-in template is back."
+    - kind: show
+      id: cleanup
+      body: "developer deletes the projects they administer:"
+      run: "oc delete project lab-before lab-after lab-team lab-again"
+      notice: "Four projects deleted. A project's administrator may delete it."
+    - kind: reflect
+      id: explain-template-risk
+      prompt: "A colleague wants to edit the production project request template directly on a Friday afternoon. What would you check, and in what order?"
+      model: |
+        A broken template makes every project request fail, and the change restarts the openshift-apiserver. I would
+        start from the current template (or the bootstrap one), keep the Project and RoleBinding, validate the edited
+        file with oc process --local and a server dry run, create it under a new name in openshift-config, point
+        spec.projectRequestTemplate at it at a quiet time, wait until openshift-apiserver is Progressing=False, request
+        a test project and list its objects, and keep the previous spec so I can restore it at once. Existing projects
+        would need a separate, reviewed change.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can give every requested project a quota, defaults and NetworkPolicies through a project request template,
+        prove which projects receive them and which do not, decide who may request projects, set the message they
+        see, and restore both settings safely.
+
+        A quota per project still lets one person spread over many projects. Next,
+        [Quotas across projects](/lesson/n.cluster-quotas) caps everything one requester uses, whatever the project.
+  sections:
+    - id: template-reference
+      title: Project request template reference
+      depth: true
+      body: |
+        | Item | Value |
+        |---|---|
+        | where the template lives | namespace `openshift-config` |
+        | what names it | `project.config.openshift.io/cluster`, `spec.projectRequestTemplate.name` |
+        | message for users who may not request | `spec.projectRequestMessage` |
+        | parameters filled in per request | `PROJECT_NAME`, `PROJECT_DISPLAYNAME`, `PROJECT_DESCRIPTION`, `PROJECT_ADMIN_USER`, `PROJECT_REQUESTING_USER` |
+        | used by | project requests: `oc new-project`, the web console |
+        | not used by | existing projects; namespaces created directly (`oc create namespace`, manifests); `oc adm new-project` |
+        | applied by | the openshift-apiserver, after its operator rolls out the new configuration |
+
+        Keep the Project and the `admin` RoleBinding of the bootstrap template. Without the RoleBinding, requesters
+        get a project they cannot use.
+    - id: when-requests-fail
+      title: When project requests fail after a template change
+      depth: true
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | every `oc new-project` fails | the error of the request; `oc get template -n openshift-config` | the named template is missing, or one of its objects is invalid | restore the previous `spec` of `project.config.openshift.io/cluster`, then fix the template |
+        | new projects lack the objects | `oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}'` | the rollout has not finished, or the template is named in the wrong namespace | wait for `openshift-apiserver` Progressing=False; the template must be in `openshift-config` |
+        | Routes of new projects stop answering | the template's NetworkPolicies | only same-namespace traffic is allowed | allow the ingress namespaces as well |
+        | self-provisioning came back on its own | `autoupdate` annotation of `self-provisioners` | it was still `true` when the API server restarted | set it to `false` |
+  review:
+    - q: How do you give every new project a quota automatically?
+      a: Add it to a custom project request template in openshift-config, named in spec.projectRequestTemplate of project.config.openshift.io/cluster, then wait for the openshift-apiserver rollout.
+    - q: Which projects does a project request template affect?
+      a: Only projects requested after the change (oc new-project, web console). Existing projects and namespaces created directly are untouched.
+    - q: Which permission lets a user run oc new-project?
+      a: create projectrequests, granted by default to system:authenticated:oauth through the self-provisioners ClusterRoleBinding.
+    - q: Why set rbac.authorization.kubernetes.io/autoupdate to false on self-provisioners?
+      a: Otherwise the API server restores the default subjects when it restarts, and self-provisioning comes back.
+    - q: Does `oc adm new-project` apply the project request template?
+      a: No. It creates the project directly; only project requests (oc new-project, the web console) use the template.
+    - q: Where do you set the text shown to a user who may not request projects?
+      a: spec.projectRequestMessage of project.config.openshift.io/cluster.
+  labs: []
+  limits: |
+    OpenShift Local runs one openshift-apiserver pod, so each change of the project configuration makes the OpenShift
+    API groups unavailable for a short while; a highly available cluster runs several. Self-provisioning was switched
+    off for a few seconds only, inside the recording, and restored with the original subject and annotation.
+  enterprise: |
+    Organisations keep the project request template in Git with the rest of the cluster configuration, and add
+    to it what every team must have: quotas sized per tier, default NetworkPolicies, and RoleBindings for the platform
+    team's tooling. Where projects are created through a ticket or a portal, self-provisioning is off and the request
+    message links to that process.
+  references:
+    - title: 'OpenShift 4.21: Configuring project creation (template, self-provisioning, request message)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects#configuring-project-creation
+    - title: 'OpenShift 4.21: Using templates'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/creating-applications#using-templates
+    - title: 'OpenShift 4.21: Using RBAC to define and apply permissions (default cluster roles, autoupdate)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac
+    - title: 'OpenShift 4.21: Adding network policies to the new project template'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/network_security/index#nw-networkpolicy-project-defaults_default-network-policy
+    - title: 'Kubernetes: Using RBAC authorization (auto-reconciliation)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#auto-reconciliation
+  files:
+    project-request.yaml: |
+      apiVersion: template.openshift.io/v1
+      kind: Template
+      metadata:
+        name: lab-project-request
+      objects:
+      - apiVersion: project.openshift.io/v1
+        kind: Project
+        metadata:
+          annotations:
+            openshift.io/description: ${PROJECT_DESCRIPTION}
+            openshift.io/display-name: ${PROJECT_DISPLAYNAME}
+            openshift.io/requester: ${PROJECT_REQUESTING_USER}
+          name: ${PROJECT_NAME}
+        spec: {}
+        status: {}
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          name: admin
+          namespace: ${PROJECT_NAME}
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: admin
+        subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: User
+          name: ${PROJECT_ADMIN_USER}
+      - apiVersion: v1
+        kind: ResourceQuota
+        metadata:
+          name: project-quota
+          namespace: ${PROJECT_NAME}
+        spec:
+          hard:
+            pods: "10"
+            requests.cpu: "1"
+            requests.memory: 1Gi
+            limits.memory: 2Gi
+      - apiVersion: v1
+        kind: LimitRange
+        metadata:
+          name: project-limits
+          namespace: ${PROJECT_NAME}
+        spec:
+          limits:
+          - type: Container
+            default:
+              memory: 256Mi
+            defaultRequest:
+              cpu: 50m
+              memory: 64Mi
+            max:
+              memory: 1Gi
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-from-same-namespace
+          namespace: ${PROJECT_NAME}
+        spec:
+          podSelector: {}
+          ingress:
+          - from:
+            - podSelector: {}
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-from-openshift-ingress
+          namespace: ${PROJECT_NAME}
+        spec:
+          podSelector: {}
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  policy-group.network.openshift.io/ingress: ""
+      parameters:
+      - name: PROJECT_NAME
+      - name: PROJECT_DISPLAYNAME
+      - name: PROJECT_DESCRIPTION
+      - name: PROJECT_ADMIN_USER
+      - name: PROJECT_REQUESTING_USER
+  commands:
+    - {cmd: "oc auth can-i create projectrequests", as: developer, meaning: "yes: developer may request projects"}
+    - {cmd: "oc describe clusterrolebinding.rbac self-provisioners", as: admin, meaning: "the binding that grants project requests to every OAuth user"}
+    - {cmd: "oc get project.config.openshift.io/cluster -o yaml", as: admin, meaning: "the cluster's project configuration: no template named"}
+    - {cmd: "oc new-project lab-before", as: developer, meaning: "a project requested before the change"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-before", as: developer, meaning: "no guardrails"}
+    - {cmd: "oc adm create-bootstrap-project-template -o yaml", as: admin, meaning: "the built-in template, printed; nothing is created"}
+    - {cmd: "oc adm create-bootstrap-project-template -o yaml > bootstrap.yaml; diff bootstrap.yaml project-request.yaml", as: admin, expect: any, meaning: "what the edited template adds (diff exits 1 when files differ)"}
+    - {cmd: "oc process --local -f project-request.yaml -p PROJECT_NAME=lab-check -p PROJECT_ADMIN_USER=developer -p PROJECT_REQUESTING_USER=developer -o name", as: admin, meaning: "process the template on this machine only: the objects a request would create"}
+    - {cmd: "oc create -f project-request.yaml -n openshift-config --dry-run=server", as: admin, meaning: "server-side validation of the Template, nothing stored"}
+    - {cmd: "oc create -f project-request.yaml -n openshift-config", as: admin, meaning: "the template, in openshift-config"}
+    - {cmd: "oc patch project.config.openshift.io/cluster --type=merge -p '{\"spec\":{\"projectRequestTemplate\":{\"name\":\"lab-project-request\"},\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\"}}'", as: admin, meaning: "name the template and set the request message"}
+    - {cmd: "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'", as: admin, meaning: "the new spec"}
+    - {cmd: "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s", as: admin, meaning: "the operator starts rolling out the change"}
+    - {cmd: "oc get pods -n openshift-apiserver", as: admin, meaning: "the openshift-apiserver pod being replaced"}
+    - {cmd: "oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s", as: admin, timeout: 630, meaning: "the rollout has finished"}
+    - {cmd: "oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}{\"\\n\"}'", as: admin, meaning: "the configuration the server now runs with"}
+    - {cmd: "oc new-project lab-after", as: developer, meaning: "a project requested after the change"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-after", as: developer, meaning: "the template's objects"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-before", as: developer, meaning: "the older project is unchanged"}
+    - {cmd: "oc delete quota project-quota -n lab-after", as: developer, expect: fail, meaning: "Forbidden: the project's admin cannot remove the budget"}
+    - {cmd: "oc auth can-i delete networkpolicies -n lab-after", as: developer, meaning: "yes: NetworkPolicies are the project admin's to change"}
+    - {cmd: "oc create namespace lab-raw", as: admin, meaning: "a namespace created directly, not requested"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-raw", as: admin, meaning: "no template objects"}
+    - {cmd: "oc delete namespace lab-raw", as: admin, meaning: "removed"}
+    - {cmd: "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite", as: admin, meaning: "stop the API server from restoring the default subjects"}
+    - {cmd: "oc patch clusterrolebinding.rbac self-provisioners -p '{\"subjects\":null}'", as: admin, meaning: "remove every subject: nobody may self-provision"}
+    - {cmd: "oc describe clusterrolebinding.rbac self-provisioners", as: admin, meaning: "no subjects, autoupdate false"}
+    - {cmd: "oc auth can-i create projectrequests", as: developer, expect: fail, meaning: "no"}
+    - {cmd: "oc new-project lab-denied", as: developer, expect: fail, meaning: "refused, with the request message"}
+    - {cmd: "oc adm new-project lab-team --admin=developer", as: admin, meaning: "the administrator creates the team's project"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-team", as: developer, meaning: "what an administrator-created project contains"}
+    - {cmd: "oc adm policy add-cluster-role-to-group self-provisioner system:authenticated:oauth --rolebinding-name=self-provisioners", as: admin, meaning: "the group back in the same binding"}
+    - {cmd: "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=true --overwrite", as: admin, meaning: "the annotation back to true"}
+    - {cmd: "oc describe clusterrolebinding.rbac self-provisioners", as: admin, meaning: "as at the start"}
+    - {cmd: "oc auth can-i create projectrequests", as: developer, meaning: "yes again"}
+    - {cmd: "oc patch project.config.openshift.io/cluster --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/projectRequestTemplate\"},{\"op\":\"remove\",\"path\":\"/spec/projectRequestMessage\"}]'", as: admin, meaning: "unname the template and remove the message"}
+    - {cmd: "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s && oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s", as: admin, timeout: 800, meaning: "the second rollout"}
+    - {cmd: "oc delete template lab-project-request -n openshift-config", as: admin, meaning: "delete the template once nothing names it"}
+    - {cmd: "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'", as: admin, meaning: "{} again"}
+    - {cmd: "oc new-project lab-again", as: developer, meaning: "a project request works again"}
+    - {cmd: "oc get resourcequotas,limitranges,networkpolicies -n lab-again", as: developer, meaning: "the built-in template is back"}
+    - {cmd: "oc delete project lab-before lab-after lab-team lab-again", as: developer, meaning: "developer deletes the projects they administer"}
+  experiment:
+    id: X-SELF-03
+    objective: "Configure a project request template with a ResourceQuota, a LimitRange and two NetworkPolicies, show that only projects requested afterwards receive them, switch self-provisioning off (with a request message) and on again, then restore the project configuration, the self-provisioners binding and the template list exactly. Includes the self-provisioning change planned as X-SELF-04."
+    changes:
+      - "project.config.openshift.io/cluster: spec.projectRequestTemplate and spec.projectRequestMessage set, then removed"
+      - "openshift-apiserver pod in openshift-apiserver (rolled out twice by its operator)"
+      - "ClusterRoleBinding self-provisioners: autoupdate annotation false and subjects removed, then restored"
+      - "Template openshift-config/lab-project-request (created, deleted)"
+      - "Projects lab-before, lab-after, lab-team, lab-again and namespace lab-raw (created, deleted)"
+    preflight:
+      - cmd: |-
+          found=$(oc get template lab-project-request -n openshift-config --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get clusterrolebinding self-provisioner --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get namespace lab-before lab-after lab-team lab-again lab-raw lab-denied --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          test "$(oc get project.config.openshift.io cluster -o jsonpath='{.spec}')" = '{}'
+      - cmd: |-
+          test "$(oc get clusterrolebinding self-provisioners -o jsonpath='{.subjects[*].name} {.metadata.annotations.rbac\.authorization\.kubernetes\.io/autoupdate}')" = 'system:authenticated:oauth true'
+      - {cmd: "oc wait co/openshift-apiserver --for=condition=Available=True --timeout=30s && oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=30s && oc wait co/openshift-apiserver --for=condition=Degraded=False --timeout=30s"}
+    snapshot:
+      - "oc get project.config.openshift.io cluster -o jsonpath='{.spec}'"
+      - "oc get clusterrolebinding self-provisioners -o jsonpath='{.subjects}'"
+      - "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'"
+      - "oc get clusterrolebindings -o jsonpath='{range .items[?(@.roleRef.name==\"self-provisioner\")]}{.metadata.name}{\"\\n\"}{end}'"
+      - "oc get templates -n openshift-config -o name"
+      - "oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}'"
+      - "oc get namespace lab-before lab-after lab-team lab-again lab-raw lab-denied -o name --ignore-not-found"
+    rollback:
+      - 'oc patch project.config.openshift.io cluster --type=json -p "[{\"op\":\"replace\",\"path\":\"/spec\",\"value\":$(cat "$SNAPSHOT_DIR/0")}]"'
+      - "oc get clusterrolebinding self-provisioners >/dev/null 2>&1 || oc create clusterrolebinding self-provisioners --clusterrole=self-provisioner --group=system:authenticated:oauth"
+      - 'oc patch clusterrolebinding self-provisioners --type=json -p "[{\"op\":\"add\",\"path\":\"/subjects\",\"value\":$(cat "$SNAPSHOT_DIR/1")}]"'
+      - "oc annotate clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate=true --overwrite"
+      - "oc delete clusterrolebinding self-provisioner --ignore-not-found"
+      - "oc delete project lab-before lab-after lab-team lab-again lab-denied --ignore-not-found --wait=false"
+      - "oc delete namespace lab-raw --ignore-not-found --wait=false"
+      - "oc delete template lab-project-request -n openshift-config --ignore-not-found"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          found=$(oc get namespace lab-before lab-after lab-team lab-again lab-raw lab-denied --ignore-not-found -o name) && test -z "$found" && exit 0
+          sleep 5
+        done
+        exit 1
+      - "sleep 60; oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=900s"
+    verify:
+      - {cmd: "oc wait co/openshift-apiserver --for=condition=Available=True --timeout=120s && oc wait co/openshift-apiserver --for=condition=Degraded=False --timeout=60s"}
+      - {cmd: "oc auth can-i create projectrequests --as=developer --as-group=system:authenticated --as-group=system:authenticated:oauth"}
+
+- id: n.cluster-quotas
+  title: Quotas across projects
+  subtitle: "One budget for everything a user requests: ClusterResourceQuota"
+  module: b5-governance
+  mode: REAL_LAB
+  minutes: 25
+  level: 2
+  supports: "OpenShift 4.21 ClusterResourceQuota and AppliedClusterResourceQuota (quota.openshift.io/v1). Every command was run on OpenShift Local 4.21 by the cluster administrator (kubeadmin) and by the ordinary user developer; the cluster quota and the projects were removed afterwards (experiment X-SELF-02)."
+  concepts:
+    - k8s.quota
+    - ocp.projects
+  prerequisites:
+    - o2.quotas-limits
+    - n.project-templates
+  record_on: cluster-admin
+  objective: |
+    Cap what one user's projects use together with a ClusterResourceQuota that selects projects by their requester,
+    read it from the user's side, watch one shared budget refuse a pod in a project that has no quota of its own, and
+    remove it.
+  flow:
+    - kind: ask
+      id: recall-requester
+      recalls: n.project-templates
+      prompt: "Which part of a requested project records who asked for it?"
+      choices:
+        - text: "The annotation `openshift.io/requester`"
+          why: "The project request template sets it from `PROJECT_REQUESTING_USER`. This lesson selects projects by it."
+        - text: "The project's name"
+          why: "Anyone may choose any free name; nothing ties a name to a person."
+        - text: "The label `kubernetes.io/metadata.name`"
+          why: "That label holds the namespace's own name, not who requested it."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: Ten projects, ten budgets
+      body: |
+        A project request template can give each new project a quota of ten pods. A user who may request projects can
+        then create five projects and run fifty pods. A **ClusterResourceQuota** caps the sum over every project it
+        selects, by label or by annotation. Selected by `openshift.io/requester`, it becomes one budget per person.
+
+        As before, the administrator `kubeadmin` and the ordinary user `developer` ran everything on a lab cluster,
+        each with their own login. On a shared cluster, a new cluster quota applies at once to every project it
+        selects, old and new: running pods stay, but the next pods over the budget are refused. Read its Used column
+        before you announce it.
+    - kind: show
+      id: dev-project
+      run: "oc new-project lab-dev"
+      notice: "developer requests a first project."
+    - kind: show
+      id: test-project
+      run: "oc new-project lab-test"
+      notice: "And a second."
+    - kind: ask
+      id: what-limits-now
+      prompt: "Both projects were requested with the built-in template. What limits the pods developer runs in them now?"
+      choices:
+        - text: "Nothing but the node's capacity"
+          why: "No quota or LimitRange exists in them. Each is limited only by what the scheduler can place."
+        - text: "lab-shop's quota, since developer administered it"
+          why: "A ResourceQuota counts the pods of its own project only."
+        - text: "A default quota of ten pods per project"
+          why: "There is no such default; a project gets a quota only from a template or an administrator."
+      answer: 0
+    - kind: show
+      id: requester
+      body: "In the administrator's terminal, the annotation on both:"
+      run: "oc get project lab-dev lab-test -o custom-columns='NAME:.metadata.name,REQUESTER:.metadata.annotations.openshift\\.io/requester'"
+      notice: "`developer` for both. The dot inside the annotation's name is escaped with `\\` in the column's path."
+    - kind: teach
+      id: create-crq
+      title: One budget for one requester
+      body: |
+        `oc create clusterresourcequota` (or its alias `clusterquota`) takes the selector and the ceilings.
+        `--project-annotation-selector` picks every project whose annotation has the given value, now and in the
+        future; `--project-label-selector` does the same with a label. `--hard` sets the ceilings, as for a project
+        quota. This one allows developer four pods in total.
+    - kind: try
+      id: try-crq
+      body: "As the administrator, create a ClusterResourceQuota named `alice-budget` that limits all projects requested by `alice` to 10 pods in total."
+      accept:
+        - "oc create clusterresourcequota alice-budget --project-annotation-selector=openshift.io/requester=alice --hard=pods=10"
+        - "oc create clusterresourcequota alice-budget --project-annotation-selector openshift.io/requester=alice --hard pods=10"
+        - "oc create clusterresourcequota alice-budget --project-annotation-selector=openshift.io/requester=alice --hard pods=10"
+        - "oc create clusterresourcequota alice-budget --project-annotation-selector openshift.io/requester=alice --hard=pods=10"
+        - "oc create clusterresourcequota alice-budget --hard=pods=10 --project-annotation-selector=openshift.io/requester=alice"
+        - "oc create clusterresourcequota alice-budget --hard pods=10 --project-annotation-selector openshift.io/requester=alice"
+        - "oc create clusterquota alice-budget --project-annotation-selector=openshift.io/requester=alice --hard=pods=10"
+        - "oc create clusterquota alice-budget --project-annotation-selector openshift.io/requester=alice --hard pods=10"
+        - "oc create clusterquota alice-budget --hard=pods=10 --project-annotation-selector=openshift.io/requester=alice"
+        - "oc create clusterquota alice-budget --hard pods=10 --project-annotation-selector openshift.io/requester=alice"
+      hints:
+        - match: "^oc create (quota|resourcequota) "
+          say: "`oc create quota` makes a quota for one project. Several projects need a `clusterresourcequota`."
+        - match: "--project-label-selector"
+          say: "The requester is recorded in an annotation, not a label: `--project-annotation-selector`."
+        - match: "requester=alice-budget|openshift\\.io/requester alice"
+          say: "The selector is `key=value`: `openshift.io/requester=alice`."
+        - match: "(^| )-n( |$)|--namespace"
+          say: "A ClusterResourceQuota belongs to no project: it selects projects. Leave out `-n`."
+      hint: "`oc create clusterresourcequota`, the name, `--project-annotation-selector=openshift.io/requester=alice` and `--hard=pods=10`."
+      then: "The quota would count the pods of every project requested by alice, including projects she requests later."
+    - kind: show
+      id: crq-created
+      run: "oc create clusterresourcequota lab-developer --project-annotation-selector=openshift.io/requester=developer --hard=pods=4"
+      notice: "`clusterresourcequota.quota.openshift.io/lab-developer created`."
+    - kind: show
+      id: crq-wait
+      body: "As for a project quota, a controller fills in the status; wait for it:"
+      run: "oc wait clusterresourcequota/lab-developer --for=jsonpath='{.status.total.hard.pods}'=4 --timeout=60s"
+      notice: "`condition met`."
+    - kind: show
+      id: crq-describe
+      run: "oc describe clusterresourcequota lab-developer"
+      notice: |
+        `Namespace Selector` lists the projects it selects: lab-dev and lab-test, and also `academy-lesson-n-cluster-quotas`
+        and `academy-ledger-probe`, two projects the course's own tooling had requested as developer. The selector is the
+        annotation `openshift.io/requester: developer`; `pods` is 0 of 4.
+    - kind: teach
+      id: selection-size
+      title: How many projects one quota should select
+      body: |
+        The status of a cluster quota lists every project it selects, and each admission in any of them claims part of
+        one shared total. Claiming it takes a lock, so the 4.21 documentation advises selecting 100 active projects or
+        fewer per ClusterResourceQuota: more can severely slow the API server's answers for those projects. Larger
+        groups get several quotas, for example one per team label.
+    - kind: ask
+      id: why-more-projects
+      prompt: "The quota selects projects developer created before this lesson too. Why?"
+      choices:
+        - text: "The selector matches the annotation, whenever the project was created"
+          why: "A ClusterResourceQuota selects every project that carries the annotation, old or new. The budget is per person, not per lesson."
+        - text: "The quota copies itself into each project developer opens"
+          why: "Nothing is copied: one cluster object counts usage across the selected projects."
+        - text: "Because developer is a cluster administrator"
+          why: "developer is an ordinary user; the selection depends on the projects' annotation only."
+      answer: 0
+    - kind: teach
+      id: who-is-selected
+      title: Which projects a requester budget sees
+      body: |
+        Only a project request writes `openshift.io/requester`. A project the administrator creates with
+        `oc adm new-project`, and a namespace created directly, carry no requester, so a per-person budget never
+        selects them; the platform team selects those with a label it sets, through `--project-label-selector`.
+
+        The project's users cannot take themselves out of the budget either: through the Project API they may change
+        only the display name and the description, and their `admin` role may not update the namespace itself.
+    - kind: show
+      id: dev-cannot-read
+      body: "The quota is a cluster-scoped object. Can developer read it?"
+      run: "oc get clusterresourcequota lab-developer"
+      notice: "Forbidden: ClusterResourceQuotas belong to the cluster administrator."
+    - kind: show
+      id: applied
+      body: "developer sees it through **AppliedClusterResourceQuota**, a read-only view in each selected project:"
+      run: "oc describe appliedclusterresourcequota -n lab-dev"
+      notice: "The same quota, seen from lab-dev: the selected projects, and Used against Hard for the whole selection."
+    - kind: ask
+      id: guess-second-project
+      guess: true
+      prompt: "developer runs three pods in lab-dev, then asks for two in lab-test, which has no quota of its own. What happens in lab-test?"
+      choices:
+        - text: "One pod is admitted, the other refused"
+          why: "Three plus one reach the four-pod budget; the fifth pod is refused at admission. The next steps show it."
+        - text: "Both pods run: lab-test has no quota"
+          why: "Every applicable quota must be satisfied, and the cluster quota applies to lab-test."
+        - text: "Both are refused until lab-dev is empty"
+          why: "The budget is shared, not reserved: lab-test may use what is left."
+      answer: 0
+    - kind: show
+      id: dev-deploy
+      run: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=3 -n lab-dev -- sleep infinity"
+      notice: "Three pods asked for in lab-dev."
+    - kind: show
+      id: dev-rollout
+      run: "oc rollout status deploy/web -n lab-dev --timeout=180s"
+      notice: "All three run."
+    - kind: show
+      id: test-deploy
+      run: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -n lab-test -- sleep infinity"
+      notice: "Two pods asked for in lab-test."
+    - kind: show
+      id: test-failure
+      run: "oc wait deploy/web -n lab-test --for=condition=ReplicaFailure --timeout=120s"
+      notice: "A pod creation in lab-test was refused."
+    - kind: ask
+      id: where-refusal
+      prompt: "lab-test has no pod for the refused replica. Where can developer read why?"
+      choices:
+        - text: "The Deployment's ReplicaFailure condition, or FailedCreate events"
+          why: "The refusal happens at admission, on the ReplicaSet's create request, and is reported there."
+        - text: "The logs of the missing pod"
+          why: "A refused pod never existed, so it has no logs."
+        - text: "The ClusterResourceQuota object"
+          why: "developer may not read it. Its project view, AppliedClusterResourceQuota, shows the totals but not the refusal."
+      answer: 0
+    - kind: show
+      id: test-message
+      run: "oc get deploy web -n lab-test -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'"
+      notice: |
+        `exceeded quota: lab-developer, requested: pods=1, used: pods=4, limited: pods=4`: the cluster quota's name, in a
+        project that has no quota of its own.
+    - kind: try
+      id: try-applied
+      body: "As developer, show the cluster quotas that apply to your project `lab-test`, with their Used and Hard values."
+      accept:
+        - "oc describe appliedclusterresourcequota -n lab-test"
+        - "oc describe appliedclusterresourcequotas -n lab-test"
+        - "oc describe AppliedClusterResourceQuota -n lab-test"
+        - "oc describe appliedclusterresourcequota --namespace=lab-test"
+        - "oc describe appliedclusterresourcequota --namespace lab-test"
+        - "oc -n lab-test describe appliedclusterresourcequota"
+        - "oc describe appliedclusterresourcequota lab-developer -n lab-test"
+        - "oc describe appliedclusterresourcequota/lab-developer -n lab-test"
+        - "oc -n lab-test describe appliedclusterresourcequota lab-developer"
+      hints:
+        - match: "clusterresourcequota(?!.*applied)|^oc (get|describe) clusterquota"
+          say: "developer may not read the cluster object itself. The per-project view is `appliedclusterresourcequota`."
+        - match: "(^| )(quota|resourcequotas?)( |$)"
+          say: "A project quota is a different object; lab-test has none. Ask for the applied cluster quotas."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "The view lives in each selected project: name it with `-n lab-test`."
+      hint: "`oc describe appliedclusterresourcequota`, in the project."
+      run: "oc describe appliedclusterresourcequota lab-developer -n lab-test"
+      then: |
+        `pods 4 4`: the four slots are used across the whole selection. The view is the same from any selected project; it
+        does not say which project uses what.
+    - kind: show
+      id: per-project
+      body: "The administrator can see which project uses what, in the quota's status:"
+      run: "oc get clusterresourcequota lab-developer -o jsonpath='{range .status.namespaces[*]}{.namespace}{\"\\t\"}{.status.used.pods}{\"\\n\"}{end}'"
+      notice: |
+        lab-dev 3, lab-test 1, and 0 in the two other selected projects.
+    - kind: teach
+      id: shared
+      title: A shared budget moves
+      body: |
+        The budget is not divided between projects in advance: it is one total over the selected projects.
+        developer now scales lab-dev down from three pods to one.
+    - kind: ask
+      id: guess-scale-down
+      guess: true
+      prompt: "lab-dev goes from three pods to one. What happens in lab-test, where a pod was refused?"
+      choices:
+        - text: "lab-test gets its pod on a later retry"
+          why: "Freed budget is available to any selected project. The next steps show lab-test converging without any change there."
+        - text: "Nothing until developer redeploys lab-test"
+          why: "The ReplicaSet keeps retrying on its own; no redeploy is needed."
+        - text: "lab-dev's stopped pods move to lab-test"
+          why: "Pods never move between projects. Only the budget is shared."
+      answer: 0
+    - kind: show
+      id: dev-scale
+      run: "oc scale deploy/web --replicas=1 -n lab-dev"
+      notice: "`scaled`."
+    - kind: show
+      id: test-converges
+      run: "oc rollout status deploy/web -n lab-test --timeout=300s"
+      notice: "lab-test reaches two pods without any change in lab-test."
+    - kind: show
+      id: applied-after
+      run: "oc describe appliedclusterresourcequota lab-developer -n lab-test"
+      notice: |
+        `pods 3 4`: one pod in lab-dev, two in lab-test, one slot free.
+    - kind: ask
+      id: granularity
+      prompt: "A team wants one ClusterResourceQuota selecting 400 projects by a label. What does the documentation advise?"
+      choices:
+        - text: "Keep it to about 100 projects or fewer per quota"
+          why: "Quota accounting across many projects locks shared state; the 4.21 documentation advises 100 or fewer selected projects, as more can slow the API server for them."
+        - text: "Any number: the quota is checked only once a day"
+          why: "It is checked at every admission of a tracked object."
+        - text: "Use one quota per project instead, it is the same"
+          why: "Per-project quotas cannot cap a total across projects."
+      answer: 0
+    - kind: show
+      id: crq-delete
+      body: "The administrator removes the quota; developer's projects are no longer limited together:"
+      run: "oc delete clusterresourcequota lab-developer"
+      notice: "`deleted`."
+    - kind: show
+      id: cleanup
+      run: "oc delete project lab-dev lab-test"
+      notice: "developer deletes both projects."
+    - kind: reflect
+      id: explain-crq
+      prompt: "Explain to a team lead why their new project, which has no quota, refused a pod with an `exceeded quota` message."
+      model: |
+        A ClusterResourceQuota selects every project that carries their requester annotation (or a label), and counts
+        the pods and resources of all of them together. Their new project is selected too, so its pods are charged to
+        the same budget as their other projects. The message names the cluster quota. They can see it with
+        oc describe appliedclusterresourcequota in the project, free capacity in another project, or ask the platform
+        team to review the budget.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can cap one person's (or one label's) projects together with a ClusterResourceQuota, read it from inside a
+        project as AppliedClusterResourceQuota, recognise its refusals, and see how freeing capacity in one project
+        helps another.
+
+        Guardrails typed on the command line are hard to review and to repeat. Next,
+        [Why clusters drift](/lesson/gx.declarative) keeps the desired state of applications, and of guardrails like
+        these, in reviewed files.
+  sections:
+    - id: crq-reference
+      title: ClusterResourceQuota reference
+      depth: true
+      body: |
+        | Task | Command |
+        |---|---|
+        | one budget for a requester's projects | `oc create clusterresourcequota <name> --project-annotation-selector=openshift.io/requester=<user> --hard=pods=10` |
+        | one budget for labelled projects | `oc create clusterresourcequota <name> --project-label-selector=<key>=<value> --hard=pods=10` |
+        | read it (administrator) | `oc describe clusterresourcequota <name>` |
+        | read it from a project (project user) | `oc describe appliedclusterresourcequota -n <project>` |
+        | usage per selected project | `oc get clusterresourcequota <name> -o jsonpath='{.status.namespaces}'` |
+
+        Every applicable quota must allow an object: a project quota and a cluster quota both apply when both
+        select the project. Keep the number of projects a cluster quota selects to about 100 or fewer.
+
+        AppliedClusterResourceQuota shows every selected project's name to the users of each selected project: a label
+        that spans several teams discloses their project names to one another. Cluster quotas, like SCCs, do not apply
+        in the highly privileged platform projects (`default`, `kube-system`, `openshift`, and projects labelled
+        `openshift.io/run-level` 0 or 1).
+  review:
+    - q: How do you cap the total pods of all projects requested by one user?
+      a: oc create clusterresourcequota <name> --project-annotation-selector=openshift.io/requester=<user> --hard=pods=<n>
+    - q: How does a project user see a ClusterResourceQuota that applies to their project?
+      a: oc describe appliedclusterresourcequota -n <project>; the cluster object itself is not readable for them.
+    - q: A project has no ResourceQuota but refuses a pod with exceeded quota. Why?
+      a: A ClusterResourceQuota selects it, and the selection's total is used up.
+  labs: []
+  limits: |
+    The quota was kept for a few minutes only: while it exists it limits every project developer has requested,
+    including the course's own temporary projects. On this cluster it also selected projects created by the course for
+    developer before the lesson, which is why its list shows more than lab-dev and lab-test.
+  references:
+    - title: 'OpenShift 4.21: Resource quotas across multiple projects'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/quotas#setting-quotas-across-multiple-projects
+    - title: 'OpenShift 4.21: Configuring project creation (the requester annotation)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects#configuring-project-creation
+    - title: 'Kubernetes: Resource quotas'
+      url: https://kubernetes.io/docs/concepts/policy/resource-quotas/
+  commands:
+    - {cmd: "oc new-project lab-dev", as: developer, meaning: "a first project"}
+    - {cmd: "oc new-project lab-test", as: developer, meaning: "a second project"}
+    - {cmd: "oc get project lab-dev lab-test -o custom-columns='NAME:.metadata.name,REQUESTER:.metadata.annotations.openshift\\.io/requester'", as: admin, meaning: "who requested each project"}
+    - {cmd: "oc create clusterresourcequota lab-developer --project-annotation-selector=openshift.io/requester=developer --hard=pods=4", as: admin, meaning: "four pods in total for everything developer requested"}
+    - {cmd: "oc wait clusterresourcequota/lab-developer --for=jsonpath='{.status.total.hard.pods}'=4 --timeout=60s", as: admin, meaning: "wait until the status is filled in"}
+    - {cmd: "oc describe clusterresourcequota lab-developer", as: admin, meaning: "selected projects, Used and Hard"}
+    - {cmd: "oc get clusterresourcequota lab-developer", as: developer, expect: fail, meaning: "Forbidden: a cluster-scoped administrator object"}
+    - {cmd: "oc describe appliedclusterresourcequota -n lab-dev", as: developer, meaning: "the same quota, seen from a selected project"}
+    - {cmd: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=3 -n lab-dev -- sleep infinity", as: developer, meaning: "three pods in lab-dev"}
+    - {cmd: "oc rollout status deploy/web -n lab-dev --timeout=180s", as: developer, timeout: 210, meaning: "all three run"}
+    - {cmd: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -n lab-test -- sleep infinity", as: developer, meaning: "two pods in lab-test"}
+    - {cmd: "oc wait deploy/web -n lab-test --for=condition=ReplicaFailure --timeout=120s", as: developer, meaning: "a pod creation was refused"}
+    - {cmd: "oc get deploy web -n lab-test -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'", as: developer, meaning: "exceeded quota: lab-developer"}
+    - {cmd: "oc describe appliedclusterresourcequota lab-developer -n lab-test", as: developer, meaning: "pods 4 of 4"}
+    - {cmd: "oc get clusterresourcequota lab-developer -o jsonpath='{range .status.namespaces[*]}{.namespace}{\"\\t\"}{.status.used.pods}{\"\\n\"}{end}'", as: admin, meaning: "pods used per selected project"}
+    - {cmd: "oc scale deploy/web --replicas=1 -n lab-dev", as: developer, meaning: "free two pods in lab-dev"}
+    - {cmd: "oc rollout status deploy/web -n lab-test --timeout=300s", as: developer, timeout: 330, meaning: "lab-test gets its second pod"}
+    - {cmd: "oc describe appliedclusterresourcequota lab-developer -n lab-test", as: developer, meaning: "pods 3 of 4"}
+    - {cmd: "oc delete clusterresourcequota lab-developer", as: admin, meaning: "remove the cluster quota"}
+    - {cmd: "oc delete project lab-dev lab-test", as: developer, meaning: "remove both projects"}
+  experiment:
+    id: X-SELF-02
+    objective: "A cluster administrator caps every project requested by developer at four pods in total with a ClusterResourceQuota selected by the openshift.io/requester annotation; developer reads it through AppliedClusterResourceQuota, a pod in a project without its own quota is refused once the shared budget is used, and freeing pods in the other project lets it run. The quota and the projects are removed."
+    changes:
+      - "ClusterResourceQuota lab-developer (created, deleted); while it exists it limits every project requested by developer"
+      - "Projects lab-dev and lab-test, requested by developer, with a Deployment web of up to three small ubi-minimal pods each (deleted)"
+    preflight:
+      - cmd: |-
+          names=$(oc get clusterresourcequotas -o name) || exit 1
+          test -z "$names"
+      - cmd: |-
+          found=$(oc get namespace lab-dev lab-test --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          oc get namespaces -o json | jq -e 'all(.items[]; .metadata.annotations["openshift.io/requester"] != "developer" or .metadata.name == "academy-lesson-n-cluster-quotas" or .status.phase == "Terminating")'
+    snapshot:
+      - "oc get clusterresourcequotas -o name"
+      - "oc get namespace lab-dev lab-test -o name --ignore-not-found"
+      - "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'"
+    rollback:
+      - "oc delete clusterresourcequota lab-developer --ignore-not-found"
+      - "oc delete project lab-dev lab-test --ignore-not-found --wait=false"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          found=$(oc get namespace lab-dev lab-test --ignore-not-found -o name) && test -z "$found" && exit 0
+          sleep 5
+        done
+        exit 1
+    verify:
+      - cmd: |-
+          names=$(oc get clusterresourcequotas -o name) || exit 1
+          test -z "$names"

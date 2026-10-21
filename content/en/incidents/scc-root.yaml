@@ -1,0 +1,110 @@
+id: inc.scc-root
+kind: incident
+title: "A Deployment with no pods"
+subtitle: "0/1 ready and nothing to inspect"
+summary: "The Deployment exists, the ReplicaSet exists, but no pod is ever created."
+module: b3-workload-security
+minutes: 15
+level: 2
+supports: "Recorded on OpenShift 4.21.8, where project workloads may use the restricted-v2 SCC and restricted-v3 (the latter only for pods that run in a user namespace, hostUsers: false)."
+concepts: [sec.scc, container.security, k8s.controllers]
+prerequisites: [f.scc]
+namespace: academy-inc-scc
+objective: |
+  Find an error that never reaches a pod, understand the platform's decision, and fix the workload rather than
+  weakening the platform.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`, applied from the vendor's manifest. The app creates the project `academy-inc-scc` as your
+  learner identity when you start the incident, with everything listed here in the state the symptom describes; how it
+  got into that state is part of the investigation and is shown in the debrief. The images come from Red Hat's public
+  registry `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay
+  what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  A vendor's manifest was applied as-is for the portal. `oc get pods` shows nothing at all; the Deployment says
+  0/1 available.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          securityContext: {runAsUser: 0}
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get deploy,rs,pods -n academy-inc-scc", meaning: "deployment 0/1, a ReplicaSet with DESIRED 1 and CURRENT 0, and no pod section at all"}
+  - {cmd: "oc get events -n academy-inc-scc --field-selector reason=FailedCreate", meaning: "on the ReplicaSet: pods ... is forbidden: unable to validate against any security context constraint. restricted-v2 says runAsUser 0 must be in [1004080000, 1004089999]; restricted-v3 also rejects it (hostUsers must be false, UID in [1000, 65534]); every other SCC is not usable by user or serviceaccount"}
+  - {cmd: "oc get deploy web -n academy-inc-scc -o jsonpath='{.spec.template.spec.securityContext}{\"\\n\"}'", meaning: "{\"runAsUser\":0}: root is requested explicitly in the pod securityContext"}
+  - {cmd: "oc get project academy-inc-scc -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'", meaning: "1004080000/10000: 10,000 UIDs starting at 1004080000, the range restricted-v2 enforces in this project (the same range the event quotes)"}
+hints:
+  - "No pod means the pod was rejected at creation. Who creates pods for a Deployment, and where would it report an error?"
+  - "Read the ReplicaSet's FailedCreate event: which SCC rule was violated?"
+  - "The image is built to run as an arbitrary user. Remove the setting that forces UID 0, let the restricted SCC choose the UID, and check which SCC admits the new pod."
+fix:
+  - {cmd: "oc patch deploy/web -n academy-inc-scc --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/securityContext/runAsUser\"}]'", meaning: "let OpenShift assign a UID from the project's range"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-scc --timeout=120s", meaning: "the ReplicaSet can now create the pod; it is admitted and becomes available", timeout: 140}
+  - {cmd: "oc get pod -l app=web -n academy-inc-scc -o jsonpath='{.items[0].metadata.annotations.openshift\\.io/scc}{\" uid=\"}{.items[0].spec.containers[0].securityContext.runAsUser}{\"\\n\"}'", meaning: "restricted-v2 uid=1004080000: admitted by restricted-v2, which set the first UID of the project's range"}
+fix_wait: [web-ready, route-ok]
+checks:
+  - {id: no-root, title: "The pod no longer asks for UID 0", type: field, kind: deployment, name: web, path: "spec.template.spec.securityContext.runAsUser", op: absent, expect_text: "not set"}
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The pod template requested `runAsUser: 0`. The pods run as the project's `default` ServiceAccount and are created by
+  the ReplicaSet controller; neither has any SCC beyond what every authenticated user gets, `restricted-v2` and
+  `restricted-v3`. `restricted-v2` requires a UID inside the project's assigned range (1004080000-1004089999 here);
+  `restricted-v3` additionally requires a user namespace (`hostUsers: false`). Both rejected UID 0, so admission
+  rejected every pod. The error is an event on the ReplicaSet, because no pod object was ever created.
+alternatives: |
+  - If an image truly requires root, an administrator can grant `anyuid` to a dedicated ServiceAccount
+    (`oc adm policy add-scc-to-user anyuid -z <sa>`), as a reviewed and documented exception.
+  - Better: rebuild the image to run as an arbitrary UID (group 0 ownership and group-writable permissions on the paths
+    it writes), as Red Hat's UBI-based application images such as httpd-24 do.
+  - Setting a UID inside the project's range is also admitted, but the range differs in every project, so the
+    manifest would break elsewhere. This incident's `no-root` check therefore expects the template to leave the UID
+    to the platform (no `runAsUser` at all).
+sre: |
+  Never "fix" this by granting privileged SCCs to `default` or to whole groups: that weakens every workload in the
+  project. Admission errors land on the controller (ReplicaSet, Job, StatefulSet), so dashboards that only watch
+  pods miss them: alert on Deployments with unavailable replicas.
+questions:
+  - q: "Why is the error on the ReplicaSet and not on a pod?"
+    a: "The pod creation request was rejected by admission, so no pod object exists; the ReplicaSet controller records the FailedCreate event."
+  - q: "Which UID does the fixed pod run with?"
+    a: "The first UID of the project's openshift.io/sa.scc.uid-range annotation (1004080000 in the recording), set by restricted-v2 because the pod no longer asks for a specific UID."
+references:
+  - {title: "OpenShift 4.21: Managing security context constraints", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies"}
+symptom_checks: [web-ready, route-ok]  # monitoring-level evidence shown before the answer

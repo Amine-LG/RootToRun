@@ -1,0 +1,420 @@
+/* Redesigned page components: home, learn overview and course pages, lesson reading (tokens: tokens.css). Loaded after styles.css and atlas.css. */
+
+/* ============================================================================================ home */
+.page.hx { max-width: var(--wrap); padding-top: clamp(28px, 6vw, 72px); }
+.hx-hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: clamp(28px, 5vw, 72px); align-items: center; }
+.hx-copy { max-width: 36rem; }
+.hx-kicker {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0 0 18px; padding: 4px 12px 4px 10px; border-radius: 999px;
+  font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); background: var(--surface); border: 1px solid var(--line);
+}
+.hx-kicker::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.hx h1 { font-size: var(--fs-3xl); font-weight: 750; letter-spacing: -0.032em; line-height: 1.04; margin: 0 0 20px; max-width: 14ch; }
+.hx-lede { font-size: var(--fs-lg); line-height: 1.55; color: var(--text-2); margin: 0 0 28px; max-width: 34rem; }
+.hx-last { margin: 0 0 24px; color: var(--muted); font-size: var(--fs-lg); }
+.hx-last strong { color: var(--text); font-weight: 650; }
+.hx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.hx-alt { font-weight: 600; color: var(--text-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 5px; transition: color var(--dur-2), text-decoration-color var(--dur-2); }
+.hx-alt:hover { color: var(--accent); text-decoration-color: currentColor; }
+.hx-note { margin: 16px 0 0; color: var(--muted); }
+
+/* the panel beside the hero: the whole path (new visitors) or the next session (returning learners) */
+.hx-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px 22px 14px; box-shadow: var(--shadow-2); }
+.hx-panel h2, .hx-panel-h { font-size: var(--fs-base); font-weight: 700; letter-spacing: 0; margin: 0 0 4px; }
+.hx-panel-sub { margin: 0 0 14px; color: var(--muted); font-size: var(--fs-sm); }
+.hx-tracks { list-style: none; margin: 0 -10px; padding: 0; position: relative; }
+.hx-tracks::before { content: ''; position: absolute; left: 24px; top: 22px; bottom: 22px; width: 1px; background: var(--line-2); }
+.hx-tracks li a, .hx-arena {
+  position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
+  padding: 9px 10px; border-radius: var(--radius); color: var(--text); text-decoration: none;
+  transition: background-color var(--dur-2) var(--ease);
+}
+.hx-tracks li a:hover, .hx-arena:hover { background: var(--surface-2); text-decoration: none; }
+.hx-n {
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700;
+  background: var(--surface); border: 1px solid var(--line-2); color: var(--text-2); font-variant-numeric: tabular-nums;
+}
+.hx-tracks li.started .hx-n { border-color: var(--accent); color: var(--accent); }
+.hx-here { color: var(--accent); font-weight: 650; }
+.hx-tracks li.done .hx-n { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.hx-t { font-weight: 600; line-height: 1.3; }
+.hx-m { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hx-bar { grid-column: 2 / -1; height: 4px; margin-top: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.hx-bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-3) var(--ease); }
+.hx-arena { margin: 6px -10px 0; border-top: 1px dashed var(--line-2); border-radius: 0 0 var(--radius) var(--radius); padding-top: 12px; }
+.hx-arena .icon { justify-self: center; color: var(--muted); }
+.hx-arena { grid-template-columns: 30px auto minmax(0, 1fr); }
+.hx-arena .hx-t { white-space: nowrap; }
+.hx-arena .hx-m { white-space: normal; text-align: right; }
+
+/* returning: the session plan, under the resume action */
+.hx-hero.returning { align-items: start; }
+.hx-session { margin-top: var(--s6); padding: 18px 18px 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.hx-session h2 { font-size: var(--fs-base); font-weight: 700; margin: 0 0 8px; }
+.hx-session-note { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.hx-session .session { list-style: none; margin: 0 -8px; padding: 0; display: grid; gap: 2px; }
+.session li a { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 8px; border-radius: var(--radius); color: var(--text); text-decoration: none; font-weight: 600; transition: background-color var(--dur-2) var(--ease); }
+.session li a:hover { background: var(--surface-2); text-decoration: none; }
+.session .s-n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+.session .s-what { min-width: 0; }
+.session .s-what small { display: block; color: var(--muted); font-weight: 400; font-size: var(--fs-sm); }
+.session .s-min { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; font-weight: 500; }
+
+/* below the fold: one simple hierarchy of sections */
+.hx-section { margin-top: clamp(56px, 9vw, 112px); }
+.hx-h2, .hx .start-from > h2 { font-size: var(--fs-xl); margin: 0 0 6px; }
+.hx-how { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(20px, 3vw, 40px); }
+.hx-how h3 { font-size: var(--fs-base); font-weight: 700; margin: 14px 0 4px; }
+.hx-how p { margin: 0; color: var(--text-2); }
+.hx-how-i { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+
+/* starting point: a calm radio list with its detail below */
+.start-section { scroll-margin-top: calc(var(--hdr) + 16px); }
+.start-from > h2 { margin: 0 0 16px; }
+.route-picks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.route-pick {
+  display: flex; align-items: flex-start; gap: 12px; min-height: 56px; padding: 14px 16px; text-align: left; cursor: pointer;
+  border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text); font-weight: 600;
+  transition: border-color var(--dur-2), background-color var(--dur-2), transform var(--dur-1) var(--ease);
+}
+.route-pick:hover { border-color: var(--line-2); background: var(--surface-2); }
+.route-pick:active { transform: scale(0.99); }
+.route-pick[aria-checked='true'] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.route-pick .rp-dot { flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; border: 2px solid var(--line-2); display: grid; place-items: center; transition: background-color var(--dur-2), border-color var(--dur-2); }
+.route-pick[aria-checked='true'] .rp-dot { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.route-pick .rp-t { line-height: 1.35; }
+.route-detail {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: center; margin-top: 12px; padding: 20px 22px;
+  border-radius: var(--radius-lg); background: var(--surface-2); border: 1px solid var(--line); animation: fade var(--dur-2) var(--ease);
+}
+.route-detail p { margin: 0; color: var(--text-2); }
+.route-detail .rd-who { color: var(--muted); }
+.route-detail .rd-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.route-detail .rd-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.route-detail .rd-alt { color: var(--text-2); font-size: var(--fs-sm); text-align: center; font-weight: 600; }
+.nchip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 600; border: 1px solid var(--line-2); color: var(--text-2); background: var(--surface); }
+.nchip.ok { color: var(--ok); }
+.nchip.info { color: var(--accent); }
+.nchip.warn { color: var(--warn); }
+
+/* a returning learner's route: one line, the full choice folded under it */
+.route-now { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.route-now > summary {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; min-height: 56px; padding: 14px 20px;
+  list-style: none; cursor: pointer; border-radius: inherit;
+}
+.route-now > summary::-webkit-details-marker { display: none; }
+.route-now > summary:hover { background: var(--surface-2); }
+.route-now > summary:focus-visible { outline: none; box-shadow: var(--focus); }
+.rn-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.rn-label { color: var(--muted); font-size: var(--fs-sm); font-weight: 650; }
+.rn-route { font-weight: 650; }
+.rn-meta { color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.rn-change { display: inline-flex; align-items: center; gap: 6px; color: var(--link); font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+.rn-change::after { content: ''; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); transition: transform var(--dur-2) var(--ease); }
+.route-now[open] .rn-change::after { transform: translateY(1px) rotate(225deg); }
+.rn-body { padding: 4px 20px 20px; border-top: 1px solid var(--line); }
+.rn-sub { margin: 14px 0; color: var(--muted); font-size: var(--fs-sm); }
+.hx-foot-note { margin: clamp(48px, 7vw, 80px) 0 0; text-align: center; color: var(--muted); font-size: var(--fs-sm); }
+
+@media (max-width: 960px) {
+  .hx-hero { grid-template-columns: 1fr; }
+  .hx-copy { max-width: none; }
+  .route-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .page.hx { padding-top: 24px; }
+  .hx h1 { font-size: 2.3rem; }
+  .hx-lede { font-size: var(--fs-base); margin-bottom: 22px; }
+  .hx-actions .btn { width: 100%; }
+  .hx-actions .hx-alt { margin: 4px auto 0; }
+  .hx-how { grid-template-columns: 1fr; gap: 20px; }
+  .hx-how li { display: grid; grid-template-columns: 40px 1fr; column-gap: 14px; }
+  .hx-how h3 { margin: 0 0 2px; align-self: center; }
+  .hx-how p { grid-column: 2; }
+  .route-picks { grid-template-columns: 1fr; }
+  .route-detail { grid-template-columns: 1fr; padding: 16px; }
+  .hx-panel { padding: 18px 16px 10px; }
+  .hx-m { white-space: normal; text-align: right; }
+}
+
+/* ============================================================================================ lessons: a technical textbook */
+.lesson2 .lesson-bar { margin-bottom: 28px; font-size: var(--fs-sm); }
+.lesson2 .lesson-bar .back { color: var(--muted); font-weight: 600; }
+.lesson2 .lesson-bar .back:hover { color: var(--text); }
+.lesson2 .terr-dot { display: none; }
+.lesson2 .lesson-h { max-width: 46rem; margin-bottom: 40px; }
+.lesson2 .lesson-where { color: var(--muted); font-weight: 600; font-size: var(--fs-sm); }
+.lesson2 .lesson-h h1 { font-size: clamp(2rem, 1.3rem + 2.2vw, 2.75rem); letter-spacing: -0.03em; line-height: 1.08; margin: 8px 0 12px; }
+.lesson2 .subtitle { font-size: var(--fs-lg); line-height: 1.45; color: var(--text-2); margin: 0 0 24px; }
+.lesson2 .lesson-goal {
+  max-width: none; margin: 0; padding: 16px 20px; border: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface);
+}
+.lesson2 .lesson-goal .lbl { font-size: var(--fs-xs); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--muted); margin-bottom: 4px; }
+.lesson2 .lesson-goal .md p { font-size: var(--fs-base); line-height: 1.55; color: var(--text); }
+.lesson2 .lesson-facts { margin-top: 14px; font-size: var(--fs-sm); gap: 6px 20px; }
+.lesson2 .testout { font-size: var(--fs-sm); color: var(--muted); }
+
+/* explanations in the reading face; everything you act on stays in the interface face */
+.lesson-article .prose { font-family: var(--serif); font-size: var(--fs-read); line-height: 1.72; color: var(--text); } /* its measure: layout system, below */
+.lesson-article .prose .md p, .lesson-article .prose .md li { font-size: inherit; line-height: inherit; }
+.lesson-article .prose p { margin: 0 0 1em; }
+.lesson-article .prose li { margin: 0.35em 0; }
+.lesson-article .prose strong { font-weight: 650; }
+.lesson-article .prose code { font-size: 0.8em; padding: 0.1em 0.35em; }
+.lesson-article .prose h3, .lesson-article .prose h4, .lesson-article .prose table, .lesson-article .prose figcaption,
+.lesson-article .prose .callout, .lesson-article .prose button { font-family: var(--sans); }
+.lesson-article .prose h3 { font-size: var(--fs-lg); margin: 1.6em 0 0.4em; }
+.lesson-article .prose table { font-size: var(--fs-sm); line-height: 1.5; }
+.lesson-article .prose blockquote { margin: 1.2em 0; padding: 2px 0 2px 18px; border-left: 2px solid var(--line-2); color: var(--text-2); }
+.lesson-article .act-title { font-size: var(--fs-xl); letter-spacing: -0.018em; margin: 0 0 14px; }
+.flow-toc > summary { font-size: var(--fs-sm); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--text-2); }
+.flow-parts { font-size: var(--fs-sm); }
+.flow-parts li a { line-height: 1.4; padding: 7px 12px; border-left-width: 2px; transition: color var(--dur-2), border-color var(--dur-2); }
+.flow-parts li a[aria-current] { font-weight: 650; color: var(--accent); border-left-color: var(--accent); }
+
+/* code: one dark panel for files and terminals, a labelled bar, comfortable size */
+.codebar {
+  min-height: 36px; padding: 2px 6px 2px 14px; border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--term-bar); border-color: var(--term-line); color: var(--term-muted);
+}
+.codebar .file-name { font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0; }
+pre.code { font-size: 0.84rem; line-height: 1.65; padding: 14px 16px; border-radius: var(--radius); }
+.codebar + pre { border-top: 1px solid var(--term-line); }
+.demo-term { border-radius: var(--radius); font-size: 0.84rem; line-height: 1.6; }
+@media (max-width: 640px) {
+  .lesson-article .prose { font-size: 1.0625rem; line-height: 1.68; }
+  .lesson2 .lesson-h { margin-bottom: 28px; }
+  pre.code, .demo-term { font-size: 0.8rem; }
+}
+/* short inline code (-l, ls) never splits across lines; long code still wraps instead of widening the page */
+.lesson-article :is(.md, .prose) code, .check-prompt code, .choice-t code, .guess-prompt code { overflow-wrap: break-word; word-break: normal; }
+
+/* ============================================================================================ shared labels and panels
+   Small labels were spaced uppercase monospace in a dozen places; they are now one sentence-case label style. Monospace
+   is kept for technical text only. */
+.goal-lbl, .alert-h, .hint-n, .pg-me .me-group h3, .pg-me .evidence-table thead th, .xp-tile-kind, .track-level, .obj-label,
+.predict-h, .explain-h, .misconception .lbl, .why-right .lbl, .step-n, .debrief-h, .owner-h, .menu-h, .nav-h, .choose-card .who,
+.step-count, .act-label, .lesson-goal .lbl, .check-answer .lbl, .check-key .lbl, .notice .lbl, .ol-kind, .choose-card > .choose-who,
+.model-answer .lbl, .who {
+  font-family: var(--sans); font-size: var(--fs-xs); font-weight: 650; letter-spacing: 0; text-transform: none;
+}
+.brand small, .brand-name span { font-family: var(--sans); letter-spacing: 0.02em; text-transform: none; font-size: var(--fs-xs); }
+
+.pg .pg-fold > summary { font-family: var(--sans); }
+.pg .pg-card, .pg .pg-fold { border-radius: var(--radius-lg); }
+
+/* review fixes: visible control outlines, tighter rhythm, phone rows that stack, first step for beginners */
+code.nb { white-space: nowrap; }
+.route-pick .rp-dot { border-color: var(--muted); }
+.hx-section { margin-top: clamp(48px, 7vw, 88px); }
+.hx-new { margin: 18px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.hx-new a { font-weight: 600; }
+.lesson2 .lesson-h { margin-bottom: 28px; }
+.lesson2 .subtitle { margin-bottom: 18px; }
+.lesson2 .lesson-bar { margin-bottom: 20px; }
+@media (max-width: 640px) {
+  .hx-tracks li a, .hx-arena { grid-template-columns: 30px minmax(0, 1fr); row-gap: 2px; }
+  .hx-tracks li a .hx-m, .hx-arena .hx-m { grid-column: 2; text-align: left; white-space: normal; }
+  .hx-bar { grid-column: 2; }
+  .hx-tracks::before { top: 18px; bottom: 30px; }
+}
+/* the phone's sticky "In this lesson" bar is opaque: text must never show through it (and no backdrop filter to paint) */
+@media (max-width: 900px) {
+  .flow-parts { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+/* ============================================================================================ polish pass */
+/* after checking, the spent Check button goes away (it comes back with "Try again"); the answer is marked once, by its
+   green indicator, and named in the feedback */
+.check-q:is(.is-right, .is-wrong) > .check-actions { display: none; }
+.check-choice.answer .choice-answer-label, .guess-choice.answer .choice-answer-label { display: none; }
+.check-feedback-slot .check-after { margin-top: var(--s4); }
+/* the end-of-lesson facts read as sentences: icon in the margin, text and links flowing together */
+.summary-facts li { display: block; position: relative; padding-left: 26px; }
+.summary-facts .icon { position: absolute; left: 0; top: 4px; margin: 0; }
+/* a look back at an earlier lesson: one quiet line, and the "not opened yet" note under it */
+.recall-from { gap: 4px 6px; color: var(--muted); }
+.recall-from .recall-note { flex-basis: 100%; padding-left: 19px; font-size: var(--fs-xs); }
+/* lesson introduction: the same content, less vertical weight */
+.lesson2 .lesson-goal { padding: 14px 18px; }
+.lesson2 .lesson-facts { margin-top: 12px; }
+.lesson2 .testout { margin-top: 6px; }
+@media (max-width: 640px) {
+  .lesson2 .lesson-h h1 { font-size: 2rem; }
+  .lesson2 .subtitle { font-size: 1.0625rem; margin-bottom: 16px; }
+  .lesson2 .lesson-goal { padding: 12px 14px; }
+  .lesson2 .lesson-goal .md p { font-size: 0.9375rem; }
+}
+/* final QA: a picked answer shows a dot until it is checked (the check mark means "correct"); tasks read in the
+   interface face; 44px targets for the small links; compact course start row and full-width filters on phones */
+.check-choice.on:not(.answer):not(.wrong) .choice-radio .icon { display: none; }
+.check-choice.on:not(.answer):not(.wrong) .choice-radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-ink); }
+.lesson-article :is(.flow-try, .flow-order, .flow-reflect) .prose { font-family: var(--sans); font-size: var(--fs-base); line-height: 1.6; }
+.hx-alt, .lesson-bar > button.linkish, .lesson-pager .linkish { display: inline-flex; align-items: center; min-height: 44px; }
+@media (max-width: 640px) {
+  .learn .ln-course-go { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 16px; }
+  .learn .ln-course-go .btn { width: 100%; }
+  .page.practice .filters .select-in { flex: 1 1 100%; }
+  .page.practice .filters .select-in select { width: 100%; min-height: 44px; }
+}
+
+/* ------------------------------------------------------------------ section progress (course chapters) */
+.chapter-bar { display: block; width: min(220px, 60%); height: 3px; margin: 7px 0 2px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.chapter-bar i { display: block; height: 100%; background: var(--accent); transform-origin: left; }
+.chapter-title .chapter-next { margin-top: 3px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ------------------------------------------------------------------ one width for the frame on every page */
+.topbar { padding-inline: max(20px, calc((100% - var(--wrap)) / 2 + var(--gutter))); }
+@media (max-width: 900px) { .topbar { padding-inline: 12px; } }
+
+/* large monitors */
+@media (min-width: 1360px) {
+  /* a course: its summary stays in view on the left while the chapters scroll on the right */
+  .learn.path { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); column-gap: 64px; align-items: start; }
+  .learn.path > * { grid-column: 2; }
+  .learn.path > .page-bar { grid-column: 1 / -1; }
+  .learn.path > .ln-course-h { grid-column: 1; grid-row: 2 / span 8; position: sticky; top: calc(var(--hdr) + 24px); border-bottom: 0; padding-bottom: 0; }
+  .learn.path .ln-course-h .lede { font-size: var(--fs-base); }
+  .learn.path .ln-time { flex-direction: column; gap: 14px; }
+}
+
+/* ------------------------------------------------------------------ identity: header mark and progress ring */
+.topbar .brand strong { font-size: 1.06rem; letter-spacing: -0.015em; }
+.progress-mark { flex: none; display: block; }
+
+/* phones: the section tabs fit (Practice has four, with counts) */
+@media (max-width: 480px) {
+  .subnav-in { gap: 0; }
+  .subnav a { padding-inline: 9px; font-size: var(--fs-sm); }
+  .subnav .tab-n { font-size: 0.72rem; }
+}
+
+/* ============================================================================================ layout system
+   One frame and three content widths (tokens.css, "layout"):
+   - the frame (--wrap, --gutter): header, section tabs, every page and the footer share its edges;
+   - reading (--measure): running prose, measured in its own font; prose never stretches past it;
+   - text (--w-text): what the learner answers or acts on (questions, tasks, notes, page introductions);
+   - wide (--w-wide): what has long lines or two dimensions (models, diagrams, terminals, code, tables), using the room
+     the prose leaves free on the right;
+   - full (the frame): workspaces (Explore, the knowledge map).
+   Sticky chrome is measured (--hdr = site header + page bar + phone contents bar); anchors and sticky columns use it. */
+
+/* the page bar of a detail page (components/PageHead.tsx PageBar): the way back, the page's controls and the
+   contribution actions' slot; sticky under the site header on wide screens */
+.page-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 44px; }
+.page-bar > :is(.back, .ln-back) { margin: 0; min-height: 44px; }
+.page-actions-slot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.page-actions-slot:empty { display: none; }
+@media (min-width: 901px) {
+  .page-bar {
+    position: sticky; top: var(--hdr-site); z-index: 25; margin-inline: calc(-1 * var(--gutter)); padding: 6px var(--gutter);
+    background: var(--bg); box-shadow: 0 1px 0 var(--line);
+  }
+}
+/* phones: two rows at most. The way back (shortened with an ellipsis) and the actions share the first; the page's
+   controls (pager, "Go deeper", "Present") follow on the second; an empty slot takes no room */
+.pb-short { display: none; }
+@media (max-width: 640px) {
+  .page-bar { column-gap: 12px; row-gap: 0; }
+  .page-bar > .grow { display: none; }
+  .page-bar > :first-child { flex: 1 1 0; min-width: 0; } /* the way back: a link or a breadcrumb */
+  .page-bar > :is(.back, .ln-back) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 44px; }
+  .page-bar > :is(.back, .ln-back) .icon { vertical-align: -2px; }
+  .page-bar > .page-actions-slot { order: 1; margin-left: auto; }
+  .page-bar::after { content: ''; order: 1; flex-basis: 100%; height: 0; } /* the row break */
+  .page-bar > :not(:first-child, .page-actions-slot) { order: 2; }
+  .page-bar .lesson-pager { gap: 12px; }
+}
+@media (max-width: 420px) {
+  .page-bar .pb-long { display: none; }
+  .page-bar .pb-short { display: inline; }
+}
+/* a page head (Explore, Reference, lists): the slot sits at its top right, beside the title */
+.xp-head > .page-actions-slot { align-self: flex-start; flex: none; }
+@media (max-width: 640px) { .xp-head > .page-actions-slot { order: -1; flex: 1 0 100%; } } /* phones: its own row, above */
+
+/* a lesson: contents on the side, then one column whose parts take the width they need */
+/* its header: the title, subtitle, facts and notes at the text width; the brief (what the lesson teaches beside what
+   practising it needs) as wide as the lesson under it, in two columns where there is room and one on narrow screens */
+.lesson2 .lesson-h { max-width: none; }
+.lesson2 .lesson-h > :not(.lesson-brief) { max-width: var(--w-text); }
+.lesson2 .lesson-brief { display: flex; flex-wrap: wrap; margin-top: var(--s4); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+/* one rule between the columns, or between the rows once they wrap: the brief clips the one that falls on its edge */
+.lesson2 .lesson-brief > * { margin: 0; padding: 16px 22px; box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line); }
+.lesson2 .lesson-brief > .lesson-goal { flex: 3 1 28rem; border: 0; border-radius: 0; background: none; }
+.lesson2 .lesson-goal .lbl { display: block; }
+.lesson2 .lesson-goal .md > * { max-width: var(--measure); }
+.lesson2 .lesson-brief > .prereqs { flex: 2 1 17rem; display: block; max-width: none; border: 0; border-radius: 0; background: none; font-size: var(--fs-sm); }
+.lesson-brief .prereqs .icon { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.lesson-brief .prereqs-label { font-size: var(--fs-xs); font-weight: 650; color: var(--muted); }
+.lesson-brief .prereqs-list { display: flex; flex-direction: column; gap: 0; margin-top: 2px; font-size: var(--fs-base); }
+.lesson-brief .prereqs-list li + li::before { content: none; } /* one tool per line in the narrow column: no separator left at a line's start */
+.lesson-brief .prereqs-list a { display: inline-block; padding-block: 3px; } /* a 24px target (2.5.8) */
+.lesson-brief .prereqs-where { display: block; margin-top: 6px; line-height: 1.5; }
+.lesson2 .lesson-h > :is(.testout, .diag-note) { margin-top: var(--s3); }
+@media (max-width: 640px) { .lesson2 .lesson-brief > * { padding: 12px 16px; } }
+
+/* its bar: supporting material, then contribution, then the way through the course; a quiet rule between the groups,
+   and Next as the one button (the pager is the bar's last item, at its right end) */
+.lesson-pager { align-items: center; gap: 8px; }
+.lesson-pager .pager-next { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }
+.lesson-pager .pager-next:hover { border-color: var(--accent); }
+@media (pointer: coarse) { .lesson-pager .pager-next { min-height: 44px; } }
+@media (min-width: 901px) {
+  /* one row: the way back gives up its room (ending with an ellipsis) before anything wraps */
+  .lesson-bar { flex-wrap: nowrap; }
+  .lesson-bar > .grow { display: none; }
+  .lesson-bar > .back { flex: 1 1 auto; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 44px; }
+  .lesson-bar > .back .icon { vertical-align: -2px; }
+  .lesson-bar > :not(.back) { flex: none; }
+  .lesson-bar > :is(.page-actions-slot:not(:empty), .lesson-pager) { position: relative; padding-left: 16px; }
+  .lesson-bar > :is(.page-actions-slot:not(:empty), .lesson-pager)::before {
+    content: ''; position: absolute; left: 0; top: 50%; width: 1px; height: 20px; transform: translateY(-50%); background: var(--line-2);
+  }
+}
+@media (max-width: 1100px) {
+  .lesson-bar .pb-long { display: none; }
+  .lesson-bar .pb-short { display: inline; }
+}
+/* tablets: the phone's two rows (the way back and contribution, then "Go deeper" and the pager, at the right) */
+@media (min-width: 641px) and (max-width: 900px) {
+  .lesson-bar { row-gap: 0; }
+  .lesson-bar > .grow { display: none; }
+  .lesson-bar > :first-child { flex: 1 1 0; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 44px; }
+  .lesson-bar > :first-child .icon { vertical-align: -2px; }
+  .lesson-bar > .page-actions-slot { order: 1; }
+  .lesson-bar::after { content: ''; order: 1; flex-basis: 100%; height: 0; }
+  .lesson-bar > :not(:first-child, .page-actions-slot) { order: 2; }
+}
+@media (max-width: 900px) { .page-bar .lesson-pager { margin-left: auto; } }
+.lesson-article .prose, .lesson-article .prose > .md { max-width: none; } /* the measure is on what is read */
+.lesson-article .prose > .md > :is(p, ul, ol, h2, h3, h4, h5, blockquote, dl),
+.lesson-article .prose.notice, .lesson-article .act-title { max-width: var(--measure); }
+.lesson-article .prose > .md > .table-wrap { max-width: 100%; } /* tables, code and figures in an explanation are wide */
+.flow-step:is(.act-predict, .act-check, .act-order, .act-reflect, .act-practise, .act-summary) { max-width: var(--w-text); }
+.lesson-article .recall-from { max-width: var(--w-text); }
+/* shown commands, models and diagrams, typed-command tasks: the whole column (--w-wide at most) */
+.flow-step:is(.act-show, .act-explore, .act-try, .act-learn) { max-width: none; }
+
+/* a lab, an incident, a challenge: one column across the frame, like a lesson's blocks, so the steps and their
+   terminals end where the page bar and the header end (a narrower column left the frame's right side empty); text
+   inside keeps its own widths (--w-text, --measure) */
+.page.player > :not(.page-bar) { max-width: none; }
+.page.player > .page-bar, .learn.path > .page-bar, .pg-diag > .page-bar { margin-bottom: var(--s4); }
+.page.player .lab-h :is(.subtitle, .lede), .page.player .goal-text, .page.player .ch-brief > p { max-width: var(--w-text); }
+.page.player .goal-text { display: block; }
+
+/* the prerequisite line (agent C, components/Prereqs.tsx) under a lesson's or a lab's facts: the same gap as the
+   blocks around it, so it reads as part of the header rather than stuck to the line above */
+:is(.lesson-h, .lab-h) > .prereqs { margin-top: var(--s3); }
+
+/* Progress: the "where to continue" card keeps its action near its text on wide screens */
+.pg-me .pg-now { max-width: var(--w-wide); }
+
+/* phones down to 320 px: nothing wider than the screen */
+@media (max-width: 380px) {
+  :root { --gutter: 12px; }
+  .page-bar { gap: 0 10px; }
+}

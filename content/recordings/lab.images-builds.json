@@ -1,0 +1,245 @@
+{
+ "lab": "lab.images-builds",
+ "kind": "lab",
+ "lab_hash": "23e7323353dff541",
+ "recorded_at": "2026-10-20T18:18:02+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "platform",
+   "cmd": "oc get imagestream httpd -n openshift",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    IMAGE REPOSITORY                                                          TAGS                                              UPDATED\nhttpd   default-route-openshift-image-registry.apps-crc.testing/openshift/httpd   2.4-el8,2.4-ubi10,2.4-ubi8,2.4-ubi9 + 1 more...   6 months ago\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "platform",
+   "cmd": "oc get istag httpd:latest -n openshift -o jsonpath='{.image.dockerImageReference}'",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "image-registry.openshift-image-registry.svc:5000/openshift/httpd@sha256:e5481bb4a0a4b0aaaa969fada9cd2638929b868c427dd54c7eb5adad76393402",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "build",
+   "cmd": "oc start-build hello -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "build.build.openshift.io/hello-1 started\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "build",
+   "cmd": "oc get builds -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      TYPE     FROM         STATUS    STARTED   DURATION\nhello-1   Docker   Dockerfile   Pending             \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "result",
+   "cmd": "oc logs build/hello-1 -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "time=\"2026-10-20T18:18:19Z\" level=info msg=\"Not using native diff for overlay, this may cause degraded performance for building images: kernel has CONFIG_OVERLAY_FS_REDIRECT_DIR enabled\"\nI1020 18:18:19.434335       1 defaults.go:112] Defaulting to storage driver \"overlay\" with options [mountopt=metacopy=on].\nCaching blobs under \"/var/cache/blobs\".\n\nPulling image registry.access.redhat.com/ubi9/ubi-minimal:latest ...\nTrying to pull registry.access.redhat.com/ubi9/ubi-minimal:latest...\nGetting image source signatures\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:1f074f64bbb7038b3c5f4693483d11a074c3782cf1fa5419c9464d457ab7942a\nWriting manifest to image destination\nAdding transient rw bind mount for /run/secrets/rhsm\nAdding transient rw bind mount for /run/secrets/redhat.repo\nSTEP 1/5: FROM registry.access.redhat.com/ubi9/ubi-minimal:latest\nSTEP 2/5: RUN echo \"built by an OpenShift Build\" > /built-by.txt\n--> b9df4b6e7d77\nSTEP 3/5: CMD [\"sh\",\"-c\",\"cat /built-by.txt; sleep infinity\"]\n--> d3635242d25a\nSTEP 4/5: ENV \"OPENSHIFT_BUILD_NAME\"=\"hello-1\" \"OPENSHIFT_BUILD_NAMESPACE\"=\"academy-builds\"\n--> 40733aa7f379\nSTEP 5/5: LABEL \"io.openshift.build.name\"=\"hello-1\" \"io.openshift.build.namespace\"=\"academy-builds\"\nCOMMIT temp.builder.openshift.io/academy-builds/hello-1:d5212323\n--> 43a4e8ec36af\nSuccessfully tagged temp.builder.openshift.io/academy-builds/hello-1:d5212323\n43a4e8ec36af331b053e968363830eeb0986a910e3e8d9c8a14ee94dda817120\n\nPushing image image-registry.openshift-image-registry.svc:5000/academy-builds/hello:latest ...\nGetting image source signatures\nCopying blob sha256:503e9d64ce339e1ddfdc19ff9be2d5828e4ba2abaefa2f4626c53c7bb40ff6bd\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:43a4e8ec36af331b053e968363830eeb0986a910e3e8d9c8a14ee94dda817120\nWriting manifest to image destination\nSuccessfully pushed image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:0c8ece69fce8754947f08925370d51d918082a81a52c29ada5d23f0e630b57cb\nPush successful\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "result",
+   "cmd": "oc get istag hello:latest -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME           IMAGE REFERENCE                                                                                                                                 UPDATED\nhello:latest   image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:0c8ece69fce8754947f08925370d51d918082a81a52c29ada5d23f0e630b57cb   6 seconds ago\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deploy",
+   "cmd": "oc create deployment hello --image=image-registry.openshift-image-registry.svc:5000/academy-builds/hello:latest -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deploy",
+   "cmd": "oc set triggers deploy/hello --from-image=hello:latest -c hello -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello triggers updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deploy",
+   "cmd": "oc rollout status deploy/hello -n academy-builds --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"hello\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deploy",
+   "cmd": "oc logs deploy/hello -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "built by an OpenShift Build\n",
+   "stderr": "Found 2 pods, using pod/hello-696747b9b5-hcv8h\n",
+   "ok": true
+  },
+  {
+   "step": "rebuild",
+   "cmd": "oc start-build hello -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "build.build.openshift.io/hello-2 started\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rebuild",
+   "cmd": "oc get builds -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      TYPE     FROM         STATUS     STARTED          DURATION\nhello-1   Docker   Dockerfile   Complete   38 seconds ago   22s\nhello-2   Docker   Dockerfile   Pending                     \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "after",
+   "cmd": "oc rollout history deploy/hello -n academy-builds",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello \nREVISION  CHANGE-CAUSE\n1         <none>\n2         <none>\n3         <none>\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "after",
+   "cmd": "oc get deploy hello -n academy-builds -o jsonpath='{.spec.template.spec.containers[0].image}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:7f3abde213d0fadcf5e6764efc8bc51e7ba26a2de76d4fdfb637f08260395830",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "build2",
+    "title": "Build hello-2 completed",
+    "expect": "Complete",
+    "status": "fail",
+    "observed": "Error from server (NotFound): builds.build.openshift.io \"hello-2\" not found"
+   },
+   {
+    "id": "hello-ready",
+    "title": "hello runs",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"hello\" not found"
+   },
+   {
+    "id": "pinned",
+    "title": "The trigger pinned the image to a digest",
+    "expect": "image@sha256:…",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"hello\" not found"
+   },
+   {
+    "id": "rolled",
+    "title": "Build 2 rolled out by itself (the Deployment runs the digest build 2 produced)",
+    "expect": "image@<build 2 digest>",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"hello\" not found"
+   }
+  ],
+  "at": 1792520290.724302
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "build2",
+    "title": "Build hello-2 completed",
+    "expect": "Complete",
+    "status": "pass",
+    "observed": "status.phase = 'Complete'"
+   },
+   {
+    "id": "hello-ready",
+    "title": "hello runs",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "pinned",
+    "title": "The trigger pinned the image to a digest",
+    "expect": "image@sha256:…",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].image = 'image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:7f3abde213d0fadcf5e6764efc8bc51e7ba26a2de76d4fdfb637f08260395830'"
+   },
+   {
+    "id": "rolled",
+    "title": "Build 2 rolled out by itself (the Deployment runs the digest build 2 produced)",
+    "expect": "image@<build 2 digest>",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].image = 'image-registry.openshift-image-registry.svc:5000/academy-builds/hello@sha256:7f3abde213d0fadcf5e6764efc8bc51e7ba26a2de76d4fdfb637f08260395830'; build/hello-2 status.output.to.imageDigest = 'sha256:7f3abde213d0fadcf5e6764efc8bc51e7ba26a2de76d4fdfb637f08260395830'"
+   }
+  ],
+  "at": 1792520358.231717
+ },
+ "seconds": 76,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-builds: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,246 @@
+/* ============================================================================================================
+   The practice arena: the lists of labs and incidents, the lab / incident / challenge players, and the terminal.
+   One reading order on every page: what this is (header, goal), what to do now (one step, one stage, one brief),
+   and what came of it (a status pill, the checks). Cards are the same white surface as the lessons; a primary
+   button appears only when it is the next sensible action; status is always a word plus a colour, never colour alone.
+   Part 1 styles classes that only these pages use. Part 2 restyles shared classes (cards, steps, command blocks,
+   tiles); every rule there is scoped under .page.practice so it wins over styles.css whatever the load order.
+   Motion is limited to a few state changes (a finished step, an alert, a disclosure chevron); reduced motion turns
+   all of it off at the end of this file.
+   ============================================================================================================ */
+
+/* ================================================================== part 1: classes only these pages use */
+
+/* ------------------------------------------------------------------ list header: how far the learner has got */
+.score { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 150px; }
+.score strong { font-family: var(--display); font-size: 1.7rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.score small { font-size: 0.86rem; color: var(--muted); text-align: right; }
+.score .bar { width: 100%; height: 6px; margin-top: 6px; }
+.score .bar i { background: var(--ok); }
+.method-d ol { margin: 8px 0 4px; padding-left: 1.3em; color: var(--text-2); }
+
+/* ------------------------------------------------------------------ the player: goal and how it runs here */
+/* a lab, incident or challenge: the frame, like every page; its widths come from the layout system (theme.css) */
+.page.player { max-width: var(--wrap); }
+.goal-line {
+  display: flex; align-items: flex-start; gap: 12px; margin: 18px 0 12px; padding: 14px 18px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text);
+}
+.goal-line .icon { margin-top: 3px; color: var(--accent); }
+.goal-lbl { display: block; margin-bottom: 2px; font: 650 var(--fs-xs)/1.4 var(--sans); color: var(--muted); }
+.goal-text { display: block; font-size: var(--fs-base); line-height: 1.55; }
+.pager-alert .goal-line { margin: 20px 0 14px; background: var(--surface-2); }
+
+/* one quiet line in practice mode; one compact bar with a cluster */
+.env-line { display: block; margin: 10px 0 14px; padding: 0 2px; font-size: 0.9rem; color: var(--muted); }
+.env-line .icon { display: inline-block; vertical-align: -2px; margin-right: 4px; color: var(--violet); }
+.env-line.warn .icon { color: var(--warn); }
+.env { display: flex; gap: 14px; align-items: flex-start; margin: 14px 0; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.env p { margin: 4px 0 8px; color: var(--text-2); }
+.env.live { flex-direction: column; gap: 10px; margin: 0 0 14px; padding: 12px 14px; border-radius: 14px; border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.env-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--ok); }
+.env-h strong { color: var(--text); }
+.env-h .grow { min-width: 0; }
+.env-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.env-msg { padding: 8px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid currentColor; font-size: 0.9rem; font-weight: 500; animation: rise 0.25s var(--ease) both; }
+.env-msg.ok { color: var(--ok); }
+.env-msg.bad { color: var(--bad); }
+.env-msg.warn { color: var(--warn); }
+.term-drawer { margin-top: 18px; }
+
+/* ------------------------------------------------------------------ a step: its status, its commands, what to do next */
+.step-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 26px; }
+.step-done { animation: practice-pop 0.35s var(--ease) both; }
+.page.practice .step-do .md p, .page.practice .step-do p { color: var(--text); }
+.nav-right { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.nav-right > .muted.small { font-size: 0.88rem; }
+.finish-banner {
+  display: flex; gap: 14px; align-items: center; margin: 0 0 14px; padding: 14px 18px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ok) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--line));
+}
+.finish-banner > .icon { flex: none; box-sizing: content-box; padding: 6px; border-radius: 50%; color: var(--ok); background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.finish-banner div { display: flex; flex-direction: column; }
+.finish-banner span { color: var(--text-2); font-size: 0.92rem; }
+
+/* ------------------------------------------------------------------ incident */
+.page.practice .symptom .md p, .page.practice .symptom p { font-size: 1.08rem; color: var(--text); }
+.alert-h { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-family: var(--mono); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--bad); }
+.sev-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 55%, transparent); animation: practice-ping 1.6s ease-out 3; } /* it calls attention three times, then rests */
+.inv-cmd + .inv-cmd { margin-top: 4px; }
+textarea.diag { min-height: 8.5rem; margin-top: 12px; background: var(--surface); font-family: var(--mono); font-size: 0.88rem; line-height: 1.55; }
+textarea.diag::placeholder { color: var(--placeholder); opacity: 1; }
+.hints { display: grid; justify-items: start; gap: 8px; margin: 16px 0 4px; }
+.hint { width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); animation: rise 0.3s var(--ease) both; }
+.hint-n { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--warn); }
+.hint .md p { margin: 2px 0 0; }
+.compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin: 4px 0 18px; }
+.compare-col { padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.compare-col.mine-col { background: var(--surface-2); }
+.compare .mine { margin: 6px 0 0; }
+.selfcheck-box { padding: 14px 16px; border-radius: 12px; border: 1.5px dashed var(--line-2); margin: 0 0 18px; display: grid; gap: 6px; }
+
+/* ------------------------------------------------------------------ challenge */
+.ch-reqs { list-style: none; counter-reset: req; margin: 12px 0 16px; padding: 0; display: grid; gap: 8px; }
+.ch-reqs li {
+  counter-increment: req; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 10px 14px 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); line-height: 1.55;
+}
+.ch-reqs li::before {
+  content: counter(req); display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent-strong); font: 700 0.8rem/1 var(--mono);
+}
+.ch-req-t { min-width: 0; overflow-wrap: anywhere; }
+.ch-criteria { list-style: none; padding-left: 0; display: grid; gap: 4px; }
+.ch-work, .ch-answer { margin-top: 28px; }
+.ch-h { margin: 0 0 12px; font-size: 1.3rem; }
+.ch-reveal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line-2); }
+.ch-reveal .muted { flex: 1 1 260px; min-width: 0; }
+.ch-solution { padding: 24px 26px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); animation: rise 0.3s var(--ease) both; }
+.ch-solution .ch-h { margin-top: 0; }
+.ch-trials { width: 100%; border-collapse: collapse; font-size: .92rem; margin-top: 10px; }
+.ch-trials th, .ch-trials td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ch-trials th { font-weight: 600; color: var(--muted); font-size: .82rem; }
+.ch-trials tr.bad td:last-child { color: var(--bad); }
+.small-pill { font-size: .75rem; margin-left: 6px; }
+@media (max-width: 640px) { .ch-trials th:nth-child(2), .ch-trials td:nth-child(2) { display: none; } }
+
+/* ------------------------------------------------------------------ motion */
+@keyframes practice-pop { 0% { transform: scale(0.8); opacity: 0; } 65% { transform: scale(1.08); } }
+@keyframes practice-ping { to { box-shadow: 0 0 0 9px transparent; } }
+
+/* ================================================================== part 2: shared classes, restyled for these pages */
+
+/* ------------------------------------------------------------------ list pages: labs and incidents */
+.page.practice .filters { margin: 4px 0 24px; gap: 10px 14px; }
+.page.practice .chips { margin: 0; }
+.page.practice .chip { min-height: 38px; padding: 4px 14px; font-size: 0.88rem; }
+.page.practice .method-d { padding: 8px 14px; }
+.page.practice .method-d[open] { flex: 1 1 100%; }
+
+.page.practice .group + .group { margin-top: 34px; }
+.page.practice .group-h { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 1.15rem; letter-spacing: -0.01em; }
+.page.practice .group-h small { padding: 1px 9px; border-radius: 99px; border: 1px solid var(--line-2); color: var(--muted); font: 600 0.76rem/1.6 var(--mono); }
+.page.practice .group-h .terr-dot { width: 10px; height: 10px; flex: none; }
+
+.page.practice .tile { gap: 8px; padding: 18px 18px 16px; border-radius: 14px; }
+.page.practice .tile-top > .icon { box-sizing: content-box; padding: 6px; border-radius: 9px; color: var(--tc, var(--ok)); background: color-mix(in srgb, currentColor 12%, transparent); }
+.page.practice .tile h3 { margin: 2px 0 0; font-size: 1.06rem; line-height: 1.25; }
+.page.practice .tile p { font-size: 0.92rem; line-height: 1.5; }
+.page.practice .tile-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.page.practice .tile-sub { margin-left: auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; color: var(--muted); }
+.page.practice a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 14px; }
+
+/* ------------------------------------------------------------------ the player: header */
+.page.practice .lesson-top { min-height: 40px; }
+.page.practice .lab-h { margin: 6px 0 0; }
+.page.practice .lab-h .act-head { margin: 8px 0 6px; }
+.page.practice .lab-h .lesson-title { margin: 0 0 8px; font-size: clamp(1.9rem, 4.4vw, 2.6rem); }
+.page.practice .lab-h .subtitle { margin: 0 0 6px; color: var(--text-2); font-size: 1.1rem; }
+.page.practice .lab-h .lede { margin: 6px 0 14px; font-size: 1.06rem; }
+.page.practice .lesson-meta { gap: 8px 12px; }
+
+/* disclosures: one chevron that turns, everywhere */
+.page.practice details > summary { display: flex; align-items: center; gap: 10px; list-style: none; cursor: pointer; }
+.page.practice details > summary::-webkit-details-marker { display: none; }
+.page.practice details > summary::before {
+  content: ''; flex: none; width: 7px; height: 7px; margin: 0 3px 0 2px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform 0.18s var(--ease);
+}
+.page.practice details[open] > summary::before { transform: rotate(45deg); }
+.page.practice details.more { margin: 14px 0; }
+.page.practice .before { margin: 0 0 6px; }
+.page.practice .before details.more { margin: 10px 0; background: var(--surface-2); }
+/* inside a card, a disclosure is a plain row, not a box in a box */
+.page.practice .lesson-step details.more, .page.practice .finish details.more, .page.practice .debrief-full details.more, .page.practice .ch-solution details.more {
+  margin: 0; padding: 12px 2px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none;
+}
+.page.practice .deeper { margin-top: 22px; }
+.page.practice .deeper h3 { margin-bottom: 4px; }
+.page.practice details.ch-evidence { margin: 28px 0 8px; }
+
+/* ------------------------------------------------------------------ steps and stages */
+.page.practice .lesson-steps { gap: 8px; margin: 20px 0 14px; }
+.page.practice .ls { min-height: 40px; padding: 10px 0 2px; border-radius: 4px; }
+.page.practice .ls-bar { height: 5px; transition: background-color 0.3s var(--ease); }
+.page.practice .ls.past .ls-bar { background: var(--ok); }
+.page.practice .inc-stages .ls.past .ls-bar { background: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }
+.page.practice .ls.off .ls-bar { background: var(--warn); }
+.page.practice .ls.on .ls-bar { background: var(--accent); }
+.page.practice .ls-label { font-size: 0.78rem; }
+.page.practice .ls.past .ls-label { color: var(--text-2); }
+.page.practice .ls.on .ls-label { color: var(--text); font-weight: 700; }
+.page.practice .ls:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* the one card the learner works in: a step, a stage, the finish, the brief */
+.page.practice .lesson-step, .page.practice .finish, .page.practice .pager-alert, .page.practice .debrief-full {
+  margin-top: 0; padding: 26px 28px 24px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1);
+}
+.page.practice .pager-alert { border-left: 4px solid var(--bad); }
+.page.practice .step-count { margin: 0; font-size: 0.74rem; }
+@media (max-width: 640px) { .page.practice .step-count { font-size: 0.8rem; } } /* readable on a phone */
+.page.practice .step-h2 { margin: 4px 0 12px; }
+.page.practice .step-do { max-width: 68ch; font-size: 1.04rem; }
+.page.practice .finish .step-h2 { margin-top: 8px; }
+
+.page.practice .cmds { gap: 10px; margin: 16px 0; }
+.page.practice .cmdblock { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.page.practice .cmd-text { flex: 1 1 200px; }
+.page.practice .debrief { gap: 12px; margin-top: 16px; }
+
+.page.practice .lesson-nav { align-items: center; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.page.practice .lesson-nav .btn { transition: background-color 0.25s var(--ease), border-color 0.25s var(--ease), color 0.25s var(--ease), box-shadow 0.25s var(--ease), transform 0.15s var(--ease); }
+.page.practice .linkish.small { min-height: 32px; }
+
+/* results: the colour of the left edge repeats the word in the pill */
+.page.practice .checks { border-radius: 12px; border-left-width: 3px; }
+.page.practice .checks.ok { border-left-color: var(--ok); }
+.page.practice .checks.warn { border-left-color: var(--warn); }
+.page.practice .checks.bad { border-left-color: var(--bad); }
+
+/* ------------------------------------------------------------------ challenge: a card that also carries .callout / .lesson-step */
+.page.practice .lab-h + .ch-brief { margin-top: 20px; }
+.page.practice .ch-brief .step-h2 { margin: 0 0 8px; font-size: 1.35rem; }
+.page.practice .ch-brief .ch-req-h { margin-top: 26px; }
+.page.practice .ch-nocluster { display: block; margin: 0 0 14px; }
+
+/* ------------------------------------------------------------------ terminal page */
+.page.practice .starters button { border-radius: 12px; }
+
+/* ------------------------------------------------------------------ tablets and phones */
+@media (max-width: 880px) {
+  .player .lesson-nav { flex-wrap: wrap; }
+  .player .nav-right { width: 100%; }
+  .player .nav-right .btn { flex: 1; justify-content: center; }
+  .page.practice .inc-stages .ls-label { display: block; }
+}
+@media (max-width: 700px) {
+  .page.practice .debrief { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .compare { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .score { align-items: flex-start; min-width: 0; width: 100%; }
+  .score small { text-align: left; }
+  .goal-line { gap: 10px; padding: 10px 12px; }
+  .env-actions { width: 100%; }
+  .env-actions .btn { flex: 1 1 auto; }
+  .ch-reqs li { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 10px 12px 10px 10px; }
+  .ch-reveal .btn { width: 100%; }
+  .page.practice .lesson-step, .page.practice .finish, .page.practice .pager-alert, .page.practice .debrief-full, .page.practice .ch-solution { padding: 20px 16px 18px; border-radius: 14px; }
+  .page.practice .lab-h .act-head { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; }
+  .page.practice .lab-h .act-mark { grid-row: span 2; }
+  .page.practice .lab-h .act-verb::before { display: none; }
+  .page.practice .inc-stages .ls-label { font-size: 0.78rem; } /* 12.5 px: readable; the longest label is cut with an ellipsis at 320 px */
+  .page.practice .cmd-text { flex-basis: 160px; }
+  .page.practice .tile-sub { max-width: 45%; }
+}
+
+@media (hover: none) {
+  .page.practice .tile:hover { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-done, .sev-dot, .env-msg, .hint, .ch-solution { animation: none; }
+  .page.practice details > summary::before, .page.practice .ls-bar, .page.practice .lesson-nav .btn { transition: none; }
+  .page.practice .tile:hover { transform: none; }
+}

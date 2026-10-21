@@ -1,0 +1,173 @@
+{
+ "lab": "lesson.ct.podman-stack",
+ "kind": "lesson",
+ "lab_hash": "effe1de524c3b965",
+ "recorded_at": "2026-10-15T15:46:10+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "podman pull -q quay.io/prometheus/busybox:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "stderr": "",
+   "combined": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman network create academy-ct3-net && podman network inspect academy-ct3-net --format 'driver={{.Driver}} dns={{.DNSEnabled}} subnet={{range .Subnets}}{{.Subnet}}{{end}}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "academy-ct3-net\ndriver=bridge dns=true subnet=10.89.1.0/24\n",
+   "stderr": "",
+   "combined": "academy-ct3-net\ndriver=bridge dns=true subnet=10.89.1.0/24\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman network inspect podman --format 'the default network: dns={{.DNSEnabled}}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "the default network: dns=false\n",
+   "stderr": "",
+   "combined": "the default network: dns=false\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman volume create academy-ct3-data && podman volume inspect academy-ct3-data --format 'driver={{.Driver}} mountpoint={{.Mountpoint}}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "academy-ct3-data\ndriver=local mountpoint=/home/learner/.local/share/containers/storage/volumes/academy-ct3-data/_data\n",
+   "stderr": "",
+   "combined": "academy-ct3-data\ndriver=local mountpoint=/home/learner/.local/share/containers/storage/volumes/academy-ct3-data/_data\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run --rm -v academy-ct3-data:/data quay.io/prometheus/busybox:latest sh -c 'mkdir -p /data/kv && echo blue > /data/kv/colour && echo ok > /data/healthz && ls -R /data'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/data:\nhealthz\nkv\n\n/data/kv:\ncolour\n",
+   "stderr": "",
+   "combined": "/data:\nhealthz\nkv\n\n/data/kv:\ncolour\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "printf 'kv-s3cret' | podman secret create academy-ct3-token - > /dev/null && podman secret ls --filter name=academy-ct3 --format '{{.Name}} driver={{.Driver}}'; podman secret inspect academy-ct3-token --format 'name={{.Spec.Name}} data=[{{.SecretData}}]'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "academy-ct3-token driver=file\nname=academy-ct3-token data=[]\n",
+   "stderr": "",
+   "combined": "academy-ct3-token driver=file\nname=academy-ct3-token data=[]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name academy-ct3-leak -e PLAIN_TOKEN=kv-s3cret --secret academy-ct3-token,type=env,target=KV_TOKEN quay.io/prometheus/busybox:latest sleep 60 > /dev/null && podman inspect academy-ct3-leak --format '{{range .Config.Env}}{{println .}}{{end}}' | grep TOKEN; podman exec academy-ct3-leak sh -c 'echo \"inside: KV_TOKEN=$KV_TOKEN\"'; podman rm -f -t 0 academy-ct3-leak > /dev/null",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "PLAIN_TOKEN=kv-s3cret\ninside: KV_TOKEN=kv-s3cret\n",
+   "stderr": "",
+   "combined": "PLAIN_TOKEN=kv-s3cret\ninside: KV_TOKEN=kv-s3cret\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name academy-ct3-api --network academy-ct3-net -v academy-ct3-data:/data --secret academy-ct3-token,type=env,target=KV_TOKEN --health-cmd 'wget -qO /dev/null http://localhost:8080/healthz' --health-interval disable quay.io/prometheus/busybox:latest sh -c 'trap \"exit 0\" TERM; sleep 5; echo \"/kv:app:$KV_TOKEN\" > /tmp/httpd.conf; httpd -f -p 8080 -h /data -c /tmp/httpd.conf & wait'; podman inspect academy-ct3-api --format 'state={{.State.Status}} health={{.State.Health.Status}}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "65ae802a927ad992efe1cf29c50ab5ad063921eb8a7b912c072b1d501f965ec4\nstate=running health=starting\n",
+   "stderr": "",
+   "combined": "65ae802a927ad992efe1cf29c50ab5ad063921eb8a7b912c072b1d501f965ec4\nstate=running health=starting\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run --rm --network academy-ct3-net --secret academy-ct3-token quay.io/prometheus/busybox:latest sh -c 'wget -qO- \"http://app:$(cat /run/secrets/academy-ct3-token)@academy-ct3-api:8080/kv/colour\"'",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "wget: can't connect to remote host (10.89.1.2): Connection refused\n",
+   "combined": "wget: can't connect to remote host (10.89.1.2): Connection refused\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "until podman healthcheck run academy-ct3-api > /dev/null 2>&1; do sleep 1; done; podman inspect academy-ct3-api --format 'state={{.State.Status}} health={{.State.Health.Status}}'; podman run --rm --network academy-ct3-net --secret academy-ct3-token quay.io/prometheus/busybox:latest sh -c 'wget -qO- \"http://app:$(cat /run/secrets/academy-ct3-token)@academy-ct3-api:8080/kv/colour\"'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "state=running health=healthy\nblue\n",
+   "stderr": "",
+   "combined": "state=running health=healthy\nblue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run --rm quay.io/prometheus/busybox:latest wget -T 3 -qO- http://academy-ct3-api:8080/healthz",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "wget: bad address 'academy-ct3-api:8080'\n",
+   "combined": "wget: bad address 'academy-ct3-api:8080'\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rm -f -t 3 academy-ct3-api > /dev/null && podman volume ls --filter name=academy-ct3 --format '{{.Name}}' && podman run --rm -v academy-ct3-data:/data:ro quay.io/prometheus/busybox:latest cat /data/kv/colour",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "academy-ct3-data\nblue\n",
+   "stderr": "",
+   "combined": "academy-ct3-data\nblue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rm -f -t 0 academy-ct3-api > /dev/null 2>&1; podman volume rm academy-ct3-data > /dev/null && podman secret rm academy-ct3-token > /dev/null && podman network rm academy-ct3-net > /dev/null && echo cleaned up",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cleaned up\n",
+   "stderr": "",
+   "combined": "cleaned up\n",
+   "ok": true
+  }
+ ],
+ "seconds": 13,
+ "ok": true,
+ "problems": []
+}

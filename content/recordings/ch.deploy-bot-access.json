@@ -1,0 +1,1289 @@
+{
+ "lab": "ch.deploy-bot-access",
+ "kind": "challenge",
+ "lab_hash": "1cc475d8776d60d2",
+ "recorded_at": "2026-10-14T16:23:42+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "patch-deploy",
+    "title": "ci-bot can patch deployments",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot patch deployments.apps? no"
+   },
+   {
+    "id": "update-deploy",
+    "title": "ci-bot can update deployments",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot update deployments.apps? no"
+   },
+   {
+    "id": "get-deploy",
+    "title": "ci-bot can get deployments",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot get deployments.apps? no"
+   },
+   {
+    "id": "list-deploy",
+    "title": "ci-bot can list deployments",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot list deployments.apps? no"
+   },
+   {
+    "id": "list-pods",
+    "title": "ci-bot can list pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot list pods? no"
+   },
+   {
+    "id": "pod-logs",
+    "title": "ci-bot can read pod logs",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-bot get pods/log? no"
+   },
+   {
+    "id": "no-secrets",
+    "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+    "expect": "no rule allows reading secrets",
+    "status": "pass",
+    "observed": "ci-bot has none of: get/list/watch secrets"
+   },
+   {
+    "id": "no-delete",
+    "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+    "expect": "no rule allows deleting them",
+    "status": "pass",
+    "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+   },
+   {
+    "id": "no-bindings",
+    "title": "ci-bot cannot grant access",
+    "expect": "no rule allows creating or changing bindings or roles",
+    "status": "pass",
+    "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+   }
+  ],
+  "at": 1791995029.9662762
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "patch-deploy",
+    "title": "ci-bot can patch deployments",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot patch deployments.apps? yes"
+   },
+   {
+    "id": "update-deploy",
+    "title": "ci-bot can update deployments",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot update deployments.apps? yes"
+   },
+   {
+    "id": "get-deploy",
+    "title": "ci-bot can get deployments",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot get deployments.apps? yes"
+   },
+   {
+    "id": "list-deploy",
+    "title": "ci-bot can list deployments",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot list deployments.apps? yes"
+   },
+   {
+    "id": "list-pods",
+    "title": "ci-bot can list pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot list pods? yes"
+   },
+   {
+    "id": "pod-logs",
+    "title": "ci-bot can read pod logs",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-bot get pods/log? yes"
+   },
+   {
+    "id": "no-secrets",
+    "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+    "expect": "no rule allows reading secrets",
+    "status": "pass",
+    "observed": "ci-bot has none of: get/list/watch secrets"
+   },
+   {
+    "id": "no-delete",
+    "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+    "expect": "no rule allows deleting them",
+    "status": "pass",
+    "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+   },
+   {
+    "id": "no-bindings",
+    "title": "ci-bot cannot grant access",
+    "expect": "no rule allows creating or changing bindings or roles",
+    "status": "pass",
+    "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+   }
+  ],
+  "at": 1791995039.2963831
+ },
+ "trials": [
+  {
+   "id": "edit-role",
+   "title": "The colleague's shortcut: bind the built-in edit role",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "fail",
+     "observed": "ci-bot may get/list/watch secrets; get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "fail",
+     "observed": "ci-bot may delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:edit-role",
+     "cmd": "oc create rolebinding ci-bot-edit --clusterrole=edit --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-edit created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "user-not-sa",
+   "title": "Right role, wrong subject: bound to a user named ci-bot, not the ServiceAccount",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot patch deployments.apps? no"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot update deployments.apps? no"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot get deployments.apps? no"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot list deployments.apps? no"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot list pods? no"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot get pods/log? no"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "ci-bot has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:user-not-sa",
+     "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:user-not-sa",
+     "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:user-not-sa",
+     "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --user=ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:user-not-sa",
+     "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --user=ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "no-logs",
+   "title": "Pods readable, but the pods/log subresource forgotten",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot get pods/log? no"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "ci-bot has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:no-logs",
+     "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:no-logs",
+     "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:no-logs",
+     "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:no-logs",
+     "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "named-secret",
+   "title": "Looks least-privilege, but grants one named Secret: unnamed checks would miss it",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "fail",
+     "observed": "ci-bot may get secrets (names: db-credentials)"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:named-secret",
+     "cmd": "oc apply -f - -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pipeline created\nrolebinding.rbac.authorization.k8s.io/pipeline-ci-bot created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "one-role-yaml",
+   "title": "A correct alternative: one Role with two rules, written as YAML, bound with a different name",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "ci-bot has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:one-role-yaml",
+     "cmd": "oc apply -f - -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pipeline created\nrolebinding.rbac.authorization.k8s.io/pipeline-ci-bot created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-01-no-get",
+   "title": "pipeline lacks Deployment get",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can ci-bot get deployments.apps? no"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "ci-bot has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-01-no-get",
+     "cmd": "oc create role deploy-bot --verb=list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-01-no-get",
+     "cmd": "oc create role pod-reader --verb=get,list --resource=pods,pods/log -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-01-no-get",
+     "cmd": "oc create rolebinding bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-01-no-get",
+     "cmd": "oc create rolebinding bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-02-list-secrets",
+   "title": "forbidden list access",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "fail",
+     "observed": "ci-bot may list secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "fail",
+     "run": null,
+     "code": 1,
+     "stdout": "no\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create role extra --verb=list --resource=secrets -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-list-secrets",
+     "cmd": "oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-02-get-secrets",
+   "title": "forbidden get access to db-password",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "fail",
+     "observed": "ci-bot may get secrets (names: db-password)"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "pass",
+     "observed": "ci-bot has none of: delete/deletecollection deployments.apps; delete/deletecollection services"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "fail",
+     "run": null,
+     "code": 1,
+     "stdout": "no\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create role extra --verb=get --resource=secrets --resource-name=db-password -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-get-secrets",
+     "cmd": "oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-02-deletecollection-deployments-apps",
+   "title": "forbidden deletecollection access",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "patch-deploy",
+     "title": "ci-bot can patch deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot patch deployments.apps? yes"
+    },
+    {
+     "id": "update-deploy",
+     "title": "ci-bot can update deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot update deployments.apps? yes"
+    },
+    {
+     "id": "get-deploy",
+     "title": "ci-bot can get deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get deployments.apps? yes"
+    },
+    {
+     "id": "list-deploy",
+     "title": "ci-bot can list deployments",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list deployments.apps? yes"
+    },
+    {
+     "id": "list-pods",
+     "title": "ci-bot can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot list pods? yes"
+    },
+    {
+     "id": "pod-logs",
+     "title": "ci-bot can read pod logs",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can ci-bot get pods/log? yes"
+    },
+    {
+     "id": "no-secrets",
+     "title": "ci-bot cannot read Secrets (get, list or watch, any name)",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "ci-bot has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-delete",
+     "title": "ci-bot cannot delete Deployments or Services (any name, or all at once)",
+     "expect": "no rule allows deleting them",
+     "status": "fail",
+     "observed": "ci-bot may deletecollection deployments.apps"
+    },
+    {
+     "id": "no-bindings",
+     "title": "ci-bot cannot grant access",
+     "expect": "no rule allows creating or changing bindings or roles",
+     "status": "pass",
+     "observed": "ci-bot has none of: create/update/patch rolebindings.rbac.authorization.k8s.io; create/update/patch/bind/escalate roles.rbac.authorization.k8s.io"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/deploy-bot created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-deploy created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/ci-bot-pods created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "fail",
+     "run": null,
+     "code": 1,
+     "stdout": "no\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create role extra --verb=deletecollection --resource=deployments.apps -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-02-deletecollection-deployments-apps",
+     "cmd": "oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/extra created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 270,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-access: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

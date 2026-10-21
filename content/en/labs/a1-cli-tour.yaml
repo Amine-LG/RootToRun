@@ -1,0 +1,145 @@
+id: lab.cli-tour
+title: "A tour of the oc CLI"
+summary: "Who you are, what the API offers, and every way to read an object: wide, YAML, JSONPath, custom columns, labels, events."
+module: a1-cli
+mode: REAL_LAB
+minutes: 30
+level: 1
+supports: "Recorded on OpenShift 4.21.8 (oc 4.21.8, Kubernetes 1.34). `oc` includes every kubectl command."
+concepts: [k8s.labels, k8s.architecture]
+namespace: academy-cli
+objective: |
+  Become fast at the read side of `oc`: identify yourself and the cluster, discover resource types and their
+  schema, and extract exactly the field you need from any object.
+background: |
+  `oc` is the OpenShift CLI. It contains all of `kubectl` plus OpenShift commands (`oc new-app`, `oc
+  new-project`, `oc start-build`, `oc adm …`). Almost every command is an HTTP call to the API server,
+  authenticated with your credentials (a token here) and authorized by RBAC: `oc get pods` is a GET on
+  `/api/v1/namespaces/<ns>/pods`. (A few work locally, such as `oc kustomize` or the client half of
+  `oc version`.) The project holds a small `web` Deployment (labels `app=web`, `tier=frontend`, two replicas) and
+  its Service.
+
+  **Where everything comes from.** The app creates the project `academy-cli` as you, the learner identity (OpenShift
+  Local's `developer`), and applies the setup shown below: `web` runs Red Hat's UBI 9 Apache httpd image
+  (`registry.access.redhat.com/ubi9/httpd-24`), which needs no login to pull, and serves the page and the `/healthz`
+  file from the ConfigMap `web-content`, mounted as httpd's document root. The labels and the annotation of the last
+  step are yours. Clean up deletes the project.
+commands:
+  - {cmd: "oc whoami", meaning: "the user your token belongs to"}
+  - {cmd: "oc api-resources --api-group=apps", meaning: "resource types in one API group, with short names"}
+  - {cmd: "oc explain deployment.spec.strategy", meaning: "the schema, served by the API server"}
+  - {cmd: "oc get deploy web -n academy-cli -o jsonpath='{.spec.template.spec.containers[0].image}'", meaning: "one field, nothing else"}
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>academy cli</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web, tier: frontend}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web, tier: frontend}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+steps:
+  - id: identity
+    title: "Who am I, and where?"
+    do: "Always start by confirming the identity and the cluster you are talking to."
+    commands:
+      - {cmd: "oc whoami", meaning: "user name"}
+      - {cmd: "oc whoami --show-server", meaning: "API server URL"}
+      - {cmd: "oc version", meaning: "client and server versions"}
+      - {cmd: "oc projects", meaning: "projects you can see (only those where you have a role)"}
+    observe: "`developer`, `https://api.crc.testing:6443`, `Client Version: 4.21.8` and `Kubernetes Version: v1.34.5`, then the app projects you have a role in. There is no `Server Version` (OpenShift) line: oc reads it from the cluster-scoped ClusterVersion object, which an ordinary developer is not allowed to read."
+    why: "Running a command against the wrong cluster or as the wrong user is a classic production mistake. These checks take a second."
+  - id: discover
+    title: "Discover the API"
+    do: "List resource types and read the schema of a field."
+    commands:
+      - {cmd: "oc api-resources --api-group=apps", meaning: "Deployments, ReplicaSets, StatefulSets, DaemonSets… with short names"}
+      - {cmd: "oc api-resources --api-group=route.openshift.io", meaning: "an OpenShift API group"}
+      - {cmd: "oc explain deployment.spec.strategy.rollingUpdate", meaning: "field documentation from the cluster itself"}
+    predict:
+      prompt: "Where does `oc explain` get its documentation?"
+      choices: ["From the oc binary", "From the API server's OpenAPI schema", "From the internet"]
+      answer: 1
+      explain: "The API server publishes OpenAPI schemas, so `oc explain` also works for CRDs installed on this cluster and matches its exact version."
+      feedback:
+        - "No: the binary carries no schemas. An older or newer oc still shows the fields of the cluster it talks to, because it downloads them."
+        - "Right: oc fetches the OpenAPI document from the API server, so descriptions, defaults and enums match this cluster, CRDs included."
+        - "No: nothing comes from the internet. That is why `oc explain` works on disconnected clusters and for custom resources nobody documented online."
+    observe: "`apps/v1` holds Deployment (`deploy`), ReplicaSet (`rs`), StatefulSet (`sts`), DaemonSet (`ds`) and ControllerRevision; `route.openshift.io/v1` holds `routes`. `oc explain` describes maxSurge and maxUnavailable, both defaulting to 25%."
+  - id: read
+    title: "Read objects five ways"
+    do: "Read the same Deployment at increasing levels of precision."
+    commands:
+      - {cmd: "oc get deploy -n academy-cli -o wide", meaning: "more columns: containers, images, selector"}
+      - {cmd: "oc get deploy web -n academy-cli -o yaml", meaning: "the full object: spec, status, metadata"}
+      - {cmd: "oc get deploy web -n academy-cli -o jsonpath='{.spec.template.spec.containers[0].image}'", meaning: "exactly one field"}
+      - {cmd: "oc get pods -n academy-cli -o custom-columns=NAME:.metadata.name,IP:.status.podIP,NODE:.spec.nodeName", meaning: "your own table"}
+      - {cmd: "oc describe deploy web -n academy-cli", meaning: "human summary plus events"}
+    observe: "`-o wide` adds CONTAINERS (`httpd`), IMAGES and SELECTOR (`app=web`); the YAML shows defaults you never wrote (`progressDeadlineSeconds: 600`, `imagePullPolicy: Always`…) and a `status`; JSONPath prints the image name alone; the custom table lists two pods on node `crc`; describe shows the rollout strategy, the conditions and a `ScalingReplicaSet` event."
+    why: "`-o yaml` shows everything (great for learning), JSONPath and custom columns are for scripts and quick answers, `describe` adds the events you would otherwise query separately."
+  - id: labels
+    title: "Select with labels"
+    do: "Show labels, filter by them, sort by creation time."
+    commands:
+      - {cmd: "oc get pods -n academy-cli --show-labels", meaning: "every label of every pod"}
+      - {cmd: "oc get pods -n academy-cli -l tier=frontend", meaning: "equality selector"}
+      - {cmd: "oc get pods -n academy-cli -l 'app in (web,api)'", meaning: "set-based selector"}
+      - {cmd: "oc get pods -n academy-cli --sort-by=.metadata.creationTimestamp", meaning: "oldest first"}
+    observe: "Pods carry `app=web,tier=frontend` plus `pod-template-hash`, added by the Deployment controller. Both selectors return the same two pods: no pod has `app=api`, and a set-based `in` selector matches any of its values."
+  - id: events
+    title: "Events: what the cluster did"
+    do: "Read the project's events in time order."
+    commands:
+      - {cmd: "oc get events -n academy-cli --sort-by=.lastTimestamp", meaning: "ScalingReplicaSet, SuccessfulCreate, Scheduled, Pulling, Pulled, Created, Started…"}
+    observe: "The whole story of the Deployment: ScalingReplicaSet, SuccessfulCreate (from the ReplicaSet), Scheduled, AddedInterface (the pod network, OVN-Kubernetes on OpenShift), Pulling, Pulled (or already present), Created, Started. The recording also shows three `Warning Unhealthy` readiness failures: two `connection refused` in the first seconds after the containers started, before httpd was listening (normal at start-up), then, about 24 seconds after the containers started (`49s` against `73s`), one `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`: a probe that got no answer within its timeout (1 second by default). One isolated failure is worth noticing; failures that continue are a problem."
+    why: "Events are short-lived: upstream Kubernetes keeps them for one hour by default, OpenShift for about three hours. They are the fastest answer to 'what happened to my pod?', so copy them into the ticket if you need them later."
+  - id: label-it
+    title: "Label and annotate"
+    do: "Add an ownership label and an annotation, then select by the new label."
+    commands:
+      - {cmd: "oc label deploy web team=payments -n academy-cli", meaning: "labels: for selection"}
+      - {cmd: "oc annotate deploy web owner=platform-team -n academy-cli", meaning: "annotations: for information and tools"}
+      - {cmd: "oc get deploy -n academy-cli -l team=payments", meaning: "select by the new label"}
+    checks: [team, owner]
+    wait_for: [team, owner]
+hints: []
+checks:
+  - {id: team, title: "web is labelled team=payments", type: field, kind: deployment, name: web, path: metadata.labels.team, op: eq, value: payments, expect_text: "team=payments"}
+  - {id: owner, title: "web is annotated owner=platform-team", type: field, kind: deployment, name: web, path: metadata.annotations.owner, op: eq, value: platform-team, expect_text: "owner=platform-team"}
+variations:
+  - "`oc get deploy web -n academy-cli -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{\"\\t\"}{.image}{\"\\n\"}{end}'`: a loop in JSONPath."
+  - "`oc api-resources --verbs=list --namespaced=true`: everything you could list in a namespace."
+questions:
+  - q: "What is the difference between a label and an annotation?"
+    a: "Labels are indexed and used by selectors (Services, controllers, policies). Annotations hold arbitrary metadata and are not selectable."
+  - q: "Why does `oc explain` match your cluster exactly?"
+    a: "It reads the OpenAPI schema published by the API server, including CRDs."
+enterprise: |
+  In large enterprises, labelling conventions (`app.kubernetes.io/*`, team, cost centre, data classification) are
+  usually enforced by policy: they drive network policies, chargeback and incident routing.
+references:
+  - {title: "OpenShift 4.21: Getting started with the OpenShift CLI", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/cli_tools/openshift-cli-oc"}
+  - {title: "Kubernetes: JSONPath support", url: "https://kubernetes.io/docs/reference/kubectl/jsonpath/"}
+  - {title: "Kubernetes: Labels and selectors", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/"}

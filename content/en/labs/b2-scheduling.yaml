@@ -1,0 +1,199 @@
+id: lab.scheduling
+title: "Why is this pod Pending?"
+subtitle: "Scheduler filters on a real cluster"
+summary: "Two pods that cannot be scheduled for two different reasons; read the FailedScheduling events, fix each one correctly, and inspect the scheduler profile."
+module: p1-scheduling
+mode: REAL_LAB
+minutes: 30
+level: 2
+supports: "Verified on CRC / OpenShift 4.21.8 (single node `crc`, allocatable cpu 3800m). Event wording from kube-scheduler 1.34."
+concepts: [k8s.scheduler, k8s.requests-limits, k8s.affinity]
+prerequisites: [b.scheduler]
+namespace: academy-sched
+objective: |
+  Diagnose unschedulable pods from evidence (events, node allocatable, selectors), apply the right fix for
+  each filter that rejected them, and read the cluster's scheduler configuration.
+background: |
+  With one node, every scheduling decision is "this node or nothing". That makes CRC perfect for studying the
+  **filter** phase: the FailedScheduling event counts, for each rejection reason, how many nodes a filter rejected
+  for that reason (here always "1"). The **score** phase
+  (choosing among several feasible nodes) cannot be observed here; use the simulator in the Architecture
+  Studio for that, and keep the two clearly apart.
+
+  **Where everything comes from.** The app creates the project `academy-sched` and applies the two Deployments shown
+  below, `hungry` and `picky`, both running `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed); their requests and selector are written in the
+  manifests on purpose. The node is called `crc` because this lab expects OpenShift Local, whose single node has that
+  name; the reader identity reads it, because a normal user cannot read nodes. Clean up deletes the project.
+commands:
+  - {cmd: "oc get pods -n academy-sched -o wide", meaning: "Pending pods have no NODE"}
+  - {cmd: "oc describe pod -l app=hungry -n academy-sched", meaning: "Events at the bottom: FailedScheduling with the reason"}
+  - {cmd: "oc get events -n academy-sched --field-selector reason=FailedScheduling", meaning: "only scheduling failures"}
+  - {cmd: "oc describe node crc", as: reader, meaning: "reader identity: Allocatable and Allocated resources (sum of requests)"}
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: hungry
+      labels: {app: hungry}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: hungry}}
+      template:
+        metadata:
+          labels: {app: hungry}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources:
+              requests: {cpu: "8", memory: 32Mi}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: picky
+      labels: {app: picky}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: picky}}
+      template:
+        metadata:
+          labels: {app: picky}
+        spec:
+          terminationGracePeriodSeconds: 2
+          nodeSelector:
+            disktype: ssd
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+steps:
+  - id: observe
+    title: "Two Pending pods"
+    do: "List the pods, then describe the `hungry` pod and read its events."
+    commands:
+      - {cmd: "oc get pods -n academy-sched -o wide", meaning: "status and node"}
+      - {cmd: "oc describe pod -l app=hungry -n academy-sched", meaning: "events"}
+    wait_for: [event-cpu]
+    predict:
+      prompt: "`hungry` requests 8 CPUs. The node has 4 CPUs (3800m allocatable) and is mostly idle. Which filter rejects it?"
+      choices: ["None: the node is idle, it will run", "NodeResourcesFit: Insufficient cpu", "TaintToleration"]
+      answer: 1
+      explain: "The filter compares requests with allocatable minus already-requested CPU. Idle usage is irrelevant; 8 > 3.8 can never fit."
+      feedback:
+        - "The scheduler never looks at live usage: it adds up requests. An idle node with 3.8 CPUs allocatable still cannot accept a pod that requests 8."
+        - "Right: the NodeResourcesFit filter compares the 8-CPU request with the node's allocatable CPU minus what is already requested, and rejects the node."
+        - "Taints only matter when the node has one the pod does not tolerate. This node has no taints (`Taints: <none>` in `oc describe node`); the problem is the CPU request."
+    observe: |
+      `0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1
+      Preemption is not helpful for scheduling.` The pod's Conditions show `PodScheduled False` and Node is `<none>`.
+    why: |
+      After the filters fail, the PostFilter plugins run. Preemption (evicting lower-priority pods) is skipped here: a
+      request larger than the node's whole allocatable CPU (8 > 3.8) is marked unresolvable, because no eviction could
+      ever make room, hence "Preemption is not helpful for scheduling". "no new claims to deallocate" comes from the
+      Dynamic Resource Allocation plugin: the pod uses no ResourceClaims, so it has nothing to free either. A request that
+      fits the node but not its remaining free CPU would instead go through a real preemption attempt.
+    checks: [event-cpu]
+  - id: node
+    title: "Look at the node through the scheduler's eyes"
+    do: "Switch the terminal to the **reader** identity and read the node's allocatable resources and the sum of requests already placed."
+    commands:
+      - {cmd: "oc describe node crc", as: reader, meaning: "look for Allocatable and Allocated resources"}
+    observe: |
+      Capacity cpu 4, Allocatable cpu 3800m. Under Allocated resources, the recording shows cpu requests 2352m (61%) and
+      memory requests 9545Mi (95%) for 73 non-terminated pods, almost all of them platform pods. About 1.4 CPU is left
+      for new requests, although the node is far from busy.
+    why: "Allocatable = capacity minus the system and kube reservations (and, for memory, the eviction threshold). The free CPU for scheduling is allocatable minus the sum of requests of every pod on the node."
+  - id: fix-hungry
+    title: "Fix hungry the right way"
+    do: |
+      The application really needs about a tenth of a CPU. Correct the request in the Deployment (not in the
+      pod) and watch the new pod get scheduled.
+    commands:
+      - {cmd: "oc set resources deploy/hungry -n academy-sched --requests=cpu=100m", meaning: "right-size the request"}
+      - {cmd: "oc get pods -n academy-sched -l app=hungry -o wide", meaning: "the replacement pod is assigned to crc but may still be ContainerCreating while the old pod stays Pending; Running comes once the rollout finishes"}
+    observe: |
+      Right after the change, a pod from the new ReplicaSet is already bound to `crc` (ContainerCreating) while the old
+      pod is still Pending. The rollout then deletes the old Pending pod, and the lab waits until hungry is 1/1 ready.
+    why: "Requests are a reservation. Oversized requests waste capacity and block scheduling; undersized ones invite eviction and noisy neighbours."
+    checks: [hungry-ready]
+    wait_for: [hungry-ready]
+  - id: picky
+    title: "picky: a selector nothing satisfies"
+    do: "Describe the `picky` pod and compare its nodeSelector with the node's labels."
+    commands:
+      - {cmd: "oc describe pod -l app=picky -n academy-sched", meaning: "events"}
+      - {cmd: "oc get node crc --show-labels", as: reader, meaning: "reader identity: what labels exist"}
+    predict:
+      prompt: "Which message will the event show?"
+      choices: ["Insufficient memory", "node(s) didn't match Pod's node affinity/selector", "node(s) had untolerated taint"]
+      answer: 1
+      explain: "nodeSelector is evaluated by the NodeAffinity filter plugin: no node has disktype=ssd."
+      feedback:
+        - "picky requests only 10m CPU and 16Mi memory; resources are not the problem. Look at `Node-Selectors: disktype=ssd` in the describe output."
+        - "Right: nodeSelector is checked by the NodeAffinity filter, and the node's labels contain no `disktype` at all."
+        - "This node has no taints. A taint message would mention the taint; a missing label is reported as a node affinity/selector mismatch."
+    observe: |
+      `0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector.` followed again by `Preemption is not
+      helpful for scheduling` (evicting pods cannot add a label). The describe output shows `Node-Selectors:
+      disktype=ssd`, and the node's labels include `kubernetes.io/os=linux` but no `disktype`.
+    why: "A selector is a hard requirement. Labelling the node `disktype=ssd` would 'fix' it but lie about the hardware; the honest fix is a selector expressing a real requirement."
+  - id: fix-picky
+    title: "Fix picky with a requirement that is true"
+    do: |
+      This workload only needs Linux. Replace the selector (setting a key to null removes it in a strategic
+      merge patch).
+    commands:
+      - {cmd: "oc patch deploy/picky -n academy-sched -p '{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"disktype\":null,\"kubernetes.io/os\":\"linux\"}}}}}'", meaning: "remove disktype, require Linux"}
+      - {cmd: "oc get pods -n academy-sched -l app=picky -o wide", meaning: "the replacement pod is assigned to crc (possibly still ContainerCreating) while the old pod stays Pending; Running comes once the rollout finishes"}
+    observe: "A pod from the new ReplicaSet is immediately bound to `crc` (ContainerCreating) while the old one is still Pending; the rollout replaces it and the lab waits until picky is 1/1 ready."
+    why: "`kubernetes.io/os` is a well-known label set by the kubelet. Preferences (preferredDuringScheduling) would only affect scoring, which never blocks a pod."
+    checks: [picky-ready, picky-selector]
+    wait_for: [picky-ready]
+  - id: profile
+    title: "Which scoring would apply on a bigger cluster?"
+    do: "With the reader identity, read the cluster scheduler configuration."
+    commands:
+      - {cmd: "oc get scheduler cluster -o yaml", as: reader, meaning: "spec.profile; mastersSchedulable"}
+    observe: "`spec` has only `mastersSchedulable: true` and an empty legacy `policy.name`: no `profile` field."
+    why: "No profile means the default, LowNodeUtilization (spread pods to the least allocated nodes). mastersSchedulable is true because CRC's single node is also the control plane."
+hints: []
+checks:
+  - {id: event-cpu, title: "You have seen the Insufficient cpu event", type: event, reason: FailedScheduling, message_contains: "Insufficient cpu", expect_text: "a FailedScheduling event mentioning Insufficient cpu"}
+  - {id: hungry-ready, title: "hungry runs with a right-sized request", type: deployment_ready, name: hungry, expect_text: "1/1 ready"}
+  - {id: hungry-request, title: "hungry requests at most 1 CPU", type: field, kind: deployment, name: hungry, path: "spec.template.spec.containers[0].resources.requests.cpu", op: matches, value: "^([1-9][0-9]{0,2}m|1)$", expect_text: "cpu request <= 1"}
+  - {id: picky-ready, title: "picky runs", type: deployment_ready, name: picky, expect_text: "1/1 ready"}
+  - {id: picky-selector, title: "picky no longer requires disktype", type: field, kind: deployment, name: picky, path: "spec.template.spec.nodeSelector.disktype", op: absent, expect_text: "no disktype selector"}
+variations:
+  - "Add a *preferred* node affinity for `disktype=ssd` (weight 50) to picky. It still runs: preferences only score."
+  - "Compute the free CPU from `oc describe node crc` (allocatable minus Allocated requests; about 1.4 CPU in the recording), give hungry a request a little below it and scale it to 2 replicas. Predict which replica stays Pending and why (the sum of requests, not usage), and whether the message says preemption is not helpful or found no victims."
+  - "In the Architecture Studio simulator, reproduce both failures on a 4-node cluster and see how the message aggregates per node."
+troubleshooting:
+  - problem: "The FailedScheduling event is gone."
+    hint: "Events expire: the API server keeps them for a limited time (1 hour by default in Kubernetes, 3 hours on OpenShift). While a pod stays Pending the scheduler keeps retrying and emits new events; once it is scheduled, re-apply the lab setup to see them again."
+  - problem: "`oc describe node crc` is forbidden."
+    hint: "Switch the terminal identity to the reader: developer cannot read nodes."
+questions:
+  - q: "Why can a node at 10% CPU usage reject a pod for Insufficient cpu?"
+    a: "Filtering uses requests: allocatable minus the sum of requests already placed, not live usage."
+  - q: "What does 'preemption: ... Preemption is not helpful for scheduling' mean, and how does it differ from 'No preemption victims found'?"
+    a: "After filtering fails, the PostFilter phase considers evicting lower-priority pods. 'Not helpful' means the node was ruled out before trying, because no eviction could fix the reason (a missing label, or a request bigger than the node's allocatable). 'No preemption victims found' means a real attempt was made but no set of lower-priority pods would free enough room."
+  - q: "Why is labelling the node disktype=ssd the wrong fix for picky?"
+    a: "It makes the label lie about the hardware, misleading every future scheduling decision; fix the requirement instead."
+enterprise: |
+  In production, Pending pods with `Insufficient cpu/memory` are a capacity planning signal: the platform team
+  watches pending pods and request-to-allocatable ratios per node pool, and reviews oversized requests during
+  onboarding. Selector mismatches are usually configuration drift between environments (a label that exists in
+  test but not in prod).
+references:
+  - {title: "Kubernetes: Assigning pods to nodes", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/"}
+  - {title: "Kubernetes: Pod priority and preemption", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/"}
+  - {title: "Kubernetes: Well-known labels", url: "https://kubernetes.io/docs/reference/labels-annotations-taints/"}
+# The steps describe the single node of OpenShift Local by name (`oc describe node crc`).
+requires: [crc]

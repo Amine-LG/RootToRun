@@ -1,0 +1,175 @@
+id: ch.right-size
+kind: challenge
+title: "Right-size two workloads"
+subtitle: "Requests, limits and QoS classes, graded by what the scheduler and the kernel do"
+summary: "A report worker never starts and a cache runs with no reservation at all. Size both so they schedule, survive and get the right quality of service."
+module: r1-app-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Any cluster works; the CPU figures assume a node with at least 1 CPU free."
+concepts: [k8s.requests-limits, k8s.qos, k8s.scheduler, linux.cgroups]
+prerequisites: [b.resources-qos, b.architecture, o1.troubleshooting]
+namespace: academy-ch-size
+objective: |
+  Choose requests and limits from evidence: what the scheduler needs to place a pod, what the kernel enforces at
+  run time, and which QoS class each workload should get.
+background: |
+  **Where everything comes from.** The project starts with the two Deployments, `report` and `cache`, both on the UBI
+  9 minimal image; the report's warm-up is a shell script in its `command` that reads about 64 MiB. The app creates
+  the project `academy-ch-size` as your learner identity when you start the challenge and applies the starting
+  objects; everything else is yours to create. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press Grade, as the app's
+  own identities; Clean up deletes the project.
+symptom: |
+  Two workloads share this project. The nightly `report` worker (two replicas) has not run since someone copied its
+  resource settings from a much larger service. The `cache` was deployed in a hurry with no resource settings at all.
+  The report worker loads about 64 MiB into memory when it starts and needs some room on top for its runtime; it
+  is critical, so it must be among the last pods evicted when the node runs short of memory. The cache is not
+  critical, but the team wants it to have a reservation of its own on the node.
+requirements:
+  - "The Deployment `report` runs **2 Ready replicas** whose containers have **not restarted**."
+  - "The `report` pods have the QoS class **Guaranteed**."
+  - "`report` reserves **at most 1 CPU** per pod (the node is shared)."
+  - "Every container of the Deployment `cache` has **CPU and memory requests**, and `cache` still runs 1 Ready replica."
+  - "Change the resource settings only: the grader does not check how you changed them."
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: report, labels: {app: report}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: report}}
+      template:
+        metadata: {labels: {app: report}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: worker
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["/bin/sh", "-c", "echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity"]
+            resources: {requests: {cpu: "64", memory: 48Mi}, limits: {memory: 48Mi}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: cache, labels: {app: cache}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: cache}}
+      template:
+        metadata: {labels: {app: cache}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: cache
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+hints:
+  - "Start with the events of a `report` pod. What does the scheduler say about the node, and which resource does it name?"
+  - "Once a pod is scheduled, watch its restarts and its last state. A memory limit is enforced by the kernel, not by the scheduler."
+  - "A pod is Guaranteed only when every container has CPU and memory limits, and its requests equal its limits. If you set only limits, the requests default to them."
+  - "`oc get pod <pod> -o jsonpath='{.status.qosClass}'` shows the class the API server computed."
+fix:
+  - {cmd: "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m,memory=160Mi --limits=cpu=200m,memory=160Mi", meaning: "requests equal to limits for CPU and memory: Guaranteed, schedulable, room for the 64 MiB load"}
+  - {cmd: "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi", meaning: "a reservation for the cache (Burstable: no limits needed)"}
+  - {cmd: "oc rollout status deploy/report -n academy-ch-size --timeout=150s", meaning: "two new pods, Ready", timeout: 170}
+  - {cmd: "oc rollout status deploy/cache -n academy-ch-size --timeout=150s", meaning: "the cache's new pod is Ready", timeout: 170}
+checks:
+  - {id: report-deploy, title: "report wants 2 replicas and has 2 Ready", type: deployment_ready, name: report, replicas: 2, expect_text: "spec.replicas 2, ready 2/2"}
+  - {id: report-ready, title: "report: 2 Ready pods, no restarts", type: pods, selector: app=report, owner: report, ready: true, max_restarts: 0, min: 2, expect_text: "2 of 2 match"}
+  - {id: report-guaranteed, title: "report pods are Guaranteed", type: pods, selector: app=report, owner: report, qos: Guaranteed, min: 2, expect_text: "QoS Guaranteed"}
+  - {id: report-cpu, title: "each report pod reserves at most 1 CPU (all its containers together)", type: pods, selector: app=report, owner: report, max_cpu_request: "1", min: 2, expect_text: "2 of 2 match"}
+  - {id: report-intact, title: "report still runs its real workload (only the resources changed)", type: field, kind: deployment, name: report, path: "spec.template.spec.containers[?name=worker].command", op: json_contains, value: "head -c 64m", expect_text: "the 64 MiB load is still there"}
+  - {id: cache-requests, title: "every running cache container has CPU and memory requests", type: pods, selector: app=cache, owner: cache, ready: true, requests: [cpu, memory], min: 1, expect_text: "1 of 1 match"}
+  - {id: cache-ready, title: "cache runs 1 Ready pod", type: pods, selector: app=cache, owner: cache, ready: true, min: 1, expect_text: "1 of 1 match"}
+trials:
+  - id: cpu-only
+    title: "Only the CPU request lowered"
+    kind: wrong
+    expect: partial
+    expect_checks: {report-ready: fail, report-guaranteed: fail, report-cpu: pass, cache-requests: fail}
+    commands:
+      - {cmd: "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m"}
+  - id: burstable
+    title: "Report running, but Burstable; cache untouched"
+    kind: partial
+    expect: partial
+    expect_checks: {report-ready: pass, report-guaranteed: fail, cache-requests: fail}
+    commands:
+      - {cmd: "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m,memory=96Mi --limits=memory=160Mi"}
+  - id: limits-only
+    title: "A correct alternative written as a manifest, with different values"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -n academy-ch-size -f -"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: report, labels: {app: report}}
+          spec:
+            replicas: 2
+            selector: {matchLabels: {app: report}}
+            template:
+              metadata: {labels: {app: report}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                containers:
+                - name: worker
+                  image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                  command: ["/bin/sh", "-c", "echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity"]
+                  resources: {limits: {cpu: 250m, memory: 192Mi}}
+      - {cmd: "oc set resources deploy/cache -n academy-ch-size --requests=cpu=20m,memory=24Mi --limits=memory=64Mi"}
+  - id: g4-sleeper
+    title: "Sized correctly, but the workload was replaced by sleep"
+    kind: wrong
+    expect: partial
+    expect_checks: {report-guaranteed: pass, cache-requests: pass, report-intact: fail}
+    commands:
+      - {cmd: "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi"}
+      - cmd: "oc patch deploy/report -n academy-ch-size --type=strategic -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"worker\",\"command\":[\"sleep\",\"infinity\"],\"resources\":{\"requests\":{\"cpu\":\"200m\",\"memory\":\"48Mi\"},\"limits\":{\"cpu\":\"200m\",\"memory\":\"48Mi\"}}}]}}}}'"
+  - id: greedy-cpu
+    title: "Guaranteed, but reserving 2 CPUs per pod on a shared node (on the recorded node the new pod does not even schedule)"
+    kind: wrong
+    expect: partial
+    expect_checks: {report-cpu: fail, cache-requests: pass}
+    commands:
+      - {cmd: "oc set resources deploy/report -n academy-ch-size --requests=cpu=2,memory=160Mi --limits=cpu=2,memory=160Mi"}
+      - {cmd: "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi"}
+root_cause: |
+  Two different mechanisms, at two different times:
+  1. **Scheduling.** A request of 64 CPUs fits no node, so the scheduler leaves both pods `Pending` with a
+     `FailedScheduling` event (`Insufficient cpu`). The scheduler only reads **requests**; it never looks at actual use.
+  2. **Run time.** Once schedulable, each container loads 64 MiB under a 48 MiB memory limit. The kernel's
+     out-of-memory killer ends it (`OOMKilled`, exit code 137) and the kubelet restarts it into `CrashLoopBackOff`.
+     Limits are enforced by the kernel through cgroups; the scheduler never sees them.
+  The QoS class is computed from the resources: **Guaranteed** when every container has CPU and memory limits equal
+  to its requests, **Burstable** when at least one request or limit is set, **BestEffort** when none is. Under memory
+  pressure the kubelet does not rank pods by QoS class: it first considers pods whose usage exceeds their requests,
+  then Pod priority, then usage relative to requests. A BestEffort pod has no request, so any use exceeds it; a
+  Guaranteed pod cannot use more memory than it requests, so it stays in the group considered last (with Burstable
+  pods that stay within their requests). That is why the critical worker should be Guaranteed and the cache should
+  at least have requests.
+alternatives: |
+  Any values that satisfy the requirements pass: `oc set resources`, `oc apply` of an edited manifest, `oc patch`,
+  or the console. Setting only limits is a valid shortcut: when a container has a limit and no request for the same
+  resource, the request defaults to the limit, so the pod is Guaranteed. That defaulting happens when each **pod** is
+  created: the Deployment's template still shows only limits, which is why the grader reads the running pods'
+  effective requests rather than the template. For the cache, requests alone (Burstable)
+  are enough; adding a memory limit protects the node from a cache that grows without bound.
+sre: |
+  For a capacity note, state the evidence before the change: the FailedScheduling message with the node's
+  allocatable CPU, the OOMKilled last state and the restart count. Then state the new values and why: measured peak
+  memory plus headroom, CPU request from observed use (`oc adm top pods` when metrics are available), and the QoS
+  class you chose for each workload and how it affects eviction under memory pressure.
+questions:
+  - q: "Lowering the CPU request made the pods schedule, yet they still fail. Why did the scheduler not prevent that?"
+    a: "The scheduler places pods by their requests only. The memory limit is enforced later by the kernel, which kills a process that exceeds it; the scheduler never knows."
+  - q: "You set `limits: {cpu: 250m, memory: 192Mi}` and no requests. What QoS class does the pod get?"
+    a: "Guaranteed: the missing requests default to the limits, so requests equal limits for both resources."
+  - q: "Why is a BestEffort cache a risk for the other pods on the node, and for itself?"
+    a: "Nothing reserves capacity for it, so the scheduler can place it on a full node. Under memory pressure any use exceeds its zero request, so it is among the first candidates for eviction (with Burstable pods above their requests), and the kernel OOM killer also prefers it."
+references:
+  - {title: "Kubernetes: Resource management for pods and containers", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"}
+  - {title: "Kubernetes: Configure Quality of Service for pods", url: "https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/"}
+  - {title: "Kubernetes: Node-pressure eviction", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"}

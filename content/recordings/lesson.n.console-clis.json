@@ -1,0 +1,72 @@
+{
+ "lab": "lesson.n.console-clis",
+ "kind": "lesson",
+ "lab_hash": "31ebc655b5b3c7fc",
+ "recorded_at": "2026-10-15T16:33:36+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-console-clis",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc whoami --show-console",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "https://console-openshift-console.apps-crc.testing\n",
+   "stderr": "",
+   "combined": "https://console-openshift-console.apps-crc.testing\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc version",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Client Version: 4.21.8\nKustomize Version: v5.7.1\nKubernetes Version: v1.34.5\n",
+   "stderr": "",
+   "combined": "Client Version: 4.21.8\nKustomize Version: v5.7.1\nKubernetes Version: v1.34.5\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc version --client",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Client Version: 4.21.8\nKustomize Version: v5.7.1\n",
+   "stderr": "",
+   "combined": "Client Version: 4.21.8\nKustomize Version: v5.7.1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "mkdir -p bin; printf '#!/bin/sh\\necho \"oc-hello was called with: $*\"\\n' > bin/oc-hello; chmod +x bin/oc-hello; PATH=$PWD/bin:$PATH oc hello world",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "oc-hello was called with: world\n",
+   "stderr": "",
+   "combined": "oc-hello was called with: world\n",
+   "ok": true
+  }
+ ],
+ "seconds": 2,
+ "ok": true,
+ "problems": []
+}

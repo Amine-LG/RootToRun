@@ -1,0 +1,248 @@
+{
+ "lab": "lesson.p.project-tolerations-pdb",
+ "kind": "lesson",
+ "lab_hash": "dbbe87e62e766c2e",
+ "recorded_at": "2026-10-20T14:56:25+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-p-project-tolerations-pdb",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-batch && oc annotate namespace lab-batch scheduler.alpha.kubernetes.io/defaultTolerations='[{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]' scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]' && oc adm policy add-role-to-user edit developer -n lab-batch",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-batch\nnamespace/lab-batch annotated\nclusterrole.rbac.authorization.k8s.io/edit added: \"developer\"\n",
+   "stderr": "",
+   "combined": "Created project lab-batch\nnamespace/lab-batch annotated\nclusterrole.rbac.authorization.k8s.io/edit added: \"developer\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get namespace lab-batch -o jsonpath='defaultTolerations {.metadata.annotations.scheduler\\.alpha\\.kubernetes\\.io/defaultTolerations}{\"\\n\"}tolerationsWhitelist {.metadata.annotations.scheduler\\.alpha\\.kubernetes\\.io/tolerationsWhitelist}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "defaultTolerations [{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]\ntolerationsWhitelist [{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]\n",
+   "stderr": "",
+   "combined": "defaultTolerations [{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]\ntolerationsWhitelist [{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"}]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment worker -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -- sleep infinity && sleep 20 && oc get deploy,rs -n lab-batch",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/worker created\nNAME                     READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/worker   0/2     0            0           20s\n\nNAME                               DESIRED   CURRENT   READY   AGE\nreplicaset.apps/worker-bc7bc9f44   2         0         0       20s\n",
+   "stderr": "",
+   "combined": "deployment.apps/worker created\nNAME                     READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/worker   0/2     0            0           20s\n\nNAME                               DESIRED   CURRENT   READY   AGE\nreplicaset.apps/worker-bc7bc9f44   2         0         0       20s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events -n lab-batch --field-selector reason=FailedCreate -o custom-columns=MESSAGE:.message | sort -u",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Error creating: pod tolerations (possibly merged with namespace default tolerations) conflict with its namespace whitelist\nMESSAGE\n",
+   "stderr": "",
+   "combined": "Error creating: pod tolerations (possibly merged with namespace default tolerations) conflict with its namespace whitelist\nMESSAGE\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc annotate namespace lab-batch --overwrite scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{\"key\":\"lab-dedicated\",\"operator\":\"Equal\",\"value\":\"batch\",\"effect\":\"NoSchedule\"},{\"key\":\"node.kubernetes.io/not-ready\",\"operator\":\"Exists\",\"effect\":\"NoExecute\"},{\"key\":\"node.kubernetes.io/unreachable\",\"operator\":\"Exists\",\"effect\":\"NoExecute\"}]'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/lab-batch annotated\n",
+   "stderr": "",
+   "combined": "namespace/lab-batch annotated\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/worker -n lab-batch --timeout=240s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"worker\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"worker\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"worker\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"worker\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"worker\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"worker\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"worker\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"worker\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"worker\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"worker\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy worker -n lab-batch -o jsonpath='{.spec.template.spec.tolerations}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "\n",
+   "stderr": "",
+   "combined": "\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n lab-batch -l app=worker -o jsonpath='{range .items[0].spec.tolerations[*]}{.key}{\" \"}{.operator}{\" \"}{.value}{\" \"}{.effect}{\" \"}{.tolerationSeconds}{\"\\n\"}{end}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node.kubernetes.io/not-ready Exists  NoExecute 300\nnode.kubernetes.io/unreachable Exists  NoExecute 300\nlab-dedicated Equal batch NoSchedule \n",
+   "stderr": "",
+   "combined": "node.kubernetes.io/not-ready Exists  NoExecute 300\nnode.kubernetes.io/unreachable Exists  NoExecute 300\nlab-dedicated Equal batch NoSchedule \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run stray -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --restart=Never --overrides='{\"spec\":{\"tolerations\":[{\"key\":\"gpu\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}}' -- sleep 60",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server: pod tolerations (possibly merged with namespace default tolerations) conflict with its namespace whitelist\n",
+   "combined": "Error from server: pod tolerations (possibly merged with namespace default tolerations) conflict with its namespace whitelist\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create poddisruptionbudget worker -n lab-batch --selector=app=worker --min-available=2 && sleep 5 && oc get pdb worker -n lab-batch",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "poddisruptionbudget.policy/worker created\nNAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   2               N/A               0                     5s\n",
+   "stderr": "",
+   "combined": "poddisruptionbudget.policy/worker created\nNAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   2               N/A               0                     5s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{\"apiVersion\":\"policy/v1\",\"kind\":\"Eviction\",\"metadata\":{\"name\":\"%s\",\"namespace\":\"lab-batch\"}}' \"$pod\" > eviction.json && oc create --raw \"/api/v1/namespaces/lab-batch/pods/$pod/eviction\" -f eviction.json",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (TooManyRequests): Cannot evict pod as it would violate the pod's disruption budget.\n",
+   "combined": "Error from server (TooManyRequests): Cannot evict pod as it would violate the pod's disruption budget.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch pdb worker -n lab-batch --type=merge -p '{\"spec\":{\"minAvailable\":1}}' && sleep 5 && oc get pdb worker -n lab-batch",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "poddisruptionbudget.policy/worker patched\nNAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   1               N/A               1                     10s\n",
+   "stderr": "",
+   "combined": "poddisruptionbudget.policy/worker patched\nNAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   1               N/A               1                     10s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{\"apiVersion\":\"policy/v1\",\"kind\":\"Eviction\",\"metadata\":{\"name\":\"%s\",\"namespace\":\"lab-batch\"}}' \"$pod\" > eviction.json && oc create --raw \"/api/v1/namespaces/lab-batch/pods/$pod/eviction\" -f eviction.json && echo && echo \"evicted $pod\"",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"metadata\":{},\"status\":\"Success\",\"code\":201}\n\nevicted worker-bc7bc9f44-8rl8l\n",
+   "stderr": "",
+   "combined": "{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"metadata\":{},\"status\":\"Success\",\"code\":201}\n\nevicted worker-bc7bc9f44-8rl8l\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 3; oc get pdb worker -n lab-batch; oc rollout status deploy/worker -n lab-batch --timeout=120s && oc get pods -n lab-batch -l app=worker",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   1               N/A               0                     14s\nWaiting for deployment \"worker\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"worker\" successfully rolled out\nNAME                     READY   STATUS        RESTARTS   AGE\nworker-bc7bc9f44-8rl8l   1/1     Terminating   0          21s\nworker-bc7bc9f44-b59kw   1/1     Running       0          21s\nworker-bc7bc9f44-lkpdj   1/1     Running       0          4s\n",
+   "stderr": "",
+   "combined": "NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nworker   1               N/A               0                     14s\nWaiting for deployment \"worker\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"worker\" successfully rolled out\nNAME                     READY   STATUS        RESTARTS   AGE\nworker-bc7bc9f44-8rl8l   1/1     Terminating   0          21s\nworker-bc7bc9f44-b59kw   1/1     Running       0          21s\nworker-bc7bc9f44-lkpdj   1/1     Running       0          4s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-batch",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-batch\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-batch\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 118,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NODE-05",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete project lab-batch --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "test -z \"$(oc get namespace lab-batch -o name --ignore-not-found)\"",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get namespace lab-batch -o name --ignore-not-found",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.spec.taints}'",
+    "same": true
+   }
+  ]
+ }
+}

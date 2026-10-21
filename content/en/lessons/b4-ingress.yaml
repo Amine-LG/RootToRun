@@ -1,0 +1,1057 @@
+# Cluster ingress administration: a second router (sharding), and exposing plain TCP with NodePort and LoadBalancer
+# Services. Both lessons were recorded on OpenShift Local by the cluster administrator and the ordinary user developer.
+- id: n.ingress-sharding
+  title: "Shard ingress with a second router"
+  subtitle: "A second IngressController, route selectors and the routers that admit a Route"
+  module: b4-network-security
+  mode: REAL_LAB
+  minutes: 35
+  level: 3
+  supports: "OpenShift 4.21 Ingress Operator (operator.openshift.io/v1 IngressController) and HAProxy routers. Every step was run on OpenShift Local 4.21 by the cluster administrator (kubeadmin) and by the ordinary user developer: the second IngressController was created, served a labelled Route, and was deleted again; the cluster was then checked against copies taken before the change (experiment X-NET-01). The default IngressController was never edited."
+  concepts: [net.ingresscontroller, net.routes]
+  prerequisites: [d.routes-tls, o2.tls-exposure]
+  record_on: cluster-admin
+  objective: |
+    Add a second IngressController that serves only the Routes carrying a label, publish it in a way that cannot
+    clash with the default router, check from each Route's status which routers admitted it, and remove the shard
+    again, leaving the default router untouched.
+  files:
+    academy-shard.yaml: |
+      apiVersion: operator.openshift.io/v1
+      kind: IngressController
+      metadata:
+        name: academy-shard
+        namespace: openshift-ingress-operator
+      spec:
+        domain: shard.apps-crc.testing
+        replicas: 1
+        endpointPublishingStrategy:
+          type: Private
+        routeSelector:
+          matchLabels:
+            shard: academy
+    app.yaml: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: web-content
+      data:
+        index.html: |
+          hello from lab-ingress
+        healthz: ok
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+        labels:
+          app: web
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+            - name: httpd
+              image: registry.access.redhat.com/ubi9/httpd-24:latest
+              ports:
+              - containerPort: 8080
+              readinessProbe:
+                httpGet: {path: /healthz, port: 8080}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+              - name: content
+                mountPath: /var/www/html
+            volumes:
+            - name: content
+              configMap:
+                name: web-content
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+      spec:
+        selector:
+          app: web
+        ports:
+        - name: http
+          port: 8080
+          targetPort: 8080
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: client
+        labels:
+          app: client
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: client
+        template:
+          metadata:
+            labels:
+              app: client
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: curl
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["sleep", "infinity"]
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+  flow:
+    - kind: ask
+      id: recall-admitted
+      recalls: d.routes-tls
+      prompt: "Where does a Route show which router accepted it and whether its host claim worked?"
+      choices:
+        - text: "In the Route's `status.ingress` list"
+          why: "Each router that considers the Route writes one entry there: its name, the host, and an `Admitted` condition. You will read two such entries in this lesson."
+        - text: "In the Service's endpoints"
+          why: "EndpointSlices list the pods behind a Service. They say nothing about routers."
+        - text: "In the Route's `spec.host` field"
+          why: "`spec.host` is what the Route asks for. Whether a router granted it is reported in the status."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "One team wants its own router"
+      body: |
+        So far every Route on the cluster has been served by one router, the one the installer created. A team now
+        wants its internal applications served by a separate router, so that the internal traffic can later be
+        given its own addresses, firewall rules and certificate.
+
+        In OpenShift a router is configured by an **IngressController**, a resource in the project
+        `openshift-ingress-operator`. The Ingress Operator turns each IngressController into a router Deployment
+        and its Services in `openshift-ingress`. Several IngressControllers that split the Routes between them are
+        called **shards**. Creating one is cluster administration: everything below ran on a lab cluster as its
+        administrator, and as the ordinary user `developer` for the team's application.
+    - kind: show
+      id: list-controllers
+      body: "First, which routers exist?"
+      run: "oc get ingresscontroller -n openshift-ingress-operator"
+      notice: "One IngressController, `default`, the one the installer created."
+    - kind: show
+      id: default-publishing
+      body: "How is the default router published? Its `spec` leaves this to the platform, so read the `status`: the generation of the object, the domain it serves, and its endpoint publishing strategy."
+      run: "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}{.status.domain}{\"\\n\"}{.status.endpointPublishingStrategy}{\"\\n\"}'"
+      notice: |
+        Generation `1`: the object has not been changed since it was created. Domain `apps-crc.testing`. Strategy
+        `HostNetwork`: the router listens directly on the node's ports 80 and 443 (and 1936 for statistics).
+    - kind: show
+      id: router-pods-before
+      run: "oc get pods -n openshift-ingress -o wide"
+      notice: |
+        `router-default-…` has the node's own address (`192.168.126.11`), not a pod-network address: it runs on the
+        host network. The other pod, `routes-controller`, belongs to OpenShift Local itself, not to the Ingress
+        Operator.
+    - kind: ask
+      id: guess-second-hostnetwork
+      guess: true
+      prompt: "This cluster has one node. Could a second router use the HostNetwork strategy with the same ports 80 and 443?"
+      choices:
+        - text: "Yes, routers can share node ports"
+          why: "Only one process can listen on a given port of a node. The default router already holds 80 and 443 here."
+        - text: "No: ports 80 and 443 are taken"
+          why: "A second HostNetwork router needs other ports or other nodes. The next step chooses a strategy that uses no node port at all."
+        - text: "Yes, if it serves a different domain"
+          why: "The domain is about host names. The listening ports are still the node's, and they are in use."
+      answer: 1
+    - kind: teach
+      id: publishing
+      title: "Choosing how the shard is published"
+      body: |
+        `endpointPublishingStrategy` decides how clients reach a router:
+
+        - `LoadBalancerService`: a Service of type LoadBalancer in front of the router, on cloud platforms.
+        - `HostNetwork`: the node's own ports, as for the default router here.
+        - `NodePortService`: a Service of type NodePort.
+        - `Private`: the router runs on the pod network and nothing publishes it; you add the publishing yourself.
+
+        On a one-node cluster whose default router holds 80 and 443, `Private` is the choice that cannot clash. The
+        shard is still reachable inside the cluster through the Service `router-internal-<name>` the operator
+        creates.
+    - kind: show
+      id: shard-manifest
+      title: "The shard"
+      code: |
+        apiVersion: operator.openshift.io/v1
+        kind: IngressController
+        metadata:
+          name: academy-shard
+          namespace: openshift-ingress-operator
+        spec:
+          domain: shard.apps-crc.testing
+          replicas: 1
+          endpointPublishingStrategy:
+            type: Private
+          routeSelector:
+            matchLabels:
+              shard: academy
+      caption: "academy-shard.yaml"
+      notice: |
+        `domain` is the shard's own DNS domain; every IngressController needs one that no other controller uses.
+        `routeSelector` limits the shard to Routes labelled `shard=academy`. A `namespaceSelector` would select by
+        the project's labels instead; with both, a Route must match both.
+    - kind: try
+      id: try-create-shard
+      body: "As the administrator, create the IngressController from `academy-shard.yaml`."
+      accept: ["oc create -f academy-shard.yaml", "oc apply -f academy-shard.yaml", "oc create -f ./academy-shard.yaml", "oc apply -f ./academy-shard.yaml", "oc create --filename=academy-shard.yaml", "oc apply --filename=academy-shard.yaml", "oc create --filename academy-shard.yaml", "oc apply --filename academy-shard.yaml", "oc create -f academy-shard.yaml -n openshift-ingress-operator", "oc apply -f academy-shard.yaml -n openshift-ingress-operator"]
+      hints:
+        - match: "^oc create ingresscontroller"
+          say: "`oc create` has no generator for IngressControllers. Create this one from the file with `-f`."
+        - match: "^oc edit"
+          say: "`oc edit` changes an object that exists. This one is new: create it from the file."
+        - match: "default"
+          say: "Leave the default IngressController alone. The shard is a new object in the file."
+      hint: "`oc create` (or `oc apply`) with `-f` and the file name."
+      run: "oc create -f academy-shard.yaml"
+      then: "`ingresscontroller.operator.openshift.io/academy-shard created`. The object exists; the operator now builds the router."
+    - kind: show
+      id: wait-shard
+      body: "Like every IngressController, the shard reports `Available` once its router is running:"
+      run: "oc wait ingresscontroller/academy-shard -n openshift-ingress-operator --for=condition=Available --timeout=300s"
+      notice: "`condition met`."
+    - kind: show
+      id: shard-objects
+      body: "What the operator made from it, in `openshift-ingress`:"
+      run: "oc get deployments,services -n openshift-ingress"
+      notice: |
+        A second router Deployment, `router-academy-shard`, and its Service `router-internal-academy-shard`, of type
+        ClusterIP: reachable inside the cluster only. Nobody wrote these objects by hand, and nobody should edit
+        them: the operator would put them back as the IngressController describes.
+    - kind: show
+      id: router-pods-after
+      run: "oc get pods -n openshift-ingress -o wide -l ingresscontroller.operator.openshift.io/deployment-ingresscontroller=academy-shard"
+      notice: |
+        The shard's router pod has a pod-network address (`10.217.…`), unlike `router-default`, which uses the
+        node's address: `Private` runs the router on the pod network.
+    - kind: show
+      id: shard-certificate
+      body: "The shard also got a default certificate for its own domain. The administrator prints the certificate's subject and issuer, never the key:"
+      run: "oc get secret router-certs-academy-shard -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer"
+      notice: |
+        A wildcard certificate for `*.shard.apps-crc.testing`, signed by the Ingress Operator's own CA (the same
+        issuer that signs the default router's certificate). Routes on the shard without a certificate of their own
+        would be served with it.
+    - kind: ask
+      id: scale-the-shard
+      prompt: The team wants two shard routers. Where does that change go?
+      choices:
+      - text: spec.replicas of the IngressController academy-shard
+        why: The operator builds the router Deployment from that object, so a change there lasts.
+      - text: The router-academy-shard Deployment, with oc scale
+        why: 'That Deployment is generated: the operator would set it back to what the IngressController says.'
+      - text: The Service router-internal-academy-shard
+        why: A Service only sends traffic to the router pods; it does not decide how many run.
+      answer: 0
+    - kind: teach
+      id: team-project
+      title: "The team's Route"
+      body: |
+        The administrator gives the team a project, `lab-ingress`, with `developer` as its administrator. The
+        developer deploys a small web application and a client pod with `curl`, and exposes the application with a
+        host name in the shard's domain.
+    - kind: show
+      id: new-project
+      run: "oc adm new-project lab-ingress --admin=developer"
+      notice: "`Created project lab-ingress`. `--admin=developer` binds the `admin` role to developer in it."
+    - kind: show
+      id: deploy-app
+      run: "oc apply -f app.yaml -n lab-ingress && oc rollout status deployment/web -n lab-ingress --timeout=180s && oc rollout status deployment/client -n lab-ingress --timeout=180s"
+      notice: "The ConfigMap, the two Deployments and the Service exist, and both Deployments have rolled out."
+    - kind: show
+      id: expose
+      run: "oc expose service web --name=web-internal --hostname=web.shard.apps-crc.testing -n lab-ingress"
+      notice: "`route.route.openshift.io/web-internal exposed`. The Route carries no label yet."
+    - kind: ask
+      id: guess-unlabelled
+      guess: true
+      prompt: web-internal's host is in the shard's domain, but the Route has no label. Which routers will admit it?
+      choices:
+      - text: 'Only default: the shard''s selector does not match'
+        why: A router admits the Routes its selectors match; its domain names the hosts it generates and certifies. The next step reads the status.
+      - text: 'Only academy-shard: the host is in its domain'
+        why: A domain does not attract Routes. Without the label, the shard's routeSelector does not match.
+      - text: Both, because the host is in the shard's domain
+        why: The shard ignores the Routes its selector does not match, whatever their host.
+      answer: 0
+    - kind: show
+      id: status-before-label
+      body: "Which routers admitted it? One line per entry of `status.ingress`: the router's name and its `Admitted` condition."
+      run: "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}'"
+      notice: |
+        Only `default`. The shard ignores the Route, because the Route does not carry `shard=academy`. The default
+        router has no selector at all, so it admits every Route, including this one with a host in the shard's
+        domain.
+    - kind: show
+      id: curl-shard-before
+      body: |
+        The shard is not published, so the client pod talks to its internal Service, and names the Route's host in
+        the `Host:` header, as a browser would. `-w '%{http_code}'` prints only the HTTP status.
+      run: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/"
+      notice: "`503`: the shard's router answered, but it has no Route for this host."
+    - kind: try
+      id: try-label-route
+      body: "As developer, put the label `shard=academy` on the Route `web-internal` in `lab-ingress`."
+      accept: ["oc label route web-internal shard=academy -n lab-ingress", "oc label route/web-internal shard=academy -n lab-ingress", "oc label routes web-internal shard=academy -n lab-ingress", "oc label route web-internal shard=academy --namespace=lab-ingress", "oc label route web-internal shard=academy --namespace lab-ingress", "oc -n lab-ingress label route web-internal shard=academy", "oc label -n lab-ingress route web-internal shard=academy"]
+      hints:
+        - match: "label (svc|service|deploy|deployment) "
+          say: "The shard selects Routes (`routeSelector`), so the label goes on the Route, not on the Service or the Deployment."
+        - match: "label (namespace|ns|project) "
+          say: "Labelling the project would matter for a `namespaceSelector`. This shard uses a `routeSelector`: label the Route."
+        - match: "shard:academy|shard academy"
+          say: "A label is written `key=value`: `shard=academy`."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n lab-ingress` the command looks in the current project. Name the project."
+      hint: "`oc label`, the kind and name of the Route, `shard=academy`, and the project."
+      run: "oc label route web-internal shard=academy -n lab-ingress"
+      then: "`route.route.openshift.io/web-internal labeled`. The developer can do this: labelling a Route needs no administrator."
+    - kind: ask
+      id: guess-after-label
+      guess: true
+      prompt: "The Route now carries `shard=academy`. Which routers list it in `status.ingress`?"
+      choices:
+        - text: "Only academy-shard, because its selector is more specific"
+          why: "Selectors do not compete. The default router has no selector, so nothing tells it to drop the Route."
+        - text: "Both default and academy-shard"
+          why: "Each router decides on its own whether its selectors match. Both match now. The next step shows the two entries."
+        - text: "Neither, until the router pods restart"
+          why: "Routers watch Routes and pick up the change within seconds, without a restart."
+      answer: 1
+    - kind: show
+      id: route-yaml
+      body: "The whole Route, as the developer reads it:"
+      run: "oc get route web-internal -n lab-ingress -o yaml"
+      highlight: ["routerName", "routerCanonicalHostname"]
+      notice: |
+        `status.ingress` now has two entries, each `Admitted` `True`: `default`, with the canonical host name
+        `router-default.apps-crc.testing`, and `academy-shard`, with `router-academy-shard.shard.apps-crc.testing`.
+        Both routers serve this Route.
+    - kind: show
+      id: curl-shard-after
+      run: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/"
+      notice: "The shard now serves the page."
+    - kind: show
+      id: curl-default
+      body: "And the default router, through its own internal Service, with the same host:"
+      run: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-default.openshift-ingress.svc/"
+      notice: |
+        The same page. Which router a real client reaches is decided by DNS and the network: here the wildcard
+        `*.apps-crc.testing` points at the default router, so outside clients would never even meet the shard.
+    - kind: ask
+      id: who-decides-shard
+      prompt: With only a routeSelector on the shard, who decides whether a Route is served by it?
+      choices:
+      - text: Whoever may label the Route, such as the developer
+        why: The developer labelled web-internal without any administrator. Namespace labels, which a project administrator cannot change, keep that decision with the platform team.
+      - text: Only cluster administrators, who own the IngressController
+        why: They own the selector, but the Route's labels are in the team's hands, as the developer showed.
+      - text: Whoever controls DNS for the shard's domain
+        why: DNS decides which router a client reaches, not which Routes a router admits.
+      answer: 0
+    - kind: teach
+      id: exclude-default
+      title: "Taking the Routes away from the default router"
+      body: |
+        Sharding is only complete when the default router stops serving the shard's Routes. That is done on the
+        default IngressController, with a selector that excludes the label, for example
+        `routeSelector.matchExpressions` with the operator `NotIn`. Routes without the label, including the
+        console's and the login server's, stay on the default router.
+
+        It was not done on this cluster: changing the default router's selectors rolls its pods out again, and with
+        the single router replica this cluster has, that interrupts every Route on the cluster, including the login
+        server's, for the duration of the rollout. A router with several replicas normally rolls without a full
+        outage, but a selector typo there would still drop Routes until it is fixed. On a production cluster, plan that change, check
+        the console and OAuth Routes right after it, and keep the previous object to restore.
+    - kind: show
+      id: default-exclusion
+      code: |
+        # On the default IngressController (not run on this cluster)
+        spec:
+          routeSelector:
+            matchExpressions:
+            - key: shard
+              operator: NotIn
+              values: [academy]
+      origin: example
+      caption: "OpenShift 4.21: Configuring ingress cluster traffic, route sharding (excluding labelled Routes from the default controller)"
+      notice: "Routes labelled `shard=academy` would then appear only under `academy-shard` in their status."
+    - kind: ask
+      id: selector-choice
+      prompt: "Every Route of the projects labelled `exposure=internal` must go to the shard, whatever their own labels. Which selector fits?"
+      choices:
+        - text: "A `namespaceSelector` on the shard"
+          why: "It selects by the project's labels, so every Route in those projects is included without labelling each Route."
+        - text: "A `routeSelector` on the shard"
+          why: "That would need the label on every Route, and a Route created without it would be missed."
+        - text: "A NetworkPolicy in each project"
+          why: "NetworkPolicies decide which connections reach pods. They do not decide which router admits a Route."
+      answer: 0
+    - kind: show
+      id: unlabel
+      body: "The developer removes the label again. A trailing `-` after the key removes a label:"
+      run: "oc label route web-internal shard- -n lab-ingress"
+      notice: "`route.route.openshift.io/web-internal unlabeled`."
+    - kind: show
+      id: status-after-unlabel
+      run: "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}' && oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/"
+      notice: |
+        The shard answers `503`: it stopped serving the host within seconds. Yet the status still lists
+        `academy-shard` with `Admitted=True`: nobody removed the entry the shard wrote earlier. `status.ingress`
+        records which routers admitted a Route at some point; to know what a router serves now, send it a request.
+    - kind: teach
+      id: remove-title
+      title: "Removing the shard"
+      body: |
+        Deleting the IngressController is the whole removal: the operator deletes the router Deployment, its
+        Service and its Secrets. Then check that only `default` remains and that its generation has not moved.
+    - kind: ask
+      id: before-deleting-shard
+      prompt: In production the default router excludes the shard's label. What happens to those Routes if you delete the shard?
+      choices:
+      - text: No router serves them until a selector changes
+        why: A Route is served only by routers whose selectors match it; with the shard gone and default excluding the label, none does.
+      - text: The default router takes them over automatically
+        why: Its NotIn selector still excludes the label. Nothing reassigns Routes when a router disappears.
+      - text: They keep working from their old status entries
+        why: status.ingress only records past admissions. Traffic needs a running router that serves the host.
+      answer: 0
+    - kind: show
+      id: delete-shard
+      run: "oc delete ingresscontroller academy-shard -n openshift-ingress-operator"
+      notice: "`deleted`. By default `oc delete` waits until the object is really gone."
+    - kind: show
+      id: wait-router-gone
+      run: "oc wait --for=delete deployment/router-academy-shard -n openshift-ingress --timeout=300s; oc get ingresscontroller -n openshift-ingress-operator && oc get deployments,services -n openshift-ingress"
+      notice: "One IngressController again, and only the default router's Deployment and Service (plus OpenShift Local's `routes-controller`)."
+    - kind: show
+      id: default-untouched
+      run: "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}'"
+      notice: "Still generation `1`: the default IngressController's spec was never changed."
+    - kind: show
+      id: delete-project
+      run: "oc delete project lab-ingress"
+      notice: "The team's project goes too."
+    - kind: order
+      id: order-shard
+      prompt: "Put the administrator's steps for adding a shard in order."
+      items:
+        - "Read the default IngressController's publishing strategy and domain"
+        - "Choose a strategy and a domain that cannot clash with it"
+        - "Create the IngressController with its route or namespace selector"
+        - "Wait until it is Available and its router pod runs"
+        - "Label a Route and read its `status.ingress`"
+        - "Exclude the shard's Routes from the default controller, in a planned change"
+      why: "You need to know what the default router holds before choosing ports or a domain. A Route can only be checked against a router that runs. Changing the default controller comes last, because it rolls out the router that serves every other Route and can interrupt them."
+    - kind: reflect
+      id: explain-overlap
+      prompt: "A colleague says: 'I created the internal shard with a route selector, so the internal apps no longer go through the default router.' What do you check, and what do you tell them?"
+      model: |
+        I would read `status.ingress` of one of the internal Routes. If it lists `default` as well as the shard, the
+        default router still admits them, because it has no selector: a selector on the shard does not remove
+        anything from other routers. To finish the sharding, the default IngressController needs a selector that
+        excludes the label, which is a planned change because it rolls out the default router. I would also check
+        where DNS sends the internal host names, since clients reach whichever router DNS points at.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can add an IngressController with a publishing strategy that fits the cluster, select its Routes by
+        label, read from `status.ingress` which routers admitted a Route, and remove the shard cleanly. Next,
+        [Ingress, DNS and certificates](/lesson/n.ingress-dns-certs) reads the configuration of the Ingress, DNS and
+        service CA operators as the administrator.
+  sections:
+    - id: shard-reference
+      title: "Shard design checklist"
+      depth: true
+      body: |
+        | Decision | Field | Note |
+        |---|---|---|
+        | which Routes | `routeSelector`, `namespaceSelector` | both must match when both are set; exclude the same set from `default` |
+        | how clients reach it | `endpointPublishingStrategy` | `LoadBalancerService` (cloud), `HostNetwork` (node ports 80/443, one router per node), `NodePortService`, `Private` |
+        | which host names | `domain`, Routes' `spec.host` | DNS for the domain must point at the shard's address |
+        | which certificate | `defaultCertificate` | without it, the operator generates one for `*.<domain>` |
+        | where it runs | `nodePlacement` | for example infrastructure nodes |
+        | how many | `replicas` | HostNetwork routers need one node each |
+
+        A Route that two routers admit has two entries in `status.ingress`. A router that rejects a Route (a host
+        already claimed in another project, for example) writes an entry whose `Admitted` condition is `False`, with
+        the reason.
+    - id: shard-mistakes
+      title: "Common mistakes"
+      depth: true
+      body: |
+        - **Selecting on the shard only.** The default router keeps serving the same Routes.
+        - **Editing the router Deployment.** The operator restores it from the IngressController; change the
+          IngressController.
+        - **A second HostNetwork router on the same nodes and ports.** Its pods cannot start where the ports are taken.
+        - **A shard without DNS.** The router runs, but no client is sent to it.
+        - **Trusting an old status entry.** After a Route stopped matching a shard's selector, its `status.ingress`
+          entry for that shard stayed in place on this cluster; a request through the shard showed the truth.
+  review:
+    - q: "Which object configures a router, and where does it live?"
+      a: "An IngressController (operator.openshift.io/v1) in openshift-ingress-operator; the operator creates the router Deployment and Services in openshift-ingress."
+    - q: "How do you make a shard serve only some Routes?"
+      a: "A routeSelector (Route labels) or a namespaceSelector (project labels) on its IngressController."
+    - q: "How do you see which routers serve a Route?"
+      a: "Read status.ingress of the Route: one entry per router, with its name and Admitted condition."
+    - q: "Why does a labelled Route still appear under the default router?"
+      a: "The default IngressController has no selector unless you add one; it admits every Route, so it must be given a selector that excludes the shard's label."
+    - q: "Why use the Private strategy on a one-node cluster whose default router uses HostNetwork?"
+      a: "The node's ports 80 and 443 are taken; Private runs the router on the pod network and publishes nothing, so nothing clashes."
+  labs: []
+  limits: |
+    OpenShift Local has one node and one default router on its host network, so the shard was published with the
+    `Private` strategy and tested from a pod through its internal Service. The default IngressController was not
+    given an excluding selector: on this cluster that change interrupts every Route, including the login server's,
+    so it is shown as a documented example. No DNS record points at the shard's domain.
+  enterprise: |
+    Platform teams commonly run an external and an internal shard, each with its own load balancer, DNS domain and
+    certificate, on dedicated infrastructure nodes, and select by namespace labels set by the project template, so
+    that a team cannot move its application to the other shard by relabelling a Route.
+  commands:
+    - {cmd: "oc get ingresscontroller -n openshift-ingress-operator", as: admin, meaning: "the routers configured on the cluster: one, default"}
+    - {cmd: "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}{.status.domain}{\"\\n\"}{.status.endpointPublishingStrategy}{\"\\n\"}'", as: admin, meaning: "generation, domain and publishing strategy of the default router"}
+    - {cmd: "oc get pods -n openshift-ingress -o wide", as: admin, meaning: "the default router runs with the node's own address"}
+    - {cmd: "oc create -f academy-shard.yaml", as: admin, meaning: "create the second IngressController"}
+    - {cmd: "oc wait ingresscontroller/academy-shard -n openshift-ingress-operator --for=condition=Available --timeout=300s", as: admin, timeout: 330, meaning: "wait until its router is running"}
+    - {cmd: "oc get deployments,services -n openshift-ingress", as: admin, meaning: "the router Deployment and internal Service the operator created"}
+    - {cmd: "oc get pods -n openshift-ingress -o wide -l ingresscontroller.operator.openshift.io/deployment-ingresscontroller=academy-shard", as: admin, meaning: "the shard's router pod, on the pod network"}
+    - {cmd: "oc get secret router-certs-academy-shard -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer", as: admin, meaning: "the shard's generated default certificate: subject and issuer only"}
+    - {cmd: "oc adm new-project lab-ingress --admin=developer", as: admin, meaning: "a project for the team, administered by developer"}
+    - {cmd: "oc apply -f app.yaml -n lab-ingress && oc rollout status deployment/web -n lab-ingress --timeout=180s && oc rollout status deployment/client -n lab-ingress --timeout=180s", as: developer, timeout: 400, meaning: "the application and a client pod with curl"}
+    - {cmd: "oc expose service web --name=web-internal --hostname=web.shard.apps-crc.testing -n lab-ingress", as: developer, meaning: "a Route with a host in the shard's domain, not labelled yet"}
+    - {cmd: "for i in $(seq 1 30); do oc get route web-internal -n lab-ingress -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5", as: developer, timeout: 120, meaning: "wait until the default router has admitted the Route and reloaded"}
+    - {cmd: "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}'", as: developer, meaning: "the routers that admitted the Route"}
+    - {cmd: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/", as: developer, meaning: "the shard answers 503: no Route for that host"}
+    - {cmd: "oc label route web-internal shard=academy -n lab-ingress", as: developer, meaning: "label the Route for the shard"}
+    - {cmd: "for i in $(seq 1 30); do oc get route web-internal -n lab-ingress -o jsonpath='{.status.ingress[*].routerName}' | grep -qw academy-shard && break; sleep 2; done; sleep 5", as: developer, timeout: 120, meaning: "wait until the shard has admitted the Route and reloaded"}
+    - {cmd: "oc get route web-internal -n lab-ingress -o yaml", as: developer, meaning: "status.ingress lists both routers"}
+    - {cmd: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/", as: developer, meaning: "the shard serves the page"}
+    - {cmd: "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-default.openshift-ingress.svc/", as: developer, meaning: "the default router serves it too"}
+    - {cmd: "oc label route web-internal shard- -n lab-ingress", as: developer, meaning: "remove the label"}
+    - {cmd: "sleep 10", as: developer, meaning: "give the routers time to notice"}
+    - {cmd: "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}' && oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/", as: developer, meaning: "only default again, and the shard answers 503"}
+    - {cmd: "oc delete ingresscontroller academy-shard -n openshift-ingress-operator", as: admin, timeout: 300, meaning: "remove the shard; the operator removes its router"}
+    - {cmd: "oc wait --for=delete deployment/router-academy-shard -n openshift-ingress --timeout=300s; oc get ingresscontroller -n openshift-ingress-operator && oc get deployments,services -n openshift-ingress", as: admin, timeout: 330, meaning: "only the default router remains"}
+    - {cmd: "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}'", as: admin, meaning: "the default IngressController's generation has not moved"}
+    - {cmd: "oc delete project lab-ingress", as: admin, timeout: 300, meaning: "remove the team's project"}
+  experiment:
+    id: X-NET-01
+    objective: "Add a second IngressController (route sharding) published with the Private strategy, show a labelled Route admitted by both routers and an unlabelled one ignored by the shard, then delete the shard and prove the default IngressController and the openshift-ingress project are as before."
+    changes:
+      - "IngressController openshift-ingress-operator/academy-shard (created, deleted)"
+      - "In openshift-ingress, created and removed by the Ingress Operator: Deployment router-academy-shard, Service router-internal-academy-shard, Secrets router-certs-academy-shard, router-metrics-certs-academy-shard and router-stats-academy-shard"
+      - "Project lab-ingress with a RoleBinding for developer, two Deployments, a Service and a Route (created, deleted)"
+    preflight:
+      - {cmd: "oc get ingresscontroller academy-shard -n openshift-ingress-operator", expect: fail}
+      - {cmd: "oc get deployment router-academy-shard -n openshift-ingress", expect: fail}
+      - {cmd: "oc get project lab-ingress", expect: fail}
+      - {cmd: "oc get routes -A -o jsonpath='{range .items[*]}{.spec.host}{\"\\n\"}{end}' | grep -qx web.shard.apps-crc.testing", expect: fail}
+      - {cmd: "oc wait co/ingress --for=condition=Available=True --timeout=30s && oc wait co/ingress --for=condition=Degraded=False --timeout=30s && oc wait co/ingress --for=condition=Progressing=False --timeout=30s"}
+    snapshot:
+      - "oc get ingresscontroller -n openshift-ingress-operator -o name"
+      - "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation} {.spec}'"
+      - "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.generation} {.spec.template.spec.containers[0].env}'"
+      - "oc get deployments,services,secrets,configmaps,poddisruptionbudgets -n openshift-ingress -o name"
+      - "oc get secret router-certs -n openshift-config-managed -o jsonpath='{.data}' | sha256sum"
+      - "oc get dnsrecords -n openshift-ingress-operator -o name"
+      - "oc get clusteroperator ingress -o jsonpath='{range .status.conditions[*]}{.type}={.status} {end}'"
+      - "oc get project lab-ingress -o name --ignore-not-found"
+    rollback:
+      - "oc delete ingresscontroller academy-shard -n openshift-ingress-operator --ignore-not-found --timeout=300s"
+      - "oc delete project lab-ingress --ignore-not-found --wait=false"
+    settle:
+      - "oc wait --for=delete deployment/router-academy-shard -n openshift-ingress --timeout=300s"
+      - "oc wait --for=delete service/router-internal-academy-shard -n openshift-ingress --timeout=120s"
+      - "oc wait --for=delete secret/router-certs-academy-shard secret/router-metrics-certs-academy-shard secret/router-stats-academy-shard -n openshift-ingress --timeout=120s"
+      - "oc wait --for=delete project/lab-ingress --timeout=300s"
+      - "oc wait co/ingress --for=condition=Progressing=False --timeout=300s"
+    verify:
+      - {cmd: "oc wait co/ingress --for=condition=Available=True --timeout=60s && oc wait co/ingress --for=condition=Degraded=False --timeout=60s"}
+      - {cmd: "oc wait ingresscontroller/default -n openshift-ingress-operator --for=condition=Available=True --timeout=60s"}
+      - {cmd: "curl -sk -m 10 -o /dev/null -w '%{http_code}\\n' https://oauth-openshift.apps-crc.testing/healthz"}
+  references:
+    - {title: "OpenShift 4.21: Configuring ingress cluster traffic (ingress sharding)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/configuring-ingress-cluster-traffic"}
+    - {title: "OpenShift 4.21: Ingress Operator (IngressController configuration parameters)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/configuring-ingress"}
+    - {title: "OpenShift API: IngressController (endpointPublishingStrategy, routeSelector, namespaceSelector)", url: "https://github.com/openshift/api/blob/release-4.21/operator/v1/types_ingress.go"}
+- id: n.loadbalancer-services
+  title: "Expose plain TCP: NodePort and LoadBalancer"
+  subtitle: "Services for protocols a Route cannot carry, and what a load balancer needs"
+  module: b4-network-security
+  mode: REAL_LAB
+  minutes: 30
+  level: 3
+  supports: "Kubernetes 1.34 Service types NodePort and LoadBalancer on OpenShift 4.21 (OVN-Kubernetes). Every step was run on OpenShift Local 4.21 by the ordinary user developer, with the cluster administrator (kubeadmin) reading the node, the platform type and the operator catalog (experiment X-NET-08). OpenShift Local has no load-balancer implementation and uses user-mode networking; MetalLB was not installed (see the limits), so its configuration is a documented example."
+  concepts: [net.services, net.ingresscontroller]
+  prerequisites: [o2.tls-exposure, d.services-dns]
+  record_on: cluster-admin
+  objective: |
+    Expose a plain TCP service outside the pod network with a NodePort Service, see why a Route cannot carry it,
+    request a LoadBalancer Service and recognise from its status that no implementation serves it, and describe
+    what MetalLB adds on clusters without a cloud provider.
+  files:
+    echo.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: echo
+        labels:
+          app: echo
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: echo
+        template:
+          metadata:
+            labels:
+              app: echo
+          spec:
+            containers:
+            - name: echo
+              image: quay.io/prometheus/busybox:latest
+              # a line-based TCP service on port 9000: it reads one line and answers "echo: <line>"
+              command: ["nc", "-lk", "-p", "9000", "-e", "sh", "-c", "read line; echo \"echo: $line\""]
+              ports:
+              - containerPort: 9000
+              readinessProbe:
+                tcpSocket: {port: 9000}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 10m, memory: 8Mi}
+                limits: {memory: 32Mi}
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: client
+        labels:
+          app: client
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: client
+        template:
+          metadata:
+            labels:
+              app: client
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: nc
+              image: quay.io/prometheus/busybox:latest
+              command: ["sleep", "86400"]
+              resources:
+                requests: {cpu: 10m, memory: 8Mi}
+                limits: {memory: 32Mi}
+  flow:
+    - kind: ask
+      id: recall-route-protocols
+      recalls: o2.tls-exposure
+      prompt: "Which traffic can a Route carry to a pod?"
+      choices:
+        - text: "Any TCP or UDP protocol, if the port is right"
+          why: "The router speaks HTTP, or reads the host name from a TLS handshake (SNI). A plain TCP protocol gives it neither."
+        - text: "HTTP, HTTPS, and TLS that carries a host name (SNI)"
+          why: "That is all the router understands. This lesson shows what happens with anything else, and what to use instead."
+        - text: "Only HTTPS with a certificate on the Route"
+          why: "Plain HTTP Routes and passthrough Routes exist too. The limit is the protocol, not the certificate."
+      answer: 1
+    - kind: teach
+      id: situation
+      title: "A service that does not speak HTTP"
+      body: |
+        A team runs a line-based TCP service: a client connects to port 9000, sends a line, and gets an answer
+        back. Databases, message brokers and many legacy protocols work this way. The team needs it reachable
+        from outside the pod network.
+
+        Kubernetes has two Service types for that. A **NodePort** Service opens the same port, by default from the
+        range 30000–32767, on every node. A **LoadBalancer** Service asks an implementation (a cloud provider, or
+        MetalLB on bare metal) for an external address. Everything below ran on a lab cluster: the developer in their
+        own project, the administrator for what only an administrator can read.
+    - kind: show
+      id: deploy
+      body: "The service is a small busybox `nc` listener on port 9000 (see `echo.yaml`), with a client pod that has `nc` too:"
+      run: "oc apply -f echo.yaml && oc rollout status deployment/echo --timeout=180s && oc rollout status deployment/client --timeout=180s"
+      notice: "Both Deployments have rolled out."
+    - kind: try
+      id: try-nodeport
+      body: "Create a NodePort Service named `echo` that forwards TCP port 9000 to port 9000 of the pods, on node port 30900."
+      accept: ["oc create service nodeport echo --tcp=9000:9000 --node-port=30900", "oc create service nodeport echo --node-port=30900 --tcp=9000:9000", "oc create svc nodeport echo --tcp=9000:9000 --node-port=30900", "oc create svc nodeport echo --node-port=30900 --tcp=9000:9000", "kubectl create service nodeport echo --tcp=9000:9000 --node-port=30900", "kubectl create service nodeport echo --node-port=30900 --tcp=9000:9000"]
+      hints:
+        - match: "--port"
+          say: "`oc create service nodeport` takes the ports as `--tcp=<port>:<targetPort>`."
+        - match: "loadbalancer"
+          say: "This task is the NodePort type. The LoadBalancer type comes later."
+        - match: "^oc expose"
+          say: "`oc expose deployment echo --type=NodePort --port=9000` would work too, but it cannot choose the node port. Use `oc create service nodeport` with `--node-port`."
+        - match: "^(?!.*--node-port).*$"
+          say: "Without `--node-port`, a free port is picked from 30000–32767. The task asks for 30900."
+      hint: "`oc create service nodeport`, the name, `--tcp=9000:9000`, and `--node-port=30900`."
+      run: "oc create service nodeport echo --tcp=9000:9000 --node-port=30900"
+      then: "`service/echo created`."
+    - kind: show
+      id: nodeport-service
+      run: "oc get service echo -o wide"
+      notice: |
+        Type `NodePort`, `PORT(S)` `9000:30900/TCP`: port 9000 on the Service's cluster IP, and 30900 on every
+        node. `oc create service` gave it the selector `app=echo`, after its name, which matches the pods.
+    - kind: show
+      id: inside
+      body: "Inside the cluster, the Service name works as for any Service:"
+      run: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo 9000'"
+      notice: "`echo: hello`: the client sent one line on a plain TCP connection and got the answer."
+    - kind: ask
+      id: guess-route
+      guess: true
+      prompt: "The developer exposes this Service with an ordinary Route and opens the Route's URL with curl. What comes back?"
+      choices:
+        - text: "`echo: GET / HTTP/1.1`, the service's answer"
+          why: "The router does pass the request on, but it expects an HTTP response, and this is not one."
+        - text: "An error from the router"
+          why: "The router speaks HTTP to the pod and cannot use the answer. The next step shows the status code."
+        - text: "Nothing: the Route is refused"
+          why: "Routes are not checked against the protocol of the pods; the Route is admitted."
+      answer: 1
+    - kind: show
+      id: route-attempt
+      run: "oc expose service echo"
+      notice: "`route.route.openshift.io/echo exposed`: an HTTP Route, admitted like any other."
+    - kind: show
+      id: route-result
+      body: "From the workstation, which reaches Routes through the router:"
+      run: "curl -s -m 5 -o /dev/null -w '%{http_code}\\n' http://$(oc get route echo -o jsonpath='{.spec.host}')/"
+      notice: "`502`: the router reached the pod, but what came back was not an HTTP response. A Route is the wrong tool for this protocol."
+    - kind: show
+      id: route-delete
+      run: "oc delete route echo"
+      notice: "The Route goes."
+    - kind: ask
+      id: tcp-exposure
+      prompt: The Route answered 502 for this TCP service. Which exposure fits it instead?
+      choices:
+      - text: A Service of type NodePort or LoadBalancer
+        why: A Service forwards any TCP connection; neither type needs HTTP or a host name in a TLS handshake.
+      - text: A passthrough Route to the same port
+        why: Passthrough still needs TLS with a host name (SNI). This protocol sends plain text.
+      - text: A re-encrypt Route to the same port
+        why: A re-encrypt Route still speaks HTTP at the router, which is what failed.
+      answer: 0
+    - kind: teach
+      id: node-port-path
+      title: "Reaching the node port"
+      body: |
+        A NodePort Service is reached at `<node address>:<node port>`, from anywhere that can route to the node.
+        Nodes are cluster-scoped objects, so the administrator reads their addresses.
+    - kind: show
+      id: node-address
+      run: "oc get nodes -o wide"
+      notice: "One node, `crc`, with `INTERNAL-IP` `192.168.126.11`."
+    - kind: show
+      id: via-node
+      body: "From the client pod, connect to the node's address and the node port, as a machine on the node network would:"
+      run: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 192.168.126.11 30900'"
+      notice: "`echo: hello`: the node accepted the connection on 30900 and forwarded it to the pod."
+    - kind: teach
+      id: workstation
+      body: |
+        From the workstation it is different on this cluster. OpenShift Local runs here with **user-mode
+        networking**: the node's address is not reachable from the workstation at all. The workstation reaches the
+        virtual machine at `127.0.0.1`, through ports that OpenShift Local forwards: the router's 80 and 443, the API
+        server's 6443, SSH, and, added by its own `routes-controller` pod, the node port of each NodePort Service. On a real cluster
+        you would check node firewalls and routing instead.
+    - kind: ask
+      id: real-cluster-nodeport
+      prompt: On a three-node cluster without OpenShift Local's forwarding, where does an outside client connect to reach echo?
+      choices:
+      - text: Any node's address, on port 30900
+        why: Every node opens the node port and forwards it to a pod, if routing and firewalls let the client in.
+      - text: 127.0.0.1:30900 on the client's own machine
+        why: That address works here only because OpenShift Local forwards it to its virtual machine.
+      - text: The Service's cluster IP, on port 9000
+        why: Cluster IPs answer only inside the cluster network; outside clients cannot route to them.
+      answer: 0
+    - kind: show
+      id: crc-ip
+      body: "The next two commands run in the workstation shell as developer, the ordinary user. They talk to OpenShift Local and to a local port, not to the cluster's API, so no cluster privilege is involved. First, the address OpenShift Local gives the workstation:"
+      run: "crc ip"
+      notice: "`127.0.0.1`: the address OpenShift Local gives the workstation for the cluster."
+    - kind: show
+      id: workstation-refused
+      body: "Then the node port, from the workstation itself, through that address:"
+      run: "echo hello | nc -w 3 127.0.0.1 30900"
+      notice: "`echo: hello`, from the workstation: port 30900 on `127.0.0.1` leads to the node port."
+    - kind: show
+      id: routes-controller-log
+      body: "Who made that forward? The administrator reads the log of OpenShift Local's `routes-controller`:"
+      run: "oc logs deploy/routes-controller -n openshift-ingress --since=3m | grep -E 'Added service|Exposing port'"
+      notice: |
+        It noticed the NodePort Service `echo` and asked OpenShift Local to forward `127.0.0.1:30900` on the
+        workstation to port 30900 of the virtual machine. This is OpenShift Local's convenience, not something a
+        cluster does: elsewhere, a node port is reached at the node's own address.
+    - kind: ask
+      id: nodeport-tradeoff
+      prompt: "Why do teams rarely give a NodePort to external clients directly?"
+      choices:
+        - text: "Node ports only work inside the cluster"
+          why: "A node port answered on the node's address above; it is reachable from wherever the node is."
+        - text: "Clients depend on node addresses and an unusual port"
+          why: "Nodes come and go, and every node opens the port. A load balancer in front gives one stable address and a normal port."
+        - text: "A NodePort Service has no cluster IP"
+          why: "It has one: in-cluster clients used the name `echo` on port 9000."
+      answer: 1
+    - kind: teach
+      id: loadbalancer
+      title: "Asking for a load balancer"
+      body: |
+        A **LoadBalancer** Service is a NodePort Service (by default) plus a request: "give me an external address".
+        Kubernetes itself never invents that address. A load-balancer implementation watches these Services and
+        writes the address into `status.loadBalancer`. On a cloud the cloud provider integration does it; on
+        bare metal, MetalLB.
+    - kind: try
+      id: try-loadbalancer
+      body: "Expose the Deployment `echo` with a Service named `echo-lb` of type LoadBalancer on port 9000."
+      accept: ["oc expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000", "oc expose deployment/echo --name=echo-lb --type=LoadBalancer --port=9000", "oc expose deploy echo --name=echo-lb --type=LoadBalancer --port=9000", "oc expose deploy/echo --name=echo-lb --type=LoadBalancer --port=9000", "oc expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000 --target-port=9000", "oc expose deployment echo --type=LoadBalancer --name=echo-lb --port=9000", "oc expose deployment echo --port=9000 --name=echo-lb --type=LoadBalancer", "kubectl expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000"]
+      hints:
+        - match: "--type=loadbalancer|--type loadbalancer"
+          say: "The type is written with capitals: `LoadBalancer`."
+        - match: "^oc expose (service|svc)"
+          say: "This task expects the Deployment to be exposed, so the new Service takes the pods' selector directly."
+        - match: "^oc create service loadbalancer"
+          say: "`oc create service loadbalancer echo-lb` selects pods labelled `app=echo-lb`, which do not exist. `oc expose deployment` takes the Deployment's selector."
+      hint: "`oc expose deployment echo`, the name, the type and the port."
+      run: "oc expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000"
+      then: "`service/echo-lb exposed`."
+    - kind: show
+      id: services
+      body: "After a few seconds:"
+      run: "oc get services"
+      notice: |
+        `echo-lb` is of type `LoadBalancer` with `EXTERNAL-IP` `<pending>`, and it got a node port of its own, chosen
+        from the range. Nothing on this cluster will ever fill in the address.
+    - kind: show
+      id: lb-status
+      run: "oc get service echo-lb -o jsonpath='{.status}{\"\\n\"}{.spec.allocateLoadBalancerNodePorts}{\"\\n\"}'"
+      notice: |
+        `status.loadBalancer` is empty: `<pending>` is how `oc get` shows that. `allocateLoadBalancerNodePorts` is
+        `true`, which is why the node port exists; an implementation that sends traffic straight to pods can set it
+        to `false`.
+    - kind: show
+      id: lb-inside
+      run: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo-lb 9000'"
+      notice: "The Service still works inside the cluster: a pending external address does not stop the cluster IP."
+    - kind: ask
+      id: pending-first-check
+      prompt: EXTERNAL-IP stays <pending>, yet the Service works inside the cluster. What do you check next?
+      choices:
+      - text: Whether anything here can provide load-balancer addresses
+        why: A cloud integration or MetalLB fills status.loadBalancer; without either, the address never comes. The next steps check both.
+      - text: Whether the echo pods are Ready
+        why: The in-cluster test answered, so the pods and the selector work. Readiness does not allocate addresses.
+      - text: Whether the Service's node port is free
+        why: The node port was allocated (30955). It does not decide the external address.
+      answer: 0
+    - kind: teach
+      id: why-pending
+      title: "Why the address stays pending"
+      body: |
+        The administrator checks what could provide an address: the platform type, and whether MetalLB's API
+        exists.
+    - kind: show
+      id: platform
+      run: "oc get infrastructure cluster -o jsonpath='{.status.platformStatus.type}{\"\\n\"}'"
+      notice: "`None`: no cloud provider integration, so no cloud load balancers."
+    - kind: show
+      id: no-metallb
+      run: "oc api-resources --api-group=metallb.io"
+      notice: "Only the header line: the cluster has no `metallb.io` API, so MetalLB is not installed."
+    - kind: show
+      id: catalog
+      run: "oc get packagemanifest metallb-operator -n openshift-marketplace -o jsonpath='{.status.catalogSource}{\" \"}{.status.defaultChannel}{\"\\n\"}'"
+      notice: "The MetalLB Operator is offered by the `redhat-operators` catalog, channel `stable`: an administrator could install it."
+    - kind: ask
+      id: pending-diagnosis
+      prompt: "On a bare-metal cluster with MetalLB installed, a new LoadBalancer Service stays `<pending>`. What do you inspect first?"
+      choices:
+        - text: "The Service's EndpointSlices and readiness"
+          why: "Endpoints decide where traffic goes once it arrives. They do not allocate the address."
+        - text: "MetalLB's address pools and the Service's events"
+          why: "MetalLB allocates from an IPAddressPool. An exhausted pool, or a pool the Service does not select, leaves it pending, and MetalLB says why in the events."
+        - text: "The IngressController's endpoint publishing strategy"
+          why: "That configures the routers, not addresses for other Services."
+      answer: 1
+    - kind: teach
+      id: metallb
+      title: "MetalLB on bare metal"
+      body: |
+        MetalLB is installed with the MetalLB Operator, which runs a controller (it allocates addresses) and a
+        speaker on each node (it announces them). The administrator gives it one or more **IPAddressPools**:
+        ranges on the node network that nothing else uses. An **L2Advertisement** announces the addresses with ARP
+        from one node at a time; a BGPAdvertisement announces them to routers instead. A Service may ask for a pool
+        with the annotation `metallb.io/address-pool`.
+    - kind: show
+      id: metallb-example
+      code: |
+        apiVersion: metallb.io/v1beta1
+        kind: IPAddressPool
+        metadata:
+          name: lab-pool
+          namespace: metallb-system
+        spec:
+          addresses:
+          - 192.168.126.240-192.168.126.250
+        ---
+        apiVersion: metallb.io/v1beta1
+        kind: L2Advertisement
+        metadata:
+          name: lab-l2
+          namespace: metallb-system
+        spec:
+          ipAddressPools:
+          - lab-pool
+      origin: example
+      caption: "OpenShift 4.21: Configuring MetalLB address pools and L2 advertisements (illustrative values, not applied to this cluster)"
+      notice: "Once the MetalLB Operator and a ready MetalLB instance exist, this pool and advertisement would give `echo-lb` an address in `EXTERNAL-IP`. The pool must hold unused addresses on a network the speakers can announce on, and clients must be able to reach that network; then they connect on port 9000."
+    - kind: show
+      id: cleanup
+      run: "oc delete service echo echo-lb"
+      notice: "Both Services go, and node port 30900 is free again."
+    - kind: reflect
+      id: explain-choice
+      prompt: "A team asks for 'a Route for our PostgreSQL database'. Explain what you would offer instead, and what you would check on the cluster first."
+      model: |
+        A Route cannot carry the PostgreSQL protocol: the router understands HTTP, and TLS with SNI, and PostgreSQL's
+        own TLS negotiation does not start with a plain TLS handshake the router can route. I would offer a
+        LoadBalancer Service on port 5432, after checking that the cluster has an implementation (a cloud provider,
+        or MetalLB with a pool on the right network) by creating one and looking for an EXTERNAL-IP. Without one, a
+        NodePort Service behind the company's own load balancer is the fallback. Either way I would restrict who may
+        connect with NetworkPolicies and firewall rules.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can expose a TCP service with a NodePort Service on a chosen port, show why a Route does not carry it,
+        request a LoadBalancer Service and read from its status whether anything serves it, and describe the
+        MetalLB pool and advertisement that would. Next, [Shard ingress with a second router](/lesson/n.ingress-sharding)
+        configures the routers themselves.
+  sections:
+    - id: exposure-choices
+      title: "Choosing an exposure"
+      depth: true
+      body: |
+        | Need | Exposure | What it needs |
+        |---|---|---|
+        | HTTP or HTTPS | Route | the router, DNS for the host |
+        | TLS with SNI, terminated in the pod | passthrough Route | the client sends SNI; the pod's certificate names the host |
+        | any TCP or UDP, stable address | Service of type LoadBalancer | a cloud provider or MetalLB |
+        | any TCP or UDP, behind your own load balancer | Service of type NodePort | node reachability, firewall rules, a port from 30000–32767 |
+        | in-cluster only | Service of type ClusterIP | nothing more |
+
+        A LoadBalancer Service can set `loadBalancerSourceRanges` to limit which client addresses may connect,
+        where the implementation supports it, and `externalTrafficPolicy: Local` to keep the client's source address
+        (traffic then goes only to nodes that run a pod). OpenShift also has `spec.externalIPs` for Services, which
+        the cluster network configuration (`network.config.openshift.io/cluster`, `spec.externalIP.policy` with
+        `allowedCIDRs` and `rejectedCIDRs`, rejected ranges winning) controls for users who are not cluster
+        administrators; it is off until the administrator allows ranges, and `autoAssignCIDRs` can assign addresses
+        automatically. Allowing an address does not make it reachable: the network must route it to a node, and
+        firewalls must let the traffic through.
+  review:
+    - q: "Why can a Route not expose a plain TCP protocol?"
+      a: "The router speaks HTTP, or routes TLS by its SNI host name; a plain TCP protocol gives it neither, so it answers with an error (502 here)."
+    - q: "What does a NodePort Service open, and where?"
+      a: "The same port, by default from 30000-32767, on every node; clients connect to a node's address and that port."
+    - q: "What does EXTERNAL-IP <pending> on a LoadBalancer Service mean?"
+      a: "status.loadBalancer is empty: no load-balancer implementation (cloud provider or MetalLB) has given the Service an address."
+    - q: "What does MetalLB need from the administrator before it can give addresses?"
+      a: "The operator and a MetalLB instance, an IPAddressPool of unused addresses on the node network, and an L2Advertisement or BGPAdvertisement."
+    - q: "Does a LoadBalancer Service work inside the cluster while its address is pending?"
+      a: "Yes: it still has a cluster IP (and, by default, a node port)."
+  labs: [lab.tls-exposure]
+  limits: |
+    OpenShift Local has no cloud provider and no load-balancer implementation, so the LoadBalancer Service stays
+    `<pending>`. MetalLB was not installed: this cluster runs with user-mode networking, so an address MetalLB
+    announced on the virtual machine's network would not be reachable from the workstation anyway, the node's memory
+    requests were already at about 94% of what it can allocate, and the operator brings its own images, CRDs and
+    webhooks to remove afterwards. Its configuration is a documented example. The node port was reached from a pod
+    through the node's address, and from the workstation through a forward that OpenShift Local's routes-controller
+    adds on `127.0.0.1` for each NodePort Service (an OpenShift Local feature; the rollback removes it). The
+    LoadBalancer Service's own node port got no such forward.
+  enterprise: |
+    On bare metal, platform teams install MetalLB with pools reserved by the network team, often one pool per
+    network zone, and give application teams LoadBalancer Services instead of node ports. On clouds, the provider's
+    load balancer is created for each such Service, and its cost and source ranges are reviewed like any other
+    exposure.
+  commands:
+    - {cmd: "oc apply -f echo.yaml && oc rollout status deployment/echo --timeout=180s && oc rollout status deployment/client --timeout=180s", timeout: 400, meaning: "a plain TCP service on port 9000, and a client with nc"}
+    - {cmd: "oc create service nodeport echo --tcp=9000:9000 --node-port=30900", meaning: "a NodePort Service on node port 30900"}
+    - {cmd: "oc get service echo -o wide", meaning: "type, ports and selector"}
+    - {cmd: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo 9000'", meaning: "a plain TCP exchange through the Service name"}
+    - {cmd: "oc expose service echo", meaning: "an ordinary HTTP Route to the TCP service"}
+    - {cmd: "for i in $(seq 1 30); do oc get route echo -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5", timeout: 120, meaning: "wait until the router has admitted the Route and reloaded"}
+    - {cmd: "curl -s -m 5 -o /dev/null -w '%{http_code}\\n' http://$(oc get route echo -o jsonpath='{.spec.host}')/", meaning: "the router cannot use the TCP service's answer"}
+    - {cmd: "oc delete route echo", meaning: "remove the Route"}
+    - {cmd: "oc get nodes -o wide", as: admin, meaning: "the node's internal address"}
+    - {cmd: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 192.168.126.11 30900'", meaning: "the node port, through the node's address"}
+    - {cmd: "crc ip", meaning: "how the workstation reaches OpenShift Local"}
+    - {cmd: "echo hello | nc -w 3 127.0.0.1 30900", meaning: "the node port, from the workstation, through OpenShift Local's forward"}
+    - {cmd: "oc logs deploy/routes-controller -n openshift-ingress --since=3m | grep -E 'Added service|Exposing port'", as: admin, meaning: "OpenShift Local's routes-controller forwarded the node port to the workstation"}
+    - {cmd: "oc expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000", meaning: "ask for a load balancer"}
+    - {cmd: "sleep 15", meaning: "give a load-balancer implementation, if there were one, time to answer"}
+    - {cmd: "oc get services", meaning: "EXTERNAL-IP pending"}
+    - {cmd: "oc get service echo-lb -o jsonpath='{.status}{\"\\n\"}{.spec.allocateLoadBalancerNodePorts}{\"\\n\"}'", meaning: "an empty status.loadBalancer, and node ports allocated"}
+    - {cmd: "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo-lb 9000'", meaning: "the cluster IP works while the address is pending"}
+    - {cmd: "oc get infrastructure cluster -o jsonpath='{.status.platformStatus.type}{\"\\n\"}'", as: admin, meaning: "the platform type: None, no cloud provider"}
+    - {cmd: "oc api-resources --api-group=metallb.io", as: admin, meaning: "no MetalLB API on this cluster"}
+    - {cmd: "oc get packagemanifest metallb-operator -n openshift-marketplace -o jsonpath='{.status.catalogSource}{\" \"}{.status.defaultChannel}{\"\\n\"}'", as: admin, meaning: "the MetalLB Operator in the catalog"}
+    - {cmd: "oc delete service echo echo-lb", meaning: "remove both Services, freeing node port 30900"}
+  experiment:
+    id: X-NET-08
+    objective: "Expose a plain TCP service with a NodePort Service on a fixed node port and with a LoadBalancer Service that no implementation serves, as developer; read the node, platform type and catalog as the administrator; then prove the node port is free again and no MetalLB API appeared."
+    changes:
+      - "Services echo (NodePort, node port 30900) and echo-lb (LoadBalancer, with an allocated node port), and a Route echo, in developer's temporary project academy-lesson-n-loadbalancer-services (created, deleted)"
+      - "On the workstation: OpenShift Local's routes-controller adds a crc daemon port forward 127.0.0.1:<node port> for each NodePort Service; it does not remove it when the Service is deleted (it asks to unexpose ':<port>'), so the rollback removes every 127.0.0.1:3xxxx forward through the daemon's API (none existed before: preflight)"
+    preflight:
+      - cmd: |-
+          ports=$(oc get services -A -o jsonpath='{range .items[*]}{range .spec.ports[*]}{.nodePort}{"\n"}{end}{end}') || exit 1
+          ! printf '%s\n' "$ports" | grep -qx 30900
+      - cmd: |-
+          hosts=$(oc get routes -A -o jsonpath='{range .items[*]}{.spec.host}{"\n"}{end}') || exit 1
+          ! printf '%s\n' "$hosts" | grep -qx echo-academy-lesson-n-loadbalancer-services.apps-crc.testing
+      - cmd: |-
+          fw=$(curl -sf --max-time 5 --unix-socket "$HOME/.crc/crc-http.sock" http://localhost/network/services/forwarder/all) || exit 1
+          printf '%s' "$fw" | jq -e 'all(.[]; .local | test(":3[0-9]{4}$") | not)' >/dev/null
+    snapshot:
+      - "oc get services -A -o jsonpath='{range .items[*]}{range .spec.ports[*]}{.nodePort}{\"\\n\"}{end}{end}' | awk '$1==30900' | wc -l"
+      - "oc get services,routes -n academy-lesson-n-loadbalancer-services -o name"
+      - "oc api-resources --api-group=metallb.io -o name"
+      - "curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all | jq -S '[.[].local] | sort'"
+    rollback:
+      - "oc delete route echo -n academy-lesson-n-loadbalancer-services --ignore-not-found"
+      - "oc delete service echo echo-lb -n academy-lesson-n-loadbalancer-services --ignore-not-found"
+      - |-
+        sleep 5
+        fw=$(curl -sf --max-time 5 --unix-socket "$HOME/.crc/crc-http.sock" http://localhost/network/services/forwarder/all) || exit 1
+        for l in $(printf '%s' "$fw" | jq -r '.[] | select(.protocol == "tcp") | .local | select(test("^127[.]0[.]0[.]1:3[0-9]{4}$"))'); do
+          curl -sf --max-time 5 --unix-socket "$HOME/.crc/crc-http.sock" -X POST http://localhost/network/services/forwarder/unexpose -d "{\"local\":\"$l\",\"protocol\":\"tcp\"}" || exit 1
+          echo "removed workstation forward $l"
+        done
+  references:
+    - {title: "Kubernetes: Service types NodePort and LoadBalancer", url: "https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types"}
+    - {title: "OpenShift 4.21: Configuring ingress cluster traffic using a NodePort and a load balancer", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/configuring-ingress-cluster-traffic"}
+    - {title: "OpenShift 4.21: About MetalLB and the MetalLB Operator", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/load-balancing-with-metallb"}
+    - {title: "OpenShift 4.21: Configuring MetalLB address pools", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/load-balancing-with-metallb#nw-metallb-configure-address-pool_configure-metallb-address-pools"}
+    - {title: "Red Hat OpenShift Local: Networking (user-mode networking)", url: "https://crc.dev/docs/networking/"}

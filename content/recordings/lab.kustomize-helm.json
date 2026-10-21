@@ -1,0 +1,238 @@
+{
+ "lab": "lab.kustomize-helm",
+ "kind": "lab",
+ "lab_hash": "065d6cb5404bcc27",
+ "recorded_at": "2026-10-13T21:06:57+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "render",
+   "cmd": "oc kustomize lab/kustomize/overlays/dev",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\nkind: Service\nmetadata:\n  labels:\n    app.kubernetes.io/part-of: shop\n    env: dev\n  name: dev-catalog\nspec:\n  ports:\n  - port: 8080\n    targetPort: 8080\n  selector:\n    app: catalog\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/part-of: shop\n    env: dev\n  name: dev-catalog\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: catalog\n  template:\n    metadata:\n      labels:\n        app: catalog\n    spec:\n      containers:\n      - command:\n        - sleep\n        - infinity\n        image: registry.access.redhat.com/ubi9/ubi-minimal:latest\n        name: app\n        resources:\n          limits:\n            memory: 64Mi\n          requests:\n            cpu: 10m\n            memory: 16Mi\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "apply",
+   "cmd": "oc apply -k lab/kustomize/overlays/dev -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/dev-catalog created\ndeployment.apps/dev-catalog created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "apply",
+   "cmd": "oc get deploy,svc -n academy-declarative -l env=dev",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/dev-catalog   0/2     2            0           0s\n\nNAME                  TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE\nservice/dev-catalog   ClusterIP   10.217.4.68   <none>        8080/TCP   0s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drift",
+   "cmd": "oc scale deploy/dev-catalog --replicas=4 -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/dev-catalog scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drift",
+   "cmd": "oc diff -k lab/kustomize/overlays/dev -n academy-declarative",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "diff -u -N /tmp/LIVE-936430498/apps.v1.Deployment.academy-declarative.dev-catalog /tmp/MERGED-3210924658/apps.v1.Deployment.academy-declarative.dev-catalog\n--- /tmp/LIVE-936430498/apps.v1.Deployment.academy-declarative.dev-catalog\t2026-10-13 21:07:07.759663903 +0000\n+++ /tmp/MERGED-3210924658/apps.v1.Deployment.academy-declarative.dev-catalog\t2026-10-13 21:07:07.759663903 +0000\n@@ -6,7 +6,7 @@\n     kubectl.kubernetes.io/last-applied-configuration: |\n       {\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{},\"labels\":{\"app.kubernetes.io/part-of\":\"shop\",\"env\":\"dev\"},\"name\":\"dev-catalog\",\"namespace\":\"academy-declarative\"},\"spec\":{\"replicas\":2,\"selector\":{\"matchLabels\":{\"app\":\"catalog\"}},\"template\":{\"metadata\":{\"labels\":{\"app\":\"catalog\"}},\"spec\":{\"containers\":[{\"command\":[\"sleep\",\"infinity\"],\"image\":\"registry.access.redhat.com/ubi9/ubi-minimal:latest\",\"name\":\"app\",\"resources\":{\"limits\":{\"memory\":\"64Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}}}]}}}}\n   creationTimestamp: \"2026-10-13T21:07:00Z\"\n-  generation: 2\n+  generation: 3\n   labels:\n     app.kubernetes.io/part-of: shop\n     env: dev\n@@ -16,7 +16,7 @@\n   uid: 8e3eed74-c7c9-4df9-969f-ed6c3d94cbfe\n spec:\n   progressDeadlineSeconds: 600\n-  replicas: 4\n+  replicas: 2\n   revisionHistoryLimit: 10\n   selector:\n     matchLabels:\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reconcile",
+   "cmd": "oc apply -k lab/kustomize/overlays/dev -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/dev-catalog unchanged\ndeployment.apps/dev-catalog configured\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reconcile",
+   "cmd": "oc diff -k lab/kustomize/overlays/dev -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-template",
+   "cmd": "helm template demo lab/chart -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "---\n# Source: greeter/templates/deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo-greeter\n  labels: {app.kubernetes.io/instance: demo, app.kubernetes.io/managed-by: Helm}\nspec:\n  replicas: 1\n  selector:\n    matchLabels: {app.kubernetes.io/instance: demo}\n  template:\n    metadata:\n      labels: {app.kubernetes.io/instance: demo}\n    spec:\n      containers:\n      - name: greeter\n        image: registry.access.redhat.com/ubi9/ubi-minimal:latest\n        command:\n        - sh\n        - -c\n        - echo \"hello from helm\"; sleep infinity\n        resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-template",
+   "cmd": "helm install demo lab/chart -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME: demo\nLAST DEPLOYED: Tue Oct 13 21:07:09 2026\nNAMESPACE: academy-declarative\nSTATUS: deployed\nREVISION: 1\nTEST SUITE: None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-template",
+   "cmd": "helm list -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME\tNAMESPACE          \tREVISION\tUPDATED                                \tSTATUS  \tCHART        \tAPP VERSION\ndemo\tacademy-declarative\t1       \t2026-10-13 21:07:09.415783495 +0000 UTC\tdeployed\tgreeter-0.1.0\t1.0        \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-upgrade",
+   "cmd": "helm upgrade demo lab/chart --set replicas=2 --set message=hello-v2 -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Release \"demo\" has been upgraded. Happy Helming!\nNAME: demo\nLAST DEPLOYED: Tue Oct 13 21:07:16 2026\nNAMESPACE: academy-declarative\nSTATUS: deployed\nREVISION: 2\nTEST SUITE: None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-upgrade",
+   "cmd": "helm history demo -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "REVISION\tUPDATED                 \tSTATUS    \tCHART        \tAPP VERSION\tDESCRIPTION     \n1       \tTue Oct 13 21:07:09 2026\tsuperseded\tgreeter-0.1.0\t1.0        \tInstall complete\n2       \tTue Oct 13 21:07:16 2026\tdeployed  \tgreeter-0.1.0\t1.0        \tUpgrade complete\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-upgrade",
+   "cmd": "helm rollback demo 1 -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Rollback was a success! Happy Helming!\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "helm-upgrade",
+   "cmd": "helm history demo -n academy-declarative",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "REVISION\tUPDATED                 \tSTATUS    \tCHART        \tAPP VERSION\tDESCRIPTION     \n1       \tTue Oct 13 21:07:09 2026\tsuperseded\tgreeter-0.1.0\t1.0        \tInstall complete\n2       \tTue Oct 13 21:07:16 2026\tsuperseded\tgreeter-0.1.0\t1.0        \tUpgrade complete\n3       \tTue Oct 13 21:07:17 2026\tdeployed  \tgreeter-0.1.0\t1.0        \tRollback to 1   \n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "dev-two",
+    "title": "dev-catalog matches the overlay (2 replicas)",
+    "expect": "2",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"dev-catalog\" not found"
+   },
+   {
+    "id": "dev-label",
+    "title": "The overlay's label is on the Deployment",
+    "expect": "env=dev",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"dev-catalog\" not found"
+   },
+   {
+    "id": "demo-one",
+    "title": "After the rollback, demo runs 1 replica",
+    "expect": "1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"demo-greeter\" not found"
+   },
+   {
+    "id": "demo-rev",
+    "title": "The release has 3 revisions (install, upgrade, rollback)",
+    "expect": "3 release secrets",
+    "status": "fail",
+    "observed": "0 matching secrets"
+   }
+  ],
+  "at": 1791925619.8995419
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "dev-two",
+    "title": "dev-catalog matches the overlay (2 replicas)",
+    "expect": "2",
+    "status": "pass",
+    "observed": "spec.replicas = 2"
+   },
+   {
+    "id": "dev-label",
+    "title": "The overlay's label is on the Deployment",
+    "expect": "env=dev",
+    "status": "pass",
+    "observed": "metadata.labels.env = 'dev'"
+   },
+   {
+    "id": "demo-one",
+    "title": "After the rollback, demo runs 1 replica",
+    "expect": "1",
+    "status": "pass",
+    "observed": "spec.replicas = 1"
+   },
+   {
+    "id": "demo-rev",
+    "title": "The release has 3 revisions (install, upgrade, rollback)",
+    "expect": "3 release secrets",
+    "status": "pass",
+    "observed": "3 matching secrets"
+   }
+  ],
+  "at": 1791925640.7541707
+ },
+ "seconds": 23,
+ "ok": true,
+ "problems": []
+}

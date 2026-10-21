@@ -1,0 +1,168 @@
+{
+ "lab": "lesson.c.projects-builds",
+ "kind": "lesson",
+ "lab_hash": "1fd02598e04130bb",
+ "recorded_at": "2026-10-15T22:25:32+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-c-projects-builds",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc new-project academy-demo-shop --skip-config-write; sleep 15",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Project \"academy-demo-shop\" created on server \"https://api.crc.testing:6443\".\n\nTo switch to this project and start adding applications, use:\n\n    oc project academy-demo-shop\n",
+   "stderr": "",
+   "combined": "Project \"academy-demo-shop\" created on server \"https://api.crc.testing:6443\".\n\nTo switch to this project and start adding applications, use:\n\n    oc project academy-demo-shop\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe project academy-demo-shop",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\t\tacademy-demo-shop\nCreated:\t\t17 seconds ago\nLabels:\t\t\tkubernetes.io/metadata.name=academy-demo-shop\n\t\t\tpod-security.kubernetes.io/audit=restricted\n\t\t\tpod-security.kubernetes.io/audit-version=latest\n\t\t\tpod-security.kubernetes.io/warn=restricted\n\t\t\tpod-security.kubernetes.io/warn-version=latest\nAnnotations:\t\topenshift.io/description=\n\t\t\topenshift.io/display-name=\n\t\t\topenshift.io/requester=developer\n\t\t\topenshift.io/sa.scc.mcs=s0:c33,c12\n\t\t\topenshift.io/sa.scc.supplemental-groups=1001080000/10000\n\t\t\topenshift.io/sa.scc.uid-range=1001080000/10000\n\t\t\tsecurity.openshift.io/MinimallySufficientPodSecurityStandard=restricted\nDisplay Name:\t\t<none>\nDescription:\t\t<none>\nStatus:\t\t\tActive\nNode Selector:\t\t<none>\nQuota:\t\t\t<none>\nResource limits:\t<none>\n",
+   "stderr": "",
+   "combined": "Name:\t\t\tacademy-demo-shop\nCreated:\t\t17 seconds ago\nLabels:\t\t\tkubernetes.io/metadata.name=academy-demo-shop\n\t\t\tpod-security.kubernetes.io/audit=restricted\n\t\t\tpod-security.kubernetes.io/audit-version=latest\n\t\t\tpod-security.kubernetes.io/warn=restricted\n\t\t\tpod-security.kubernetes.io/warn-version=latest\nAnnotations:\t\topenshift.io/description=\n\t\t\topenshift.io/display-name=\n\t\t\topenshift.io/requester=developer\n\t\t\topenshift.io/sa.scc.mcs=s0:c33,c12\n\t\t\topenshift.io/sa.scc.supplemental-groups=1001080000/10000\n\t\t\topenshift.io/sa.scc.uid-range=1001080000/10000\n\t\t\tsecurity.openshift.io/MinimallySufficientPodSecurityStandard=restricted\nDisplay Name:\t\t<none>\nDescription:\t\t<none>\nStatus:\t\t\tActive\nNode Selector:\t\t<none>\nQuota:\t\t\t<none>\nResource limits:\t<none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get rolebindings -o wide -n academy-demo-shop",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                               AGE   USERS       GROUPS                                     SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  16s   developer                                              \nsystem:deployers        ClusterRole/system:deployer        15s                                                          academy-demo-shop/deployer\nsystem:image-builders   ClusterRole/system:image-builder   15s                                                          academy-demo-shop/builder\nsystem:image-pullers    ClusterRole/system:image-puller    15s               system:serviceaccounts:academy-demo-shop   \n",
+   "stderr": "",
+   "combined": "NAME                    ROLE                               AGE   USERS       GROUPS                                     SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  16s   developer                                              \nsystem:deployers        ClusterRole/system:deployer        15s                                                          academy-demo-shop/deployer\nsystem:image-builders   ClusterRole/system:image-builder   15s                                                          academy-demo-shop/builder\nsystem:image-pullers    ClusterRole/system:image-puller    15s               system:serviceaccounts:academy-demo-shop   \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project academy-demo-shop --wait=false",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"academy-demo-shop\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"academy-demo-shop\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-build --name=hello --binary --strategy=docker; oc get buildconfig,imagestream",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    * A Docker build using binary input will be created\n      * The resulting image will be pushed to image stream tag \"hello:latest\"\n      * A binary build was created, use 'oc start-build --from-dir' to trigger a new build\n\n--> Creating resources with label build=hello ...\n    imagestream.image.openshift.io \"hello\" created\n    buildconfig.build.openshift.io \"hello\" created\n--> Success\nNAME                                   TYPE     FROM     LATEST\nbuildconfig.build.openshift.io/hello   Docker   Binary   0\n\nNAME                                   IMAGE REPOSITORY                                                                                 TAGS   UPDATED\nimagestream.image.openshift.io/hello   default-route-openshift-image-registry.apps-crc.testing/academy-lesson-c-projects-builds/hello          \n",
+   "stderr": "",
+   "combined": "    * A Docker build using binary input will be created\n      * The resulting image will be pushed to image stream tag \"hello:latest\"\n      * A binary build was created, use 'oc start-build --from-dir' to trigger a new build\n\n--> Creating resources with label build=hello ...\n    imagestream.image.openshift.io \"hello\" created\n    buildconfig.build.openshift.io \"hello\" created\n--> Success\nNAME                                   TYPE     FROM     LATEST\nbuildconfig.build.openshift.io/hello   Docker   Binary   0\n\nNAME                                   IMAGE REPOSITORY                                                                                 TAGS   UPDATED\nimagestream.image.openshift.io/hello   default-route-openshift-image-registry.apps-crc.testing/academy-lesson-c-projects-builds/hello          \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc start-build hello --from-dir=. --follow --wait",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "build.build.openshift.io/hello-1 started\nReceiving source from STDIN as archive ...\ntime=\"2026-10-15T22:18:49Z\" level=info msg=\"Not using native diff for overlay, this may cause degraded performance for building images: kernel has CONFIG_OVERLAY_FS_REDIRECT_DIR enabled\"\nI1015 22:18:49.064293       1 defaults.go:112] Defaulting to storage driver \"overlay\" with options [mountopt=metacopy=on].\nCaching blobs under \"/var/cache/blobs\".\n\nPulling image registry.access.redhat.com/ubi9/ubi-minimal:latest ...\nTrying to pull registry.access.redhat.com/ubi9/ubi-minimal:latest...\nGetting image source signatures\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:1f074f64bbb7038b3c5f4693483d11a074c3782cf1fa5419c9464d457ab7942a\nWriting manifest to image destination\nAdding transient rw bind mount for /run/secrets/rhsm\nAdding transient rw bind mount for /run/secrets/redhat.repo\nSTEP 1/5: FROM registry.access.redhat.com/ubi9/ubi-minimal:latest\nSTEP 2/5: COPY message.txt /message.txt\n--> 0fdb3e8a111b\nSTEP 3/5: CMD [\"sh\",\"-c\",\"cat /message.txt; sleep infinity\"]\n--> bdeb545cf7d2\nSTEP 4/5: ENV \"OPENSHIFT_BUILD_NAME\"=\"hello-1\" \"OPENSHIFT_BUILD_NAMESPACE\"=\"academy-lesson-c-projects-builds\"\n--> cc20d912e229\nSTEP 5/5: LABEL \"io.openshift.build.name\"=\"hello-1\" \"io.openshift.build.namespace\"=\"academy-lesson-c-projects-builds\"\nCOMMIT temp.builder.openshift.io/academy-lesson-c-projects-builds/hello-1:d3afd235\n--> 1f0307a12b77\nSuccessfully tagged temp.builder.openshift.io/academy-lesson-c-projects-builds/hello-1:d3afd235\n1f0307a12b77b01db5264fb3bff6ad3fd80c175f61e34346bade05420961b3da\n\nPushing image image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello:latest ...\nGetting image source signatures\nCopying blob sha256:cf136ebc03704cafa8cefee774cf42062c4078b35a98f02fc014520e1e9f8176\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:1f0307a12b77b01db5264fb3bff6ad3fd80c175f61e34346bade05420961b3da\nWriting manifest to image destination\nSuccessfully pushed image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:306c3f9cb4fd1726652c99ee74475059417488528d3ea13a4b60246568a56b92\nPush successful\n",
+   "stderr": "Uploading directory \".\" as binary input for the build ...\n....\nUploading finished\n",
+   "combined": "Uploading directory \".\" as binary input for the build ...\n....\nUploading finished\nbuild.build.openshift.io/hello-1 started\nReceiving source from STDIN as archive ...\ntime=\"2026-10-15T22:18:49Z\" level=info msg=\"Not using native diff for overlay, this may cause degraded performance for building images: kernel has CONFIG_OVERLAY_FS_REDIRECT_DIR enabled\"\nI1015 22:18:49.064293       1 defaults.go:112] Defaulting to storage driver \"overlay\" with options [mountopt=metacopy=on].\nCaching blobs under \"/var/cache/blobs\".\n\nPulling image registry.access.redhat.com/ubi9/ubi-minimal:latest ...\nTrying to pull registry.access.redhat.com/ubi9/ubi-minimal:latest...\nGetting image source signatures\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:1f074f64bbb7038b3c5f4693483d11a074c3782cf1fa5419c9464d457ab7942a\nWriting manifest to image destination\nAdding transient rw bind mount for /run/secrets/rhsm\nAdding transient rw bind mount for /run/secrets/redhat.repo\nSTEP 1/5: FROM registry.access.redhat.com/ubi9/ubi-minimal:latest\nSTEP 2/5: COPY message.txt /message.txt\n--> 0fdb3e8a111b\nSTEP 3/5: CMD [\"sh\",\"-c\",\"cat /message.txt; sleep infinity\"]\n--> bdeb545cf7d2\nSTEP 4/5: ENV \"OPENSHIFT_BUILD_NAME\"=\"hello-1\" \"OPENSHIFT_BUILD_NAMESPACE\"=\"academy-lesson-c-projects-builds\"\n--> cc20d912e229\nSTEP 5/5: LABEL \"io.openshift.build.name\"=\"hello-1\" \"io.openshift.build.namespace\"=\"academy-lesson-c-projects-builds\"\nCOMMIT temp.builder.openshift.io/academy-lesson-c-projects-builds/hello-1:d3afd235\n--> 1f0307a12b77\nSuccessfully tagged temp.builder.openshift.io/academy-lesson-c-projects-builds/hello-1:d3afd235\n1f0307a12b77b01db5264fb3bff6ad3fd80c175f61e34346bade05420961b3da\n\nPushing image image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello:latest ...\nGetting image source signatures\nCopying blob sha256:cf136ebc03704cafa8cefee774cf42062c4078b35a98f02fc014520e1e9f8176\nCopying blob sha256:3655575efb35316918c7e7d2cb81ae7db0e4613f7ffbbadb4980cc0549ac2834\nCopying config sha256:1f0307a12b77b01db5264fb3bff6ad3fd80c175f61e34346bade05420961b3da\nWriting manifest to image destination\nSuccessfully pushed image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:306c3f9cb4fd1726652c99ee74475059417488528d3ea13a4b60246568a56b92\nPush successful\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get builds; oc get istag hello:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      TYPE     FROM     STATUS     STARTED         DURATION\nhello-1   Docker   Binary   Complete   2 minutes ago   2m22s\nNAME           IMAGE REFERENCE                                                                                                                                                   UPDATED\nhello:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:306c3f9cb4fd1726652c99ee74475059417488528d3ea13a4b60246568a56b92   7 seconds ago\n",
+   "stderr": "",
+   "combined": "NAME      TYPE     FROM     STATUS     STARTED         DURATION\nhello-1   Docker   Binary   Complete   2 minutes ago   2m22s\nNAME           IMAGE REFERENCE                                                                                                                                                   UPDATED\nhello:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:306c3f9cb4fd1726652c99ee74475059417488528d3ea13a4b60246568a56b92   7 seconds ago\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-app --image-stream=hello:latest --name=hello; sleep 15; oc get deployment hello; oc logs deployment/hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "--> Found image 1f0307a (21 seconds old) in image stream \"academy-lesson-c-projects-builds/hello\" under tag \"latest\" for \"hello:latest\"\n\n    Red Hat Universal Base Image 9 Minimal \n    -------------------------------------- \n    The Universal Base Image Minimal is a stripped down image that uses microdnf as a package manager. This base image is freely redistributable, but Red Hat only supports Red Hat technologies through subscriptions for Red Hat products. This image is maintained by Red Hat and updated regularly.\n\n    Tags: minimal rhel9\n\n\n--> Creating resources ...\n    deployment.apps \"hello\" created\n--> Success\n    Run 'oc status' to view your app.\nNAME    READY   UP-TO-DATE   AVAILABLE   AGE\nhello   1/1     1            1           17s\nversion 1\n",
+   "stderr": "",
+   "combined": "--> Found image 1f0307a (21 seconds old) in image stream \"academy-lesson-c-projects-builds/hello\" under tag \"latest\" for \"hello:latest\"\n\n    Red Hat Universal Base Image 9 Minimal \n    -------------------------------------- \n    The Universal Base Image Minimal is a stripped down image that uses microdnf as a package manager. This base image is freely redistributable, but Red Hat only supports Red Hat technologies through subscriptions for Red Hat products. This image is maintained by Red Hat and updated regularly.\n\n    Tags: minimal rhel9\n\n\n--> Creating resources ...\n    deployment.apps \"hello\" created\n--> Success\n    Run 'oc status' to view your app.\nNAME    READY   UP-TO-DATE   AVAILABLE   AGE\nhello   1/1     1            1           17s\nversion 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment hello -o jsonpath='{.metadata.annotations.image\\.openshift\\.io/triggers}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[{\"from\":{\"kind\":\"ImageStreamTag\",\"name\":\"hello:latest\",\"namespace\":\"academy-lesson-c-projects-builds\"},\"fieldPath\":\"spec.template.spec.containers[?(@.name==\\\"hello\\\")].image\"}]\n",
+   "stderr": "",
+   "combined": "[{\"from\":{\"kind\":\"ImageStreamTag\",\"name\":\"hello:latest\",\"namespace\":\"academy-lesson-c-projects-builds\"},\"fieldPath\":\"spec.template.spec.containers[?(@.name==\\\"hello\\\")].image\"}]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo 'version 2' > message.txt; oc start-build hello --from-dir=. --follow --wait | tail -n 3; sleep 10; oc rollout status deployment/hello --timeout=240s | tail -n 1; oc get deployment hello -o jsonpath='{.spec.template.spec.containers[0].image}{\"\\n\"}'; oc get istag hello:latest -o jsonpath='{.image.dockerImageReference}{\"\\n\"}'; oc rollout history deployment/hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Writing manifest to image destination\nSuccessfully pushed image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\nPush successful\ndeployment \"hello\" successfully rolled out\nimage-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\nimage-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\ndeployment.apps/hello \nREVISION  CHANGE-CAUSE\n1         <none>\n2         <none>\n3         <none>\n\n",
+   "stderr": "Uploading directory \".\" as binary input for the build ...\n....\nUploading finished\n",
+   "combined": "Uploading directory \".\" as binary input for the build ...\n....\nUploading finished\nWriting manifest to image destination\nSuccessfully pushed image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\nPush successful\ndeployment \"hello\" successfully rolled out\nimage-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\nimage-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b\ndeployment.apps/hello \nREVISION  CHANGE-CAUSE\n1         <none>\n2         <none>\n3         <none>\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-build --name=broken --binary --strategy=docker >/dev/null; oc start-build broken --from-dir=broken --follow --wait 2>&1 | tail -n 5; oc get builds",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Downloading metadata...\nDownloading metadata...\nerror: No package matches 'no-such-package'\nerror: build error: building at STEP \"RUN microdnf install -y no-such-package\": while running runtime: exit status 1\nerror: the build academy-lesson-c-projects-builds/broken-1 status is \"Failed\"\nNAME       TYPE     FROM     STATUS                       STARTED              DURATION\nhello-1    Docker   Binary   Complete                     7 minutes ago        2m22s\nhello-2    Docker   Binary   Complete                     4 minutes ago        2m14s\nbroken-1   Docker   Binary   Failed (DockerBuildFailed)   About a minute ago   1m51s\n",
+   "stderr": "",
+   "combined": "Downloading metadata...\nDownloading metadata...\nerror: No package matches 'no-such-package'\nerror: build error: building at STEP \"RUN microdnf install -y no-such-package\": while running runtime: exit status 1\nerror: the build academy-lesson-c-projects-builds/broken-1 status is \"Failed\"\nNAME       TYPE     FROM     STATUS                       STARTED              DURATION\nhello-1    Docker   Binary   Complete                     7 minutes ago        2m22s\nhello-2    Docker   Binary   Complete                     4 minutes ago        2m14s\nbroken-1   Docker   Binary   Failed (DockerBuildFailed)   About a minute ago   1m51s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc tag hello:latest hello:prod; sleep 3; oc get istag",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Tag hello:prod set to hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b.\nNAME           IMAGE REFERENCE                                                                                                                                                   UPDATED\nhello:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b   2 minutes ago\nhello:prod     image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b   4 seconds ago\n",
+   "stderr": "",
+   "combined": "Tag hello:prod set to hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b.\nNAME           IMAGE REFERENCE                                                                                                                                                   UPDATED\nhello:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b   2 minutes ago\nhello:prod     image-registry.openshift-image-registry.svc:5000/academy-lesson-c-projects-builds/hello@sha256:1eebde48521f260b59f5c0f0471e7af8c8926973f78c097fdd1532adaa5c839b   4 seconds ago\n",
+   "ok": true
+  }
+ ],
+ "seconds": 469,
+ "ok": true,
+ "problems": []
+}

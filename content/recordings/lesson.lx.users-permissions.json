@@ -1,0 +1,121 @@
+{
+ "lab": "lesson.lx.users-permissions",
+ "kind": "lesson",
+ "lab_hash": "b579fd81b496ce62",
+ "recorded_at": "2026-10-17T16:51:41+00:00",
+ "cluster": {},
+ "host": {},
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "id",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1000(learner) gid=1000(learner) groups=1000(learner),10(wheel) context=system_u:system_r:cloud_init_t:s0\n",
+   "stderr": "",
+   "combined": "uid=1000(learner) gid=1000(learner) groups=1000(learner),10(wheel) context=system_u:system_r:cloud_init_t:s0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod 600 private.txt; chmod 755 backup.sh; chmod 644 notes.txt; ls -l",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "total 12\n-rwxr-xr-x. 1 learner learner 65 Oct 17 16:51 backup.sh\ndrwxr-xr-x. 2 learner learner 22 Oct 17 16:51 box\n-rw-r--r--. 1 learner learner 37 Oct 17 16:51 notes.txt\n-rw-------. 1 learner learner 32 Oct 17 16:51 private.txt\n",
+   "stderr": "",
+   "combined": "total 12\n-rwxr-xr-x. 1 learner learner 65 Oct 17 16:51 backup.sh\ndrwxr-xr-x. 2 learner learner 22 Oct 17 16:51 box\n-rw-r--r--. 1 learner learner 37 Oct 17 16:51 notes.txt\n-rw-------. 1 learner learner 32 Oct 17 16:51 private.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls -l",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "total 12\n-rwxr-xr-x. 1 learner learner 65 Oct 17 16:51 backup.sh\ndrwxr-xr-x. 2 learner learner 22 Oct 17 16:51 box\n-rw-r--r--. 1 learner learner 37 Oct 17 16:51 notes.txt\n-rw-------. 1 learner learner 32 Oct 17 16:51 private.txt\n",
+   "stderr": "",
+   "combined": "total 12\n-rwxr-xr-x. 1 learner learner 65 Oct 17 16:51 backup.sh\ndrwxr-xr-x. 2 learner learner 22 Oct 17 16:51 box\n-rw-r--r--. 1 learner learner 37 Oct 17 16:51 notes.txt\n-rw-------. 1 learner learner 32 Oct 17 16:51 private.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "./backup.sh",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "backup.sh is running: this would copy the notes\n",
+   "stderr": "",
+   "combined": "backup.sh is running: this would copy the notes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod a-x backup.sh; ls -l backup.sh; ./backup.sh",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 126,
+   "stdout": "-rw-r--r--. 1 learner learner 65 Oct 17 16:51 backup.sh\n",
+   "stderr": "bash: line 1: ./backup.sh: Permission denied\n",
+   "combined": "-rw-r--r--. 1 learner learner 65 Oct 17 16:51 backup.sh\nbash: line 1: ./backup.sh: Permission denied\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod u+x backup.sh; ls -l backup.sh; ./backup.sh",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "-rwxr--r--. 1 learner learner 65 Oct 17 16:51 backup.sh\nbackup.sh is running: this would copy the notes\n",
+   "stderr": "",
+   "combined": "-rwxr--r--. 1 learner learner 65 Oct 17 16:51 backup.sh\nbackup.sh is running: this would copy the notes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod a-x box; ls -ld box; cat box/note.txt",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "drw-r--r--. 2 learner learner 22 Oct 17 16:51 box\n",
+   "stderr": "cat: box/note.txt: Permission denied\n",
+   "combined": "drw-r--r--. 2 learner learner 22 Oct 17 16:51 box\ncat: box/note.txt: Permission denied\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chown root notes.txt",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "chown: changing ownership of 'notes.txt': Operation not permitted\n",
+   "combined": "chown: changing ownership of 'notes.txt': Operation not permitted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod +x box",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  }
+ ],
+ "seconds": 11,
+ "ok": true,
+ "problems": []
+}

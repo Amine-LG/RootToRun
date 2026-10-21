@@ -1,0 +1,1130 @@
+{
+ "lab": "ch.bounded-cleanup",
+ "kind": "challenge",
+ "lab_hash": "7ebb86ee571d8ac7",
+ "recorded_at": "2026-10-20T17:22:58+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc create serviceaccount debug-cleaner -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/debug-cleaner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create role pod-cleaner --verb=list,delete --resource=pods -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "role.rbac.authorization.k8s.io/pod-cleaner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create rolebinding debug-cleaner --role=pod-cleaner --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io/debug-cleaner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/debug-cleaner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/debug-cleaner serviceaccount updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/debug-cleaner patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/cleanup-now created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/cleanup-now condition met\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "schedule",
+    "title": "debug-cleaner runs every 30 minutes",
+    "expect": "spec.schedule = '*/30 * * * *'",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "active",
+    "title": "the CronJob is not suspended",
+    "expect": "spec.suspend = None",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "no-overlap",
+    "title": "it never runs two jobs at once",
+    "expect": "Forbid",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "does-cleanup",
+    "title": "its command deletes pods labelled debug=true",
+    "expect": "the command names debug=true",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "own-sa",
+    "title": "its pods run as the debug-cleaner ServiceAccount",
+    "expect": "debug-cleaner",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "can-list",
+    "title": "the ServiceAccount can list pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can debug-cleaner list pods? no"
+   },
+   {
+    "id": "can-delete",
+    "title": "the ServiceAccount can delete pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can debug-cleaner delete pods? no"
+   },
+   {
+    "id": "no-deployments",
+    "title": "it cannot delete, change or scale Deployments",
+    "expect": "no rule allows changing them",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+   },
+   {
+    "id": "no-secrets",
+    "title": "it cannot read Secrets",
+    "expect": "no rule allows reading secrets",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: get/list/watch secrets"
+   },
+   {
+    "id": "no-rbac",
+    "title": "it cannot change RBAC",
+    "expect": "no rule allows changing roles or bindings",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+   },
+   {
+    "id": "ran",
+    "title": "a Job from the CronJob succeeded",
+    "expect": "1 matching job",
+    "status": "fail",
+    "observed": "0 matching job | Error from server (NotFound): cronjobs.batch \"debug-cleaner\" not found"
+   },
+   {
+    "id": "cleaned",
+    "title": "no debug pod is left",
+    "expect": "0 matching pod",
+    "status": "fail",
+    "observed": "2 matching pod"
+   },
+   {
+    "id": "web-alive",
+    "title": "web still runs",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   }
+  ],
+  "at": 1792516992.1466389
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "schedule",
+    "title": "debug-cleaner runs every 30 minutes",
+    "expect": "spec.schedule = '*/30 * * * *'",
+    "status": "pass",
+    "observed": "spec.schedule = '*/30 * * * *'"
+   },
+   {
+    "id": "active",
+    "title": "the CronJob is not suspended",
+    "expect": "spec.suspend = None",
+    "status": "pass",
+    "observed": "spec.suspend = False"
+   },
+   {
+    "id": "no-overlap",
+    "title": "it never runs two jobs at once",
+    "expect": "Forbid",
+    "status": "pass",
+    "observed": "spec.concurrencyPolicy = 'Forbid'"
+   },
+   {
+    "id": "does-cleanup",
+    "title": "its command deletes pods labelled debug=true",
+    "expect": "the command names debug=true",
+    "status": "pass",
+    "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'debug-cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+   },
+   {
+    "id": "own-sa",
+    "title": "its pods run as the debug-cleaner ServiceAccount",
+    "expect": "debug-cleaner",
+    "status": "pass",
+    "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = 'debug-cleaner'"
+   },
+   {
+    "id": "can-list",
+    "title": "the ServiceAccount can list pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can debug-cleaner list pods? yes"
+   },
+   {
+    "id": "can-delete",
+    "title": "the ServiceAccount can delete pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can debug-cleaner delete pods? yes"
+   },
+   {
+    "id": "no-deployments",
+    "title": "it cannot delete, change or scale Deployments",
+    "expect": "no rule allows changing them",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+   },
+   {
+    "id": "no-secrets",
+    "title": "it cannot read Secrets",
+    "expect": "no rule allows reading secrets",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: get/list/watch secrets"
+   },
+   {
+    "id": "no-rbac",
+    "title": "it cannot change RBAC",
+    "expect": "no rule allows changing roles or bindings",
+    "status": "pass",
+    "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+   },
+   {
+    "id": "ran",
+    "title": "a Job from the CronJob succeeded",
+    "expect": "1 matching job",
+    "status": "pass",
+    "observed": "1 matching job"
+   },
+   {
+    "id": "cleaned",
+    "title": "no debug pod is left",
+    "expect": "0 matching pod",
+    "status": "pass",
+    "observed": "0 matching pod"
+   },
+   {
+    "id": "web-alive",
+    "title": "web still runs",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   }
+  ],
+  "at": 1792517007.4737995
+ },
+ "trials": [
+  {
+   "id": "default-sa-edit",
+   "title": "Runs as the default ServiceAccount with the edit role: it works, but it is far too powerful",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "schedule",
+     "title": "debug-cleaner runs every 30 minutes",
+     "expect": "spec.schedule = '*/30 * * * *'",
+     "status": "pass",
+     "observed": "spec.schedule = '*/30 * * * *'"
+    },
+    {
+     "id": "active",
+     "title": "the CronJob is not suspended",
+     "expect": "spec.suspend = None",
+     "status": "pass",
+     "observed": "spec.suspend = False"
+    },
+    {
+     "id": "no-overlap",
+     "title": "it never runs two jobs at once",
+     "expect": "Forbid",
+     "status": "pass",
+     "observed": "spec.concurrencyPolicy = 'Forbid'"
+    },
+    {
+     "id": "does-cleanup",
+     "title": "its command deletes pods labelled debug=true",
+     "expect": "the command names debug=true",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'debug-cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+    },
+    {
+     "id": "own-sa",
+     "title": "its pods run as the debug-cleaner ServiceAccount",
+     "expect": "debug-cleaner",
+     "status": "fail",
+     "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = None"
+    },
+    {
+     "id": "can-list",
+     "title": "the ServiceAccount can list pods",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can debug-cleaner list pods? no"
+    },
+    {
+     "id": "can-delete",
+     "title": "the ServiceAccount can delete pods",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can debug-cleaner delete pods? no"
+    },
+    {
+     "id": "no-deployments",
+     "title": "it cannot delete, change or scale Deployments",
+     "expect": "no rule allows changing them",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+    },
+    {
+     "id": "no-secrets",
+     "title": "it cannot read Secrets",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-rbac",
+     "title": "it cannot change RBAC",
+     "expect": "no rule allows changing roles or bindings",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+    },
+    {
+     "id": "ran",
+     "title": "a Job from the CronJob succeeded",
+     "expect": "1 matching job",
+     "status": "pass",
+     "observed": "1 matching job"
+    },
+    {
+     "id": "cleaned",
+     "title": "no debug pod is left",
+     "expect": "0 matching pod",
+     "status": "pass",
+     "observed": "0 matching pod"
+    },
+    {
+     "id": "web-alive",
+     "title": "web still runs",
+     "expect": "1/1 ready",
+     "status": "pass",
+     "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:default-sa-edit",
+     "cmd": "oc policy add-role-to-user edit -z default -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "clusterrole.rbac.authorization.k8s.io/edit added: \"default\"\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:default-sa-edit",
+     "cmd": "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:default-sa-edit",
+     "cmd": "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:default-sa-edit",
+     "cmd": "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:default-sa-edit",
+     "cmd": "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now condition met\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "sa-admin",
+   "title": "Dedicated ServiceAccount, but bound to the admin role",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "schedule",
+     "title": "debug-cleaner runs every 30 minutes",
+     "expect": "spec.schedule = '*/30 * * * *'",
+     "status": "pass",
+     "observed": "spec.schedule = '*/30 * * * *'"
+    },
+    {
+     "id": "active",
+     "title": "the CronJob is not suspended",
+     "expect": "spec.suspend = None",
+     "status": "pass",
+     "observed": "spec.suspend = False"
+    },
+    {
+     "id": "no-overlap",
+     "title": "it never runs two jobs at once",
+     "expect": "Forbid",
+     "status": "pass",
+     "observed": "spec.concurrencyPolicy = 'Forbid'"
+    },
+    {
+     "id": "does-cleanup",
+     "title": "its command deletes pods labelled debug=true",
+     "expect": "the command names debug=true",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'debug-cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+    },
+    {
+     "id": "own-sa",
+     "title": "its pods run as the debug-cleaner ServiceAccount",
+     "expect": "debug-cleaner",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = 'debug-cleaner'"
+    },
+    {
+     "id": "can-list",
+     "title": "the ServiceAccount can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner list pods? yes"
+    },
+    {
+     "id": "can-delete",
+     "title": "the ServiceAccount can delete pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner delete pods? yes"
+    },
+    {
+     "id": "no-deployments",
+     "title": "it cannot delete, change or scale Deployments",
+     "expect": "no rule allows changing them",
+     "status": "fail",
+     "observed": "debug-cleaner may create/delete/deletecollection/patch/update deployments.apps; patch/update deployments.apps/scale; create/delete/deletecollection/patch/update replicasets.apps"
+    },
+    {
+     "id": "no-secrets",
+     "title": "it cannot read Secrets",
+     "expect": "no rule allows reading secrets",
+     "status": "fail",
+     "observed": "debug-cleaner may get/list/watch secrets; get/list/watch secrets"
+    },
+    {
+     "id": "no-rbac",
+     "title": "it cannot change RBAC",
+     "expect": "no rule allows changing roles or bindings",
+     "status": "fail",
+     "observed": "debug-cleaner may create/delete/deletecollection/patch/update rolebindings.rbac.authorization.k8s.io; create/delete/deletecollection/patch/update roles.rbac.authorization.k8s.io"
+    },
+    {
+     "id": "ran",
+     "title": "a Job from the CronJob succeeded",
+     "expect": "1 matching job",
+     "status": "fail",
+     "observed": "0 matching job | status.lastSuccessfulTime = None"
+    },
+    {
+     "id": "cleaned",
+     "title": "no debug pod is left",
+     "expect": "0 matching pod",
+     "status": "fail",
+     "observed": "2 matching pod"
+    },
+    {
+     "id": "web-alive",
+     "title": "web still runs",
+     "expect": "1/1 ready",
+     "status": "pass",
+     "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:sa-admin",
+     "cmd": "oc create serviceaccount debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:sa-admin",
+     "cmd": "oc policy add-role-to-user admin -z debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "clusterrole.rbac.authorization.k8s.io/admin added: \"debug-cleaner\"\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:sa-admin",
+     "cmd": "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:sa-admin",
+     "cmd": "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner serviceaccount updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:sa-admin",
+     "cmd": "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "delete-only",
+   "title": "Least privilege taken too far: a Role so narrow that the job cannot do its work",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "schedule",
+     "title": "debug-cleaner runs every 30 minutes",
+     "expect": "spec.schedule = '*/30 * * * *'",
+     "status": "pass",
+     "observed": "spec.schedule = '*/30 * * * *'"
+    },
+    {
+     "id": "active",
+     "title": "the CronJob is not suspended",
+     "expect": "spec.suspend = None",
+     "status": "pass",
+     "observed": "spec.suspend = False"
+    },
+    {
+     "id": "no-overlap",
+     "title": "it never runs two jobs at once",
+     "expect": "Forbid",
+     "status": "pass",
+     "observed": "spec.concurrencyPolicy = 'Forbid'"
+    },
+    {
+     "id": "does-cleanup",
+     "title": "its command deletes pods labelled debug=true",
+     "expect": "the command names debug=true",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'debug-cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+    },
+    {
+     "id": "own-sa",
+     "title": "its pods run as the debug-cleaner ServiceAccount",
+     "expect": "debug-cleaner",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = 'debug-cleaner'"
+    },
+    {
+     "id": "can-list",
+     "title": "the ServiceAccount can list pods",
+     "expect": "yes",
+     "status": "fail",
+     "observed": "can debug-cleaner list pods? no"
+    },
+    {
+     "id": "can-delete",
+     "title": "the ServiceAccount can delete pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner delete pods? yes"
+    },
+    {
+     "id": "no-deployments",
+     "title": "it cannot delete, change or scale Deployments",
+     "expect": "no rule allows changing them",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+    },
+    {
+     "id": "no-secrets",
+     "title": "it cannot read Secrets",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-rbac",
+     "title": "it cannot change RBAC",
+     "expect": "no rule allows changing roles or bindings",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+    },
+    {
+     "id": "ran",
+     "title": "a Job from the CronJob succeeded",
+     "expect": "1 matching job",
+     "status": "fail",
+     "observed": "0 matching job | status.lastSuccessfulTime = None"
+    },
+    {
+     "id": "cleaned",
+     "title": "no debug pod is left",
+     "expect": "0 matching pod",
+     "status": "fail",
+     "observed": "2 matching pod"
+    },
+    {
+     "id": "web-alive",
+     "title": "web still runs",
+     "expect": "1/1 ready",
+     "status": "pass",
+     "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc create serviceaccount debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc create role pod-deleter --verb=delete --resource=pods -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-deleter created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc create rolebinding debug-cleaner --role=pod-deleter --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner serviceaccount updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:delete-only",
+     "cmd": "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "g4-suspended",
+   "title": "Everything right, then suspended: no scheduled run will ever happen",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "schedule",
+     "title": "debug-cleaner runs every 30 minutes",
+     "expect": "spec.schedule = '*/30 * * * *'",
+     "status": "pass",
+     "observed": "spec.schedule = '*/30 * * * *'"
+    },
+    {
+     "id": "active",
+     "title": "the CronJob is not suspended",
+     "expect": "spec.suspend = None",
+     "status": "fail",
+     "observed": "spec.suspend = True"
+    },
+    {
+     "id": "no-overlap",
+     "title": "it never runs two jobs at once",
+     "expect": "Forbid",
+     "status": "pass",
+     "observed": "spec.concurrencyPolicy = 'Forbid'"
+    },
+    {
+     "id": "does-cleanup",
+     "title": "its command deletes pods labelled debug=true",
+     "expect": "the command names debug=true",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'debug-cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+    },
+    {
+     "id": "own-sa",
+     "title": "its pods run as the debug-cleaner ServiceAccount",
+     "expect": "debug-cleaner",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = 'debug-cleaner'"
+    },
+    {
+     "id": "can-list",
+     "title": "the ServiceAccount can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner list pods? yes"
+    },
+    {
+     "id": "can-delete",
+     "title": "the ServiceAccount can delete pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner delete pods? yes"
+    },
+    {
+     "id": "no-deployments",
+     "title": "it cannot delete, change or scale Deployments",
+     "expect": "no rule allows changing them",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+    },
+    {
+     "id": "no-secrets",
+     "title": "it cannot read Secrets",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-rbac",
+     "title": "it cannot change RBAC",
+     "expect": "no rule allows changing roles or bindings",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+    },
+    {
+     "id": "ran",
+     "title": "a Job from the CronJob succeeded",
+     "expect": "1 matching job",
+     "status": "pass",
+     "observed": "1 matching job"
+    },
+    {
+     "id": "cleaned",
+     "title": "no debug pod is left",
+     "expect": "0 matching pod",
+     "status": "pass",
+     "observed": "0 matching pod"
+    },
+    {
+     "id": "web-alive",
+     "title": "web still runs",
+     "expect": "1/1 ready",
+     "status": "pass",
+     "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc create serviceaccount debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc create role pod-cleaner --verb=list,delete --resource=pods -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "role.rbac.authorization.k8s.io/pod-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc create rolebinding debug-cleaner --role=pod-cleaner --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "rolebinding.rbac.authorization.k8s.io/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner serviceaccount updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\",\"suspend\":true}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "cronjob.batch/debug-cleaner patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-suspended",
+     "cmd": "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now condition met\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "yaml-alternative",
+   "title": "A correct alternative: one manifest, an equivalent schedule and one harmless extra permission",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "schedule",
+     "title": "debug-cleaner runs every 30 minutes",
+     "expect": "spec.schedule = '*/30 * * * *'",
+     "status": "pass",
+     "observed": "spec.schedule = '15,45 * * * *'"
+    },
+    {
+     "id": "active",
+     "title": "the CronJob is not suspended",
+     "expect": "spec.suspend = None",
+     "status": "pass",
+     "observed": "spec.suspend = False"
+    },
+    {
+     "id": "no-overlap",
+     "title": "it never runs two jobs at once",
+     "expect": "Forbid",
+     "status": "pass",
+     "observed": "spec.concurrencyPolicy = 'Forbid'"
+    },
+    {
+     "id": "does-cleanup",
+     "title": "its command deletes pods labelled debug=true",
+     "expect": "the command names debug=true",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.containers = [{'command': ['oc', 'delete', 'pods', '-l', 'debug=true'], 'image': 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest', 'imagePullPolicy': 'Always', 'name': 'cleaner', 'resources': {}, 'terminationMessagePath': '/dev/termination-log', 'terminationMessagePolicy': 'File'}]"
+    },
+    {
+     "id": "own-sa",
+     "title": "its pods run as the debug-cleaner ServiceAccount",
+     "expect": "debug-cleaner",
+     "status": "pass",
+     "observed": "spec.jobTemplate.spec.template.spec.serviceAccountName = 'debug-cleaner'"
+    },
+    {
+     "id": "can-list",
+     "title": "the ServiceAccount can list pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner list pods? yes"
+    },
+    {
+     "id": "can-delete",
+     "title": "the ServiceAccount can delete pods",
+     "expect": "yes",
+     "status": "pass",
+     "observed": "can debug-cleaner delete pods? yes"
+    },
+    {
+     "id": "no-deployments",
+     "title": "it cannot delete, change or scale Deployments",
+     "expect": "no rule allows changing them",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection deployments.apps; update/patch deployments.apps/scale; create/update/patch/delete/deletecollection replicasets.apps"
+    },
+    {
+     "id": "no-secrets",
+     "title": "it cannot read Secrets",
+     "expect": "no rule allows reading secrets",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: get/list/watch secrets"
+    },
+    {
+     "id": "no-rbac",
+     "title": "it cannot change RBAC",
+     "expect": "no rule allows changing roles or bindings",
+     "status": "pass",
+     "observed": "debug-cleaner has none of: create/update/patch/delete/deletecollection rolebindings.rbac.authorization.k8s.io; create/update/patch/delete/deletecollection/bind/escalate roles.rbac.authorization.k8s.io"
+    },
+    {
+     "id": "ran",
+     "title": "a Job from the CronJob succeeded",
+     "expect": "1 matching job",
+     "status": "pass",
+     "observed": "1 matching job"
+    },
+    {
+     "id": "cleaned",
+     "title": "no debug pod is left",
+     "expect": "0 matching pod",
+     "status": "pass",
+     "observed": "0 matching pod"
+    },
+    {
+     "id": "web-alive",
+     "title": "web still runs",
+     "expect": "1/1 ready",
+     "status": "pass",
+     "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:yaml-alternative",
+     "cmd": "oc apply -n academy-ch-cleanup -f -",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "serviceaccount/debug-cleaner created\nrole.rbac.authorization.k8s.io/debug-pod-cleaner created\nrolebinding.rbac.authorization.k8s.io/debug-pod-cleaner created\ncronjob.batch/debug-cleaner created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:yaml-alternative",
+     "cmd": "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:yaml-alternative",
+     "cmd": "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "job.batch/cleanup-now condition met\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 233,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-cleanup: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

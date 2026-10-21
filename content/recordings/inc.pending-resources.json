@@ -1,0 +1,129 @@
+{
+ "lab": "inc.pending-resources",
+ "kind": "incident",
+ "lab_hash": "aa0a7bdbe1065446",
+ "recorded_at": "2026-10-14T17:24:30+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -n academy-inc-pending",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-5c75dcbdf7-76lw9   0/1     Pending   0          21s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-pending --field-selector reason=FailedScheduling",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT                     MESSAGE\n22s         Warning   FailedScheduling   pod/web-5c75dcbdf7-76lw9   0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get node -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NODE   CPU     MEMORY\ncrc    3800m   10230560Ki\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy web -n academy-inc-pending -o jsonpath='{.spec.template.spec.containers[0].resources.requests}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"cpu\":\"6\",\"memory\":\"32Mi\"}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/web -n academy-inc-pending --requests=cpu=50m,memory=32Mi",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-pending --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-pending.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791998694.0939505
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-pending.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791998705.8074331
+ },
+ "seconds": 36,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-pending: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

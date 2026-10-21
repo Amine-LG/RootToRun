@@ -1,0 +1,2510 @@
+# Enterprise platform lessons as teaching flows. Documentation examples only; no commands are executed.
+- id: i.ha-architecture
+  title: High availability and failure domains
+  subtitle: Quorum, node failure, zones, spreading and disruption budgets
+  module: p4-enterprise
+  mode: EXTERNAL_LAB_REQUIRED
+  minutes: 25
+  level: 3
+  supports: OpenShift 4.21 topologies and worker latency profiles; Kubernetes 1.34 quorum-related availability design,
+    taint-based eviction, topology spread, disruption budgets and non-graceful node shutdown. Documentation examples
+    only; nothing is run or recorded. Failure experiments need an external multi-node cluster.
+  concepts:
+    - ent.ha
+    - k8s.affinity
+    - k8s.etcd
+  prerequisites:
+    - b.scheduler
+    - b.architecture
+  objective: |
+    Design and evaluate an OpenShift topology for availability: etcd quorum, node and zone failure, infra nodes,
+    application spreading and disruption budgets, and predict how long each failure takes to heal.
+  diagram: enterprise
+  flow:
+    - kind: teach
+      id: situation
+      title: Three copies, one outage
+      body: |
+        Your team runs three shop replicas. A hypervisor, the host that runs virtual machines, fails and takes
+        both workers and the routers with it.
+        Customers cannot reach any copy. The replica count was correct; their placement left one shared risk.
+
+        A **failure domain** is something whose loss can take several components down together: a server,
+        rack, zone or site. Availability depends on every link in a request's path, including the external
+        load balancer, routers, application and storage. The control plane must also survive if the cluster
+        needs to replace anything.
+
+        You will trace those dependencies, distinguish surviving a failure from recovering afterwards,
+        and design placement and maintenance rules. These are documented examples: nothing runs here.
+    - kind: teach
+      id: majority
+      title: Why a surviving control plane needs a majority
+      body: |
+        In [What a cluster is made of](/lesson/b.architecture), etcd stores the cluster's API objects.
+        A write needs agreement from a majority of its members, called **quorum**. With three members,
+        two must be available. One survivor cannot declare itself the new authority: allowing both sides
+        of a network partition to accept changes would create conflicting histories.
+
+        Three members therefore tolerate one failure. Four still need three votes and tolerate only one;
+        five need three and tolerate two. OpenShift normally uses three control-plane nodes; supported
+        bare-metal configurations can scale to four or five. Count independent failure domains as well as votes.
+    - kind: ask
+      id: fourth-vote
+      prompt: Four etcd members are spread across four hosts. Two hosts fail. What can the remaining members do?
+      choices:
+        - text: Accept writes with their two votes
+          why: Two is half of four, not a majority. Both halves of a partition could otherwise accept conflicting writes.
+        - text: Wait for a third vote
+          why: A four-member cluster needs three votes, so two surviving members cannot commit writes.
+        - text: Elect one survivor to replace quorum
+          why: An elected leader still needs a majority to commit changes; leadership does not replace quorum.
+      answer: 1
+    - kind: teach
+      id: data-plane
+      body: |
+        Losing quorum stops control-plane changes. It does not itself stop existing containers or erase
+        the network rules already installed on healthy nodes. Existing traffic can continue if the routers,
+        pods and storage it needs remain healthy. Applications that call the API can still be affected.
+
+        This is a limited survival window: controllers cannot reschedule a lost pod or scale a service
+        without writes. The next failure can turn reduced control into a customer outage.
+    - kind: ask
+      id: quorum-loss
+      prompt: Two of three control-plane hosts fail. Healthy workers still serve the shop. Which promise can you make?
+      choices:
+        - text: New replicas will repair the lost capacity
+          why: Creating replacement pods requires API writes, which quorum loss prevents.
+        - text: Existing requests may continue to succeed
+          why: The surviving data path can keep working while control-plane writes are unavailable.
+        - text: Every request fails until etcd is restored
+          why: Existing traffic does not require an etcd write for each request; check its actual dependencies.
+      answer: 1
+    - kind: teach
+      id: node-timeouts
+      title: Recovery waits before moving work
+      body: |
+        A silent node might be dead or temporarily disconnected. Under OpenShift's Default worker latency
+        profile, the controller waits about 40 seconds for a status update before marking it unhealthy.
+        Ordinary pods normally tolerate the resulting `not-ready` or `unreachable` taint for 300 seconds: the two
+        tolerations the API server added to the `tolerant` pod in [How pods get a node](/lesson/b.scheduler).
+        Only after that toleration expires does eviction begin.
+
+        For a stateless Deployment, think roughly five to six minutes before replacement starts, then add
+        scheduling, image pulls and startup time. It is not a recovery deadline. Custom tolerations, capacity,
+        storage and controller behaviour can change it. Survivors need enough capacity to serve users meanwhile.
+
+        Worker latency profiles tune related timeouts together. Slower profiles reduce false failure detection
+        on high-latency links; changing individual timing parameters by hand is unsupported. The values are in
+        the depth table.
+    - kind: ask
+      id: capacity-before-recovery
+      prompt: A worker loses power. The shop cannot tolerate five minutes of reduced service. What addresses the gap?
+      choices:
+        - text: A budget forbidding all voluntary evictions
+          why: A disruption budget governs maintenance evictions; it cannot stop an unexpected power loss.
+        - text: Enough spread replicas to carry traffic
+          why: Surviving replicas serve during detection, eviction and startup rather than waiting for replacement capacity.
+        - text: A slower worker latency profile everywhere
+          why: Slower detection avoids false alarms on some networks but does not provide serving capacity after a real
+            failure.
+      answer: 1
+    - kind: teach
+      id: placement
+      title: Tell the scheduler which failures matter
+      body: |
+        [How pods get a node](/lesson/b.scheduler) showed that the scheduler places pods using requests and
+        placement rules. A replica count alone does not express separation. **Topology spread constraints**
+        compare matching pod counts across domains named by a node label, such as `topology.kubernetes.io/zone`.
+
+        `maxSkew: 1` limits the permitted count difference under a strict constraint.
+        `DoNotSchedule` refuses a placement that violates it; `ScheduleAnyway` asks the scheduler to prefer
+        a better spread. A preference can improve placement but cannot guarantee separation.
+    - kind: show
+      id: spread-example
+      origin: example
+      caption: 'Kubernetes topology spread documentation: example Pod template fragment for app=shop'
+      code: |
+        # Under spec.template.spec of the Deployment
+        topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: shop
+      notice: |
+        The selector counts shop pods, and the topology key groups eligible nodes by zone. The template's
+        labels must match. Strict spread can leave a pod Pending when an eligible domain has too little capacity.
+        Node-level separation needs a hostname constraint or anti-affinity as well.
+    - kind: ask
+      id: strict-spread
+      prompt: A strict spread rule prevents a placement in the only zone with spare capacity. What does the pod do?
+      choices:
+        - text: Waits Pending for an allowed placement
+          why: DoNotSchedule makes spread a requirement; spare capacity alone cannot override it.
+        - text: Runs there because replicas take priority
+          why: The desired replica count does not override a hard scheduling constraint.
+        - text: Evicts a healthy replica in another zone
+          why: A spread rule constrains scheduling; it does not rebalance existing pods by evicting them.
+      answer: 0
+    - kind: teach
+      id: maintenance
+      title: A different rule for planned disruption
+      body: |
+        A **PodDisruptionBudget** (PDB) limits voluntary evictions through the eviction API, including normal
+        node drains. It does not control placement or prevent crashes. For three healthy shop replicas,
+        `maxUnavailable: 1` allows one voluntary disruption while the other two remain available.
+
+        `minAvailable: 3` with only three healthy replicas permits none. An update that needs to drain a node
+        hosting one of those pods can stall. Check replicas, health and the budget before the maintenance window.
+        You have seen both answers for real: a drain refused by a budget in [Nodes, machines and capacity
+        planning](/lesson/n.nodes-capacity), and the eviction API refusing, then allowing, one eviction in
+        [Project tolerations and disruption budgets](/lesson/p.project-tolerations-pdb).
+    - kind: show
+      id: budget-example
+      origin: example
+      caption: 'Kubernetes disruptions documentation: example PDB and OpenShift CLI inspection'
+      code: |
+        apiVersion: policy/v1
+        kind: PodDisruptionBudget
+        metadata:
+          name: shop
+          namespace: shop
+        spec:
+          maxUnavailable: 1
+          selector:
+            matchLabels:
+              app: shop
+        # Inspect the budget after it exists; no command is executed here.
+        # oc get pdb shop -n shop -o yaml
+      notice: |
+        The selector covers the intended replicas. Read the desired budget alongside its status, especially
+        current health and allowed disruptions; a replica that is already unhealthy can consume the allowance.
+    - kind: try
+      id: inspect-another-budget
+      body: In a described cluster, project payments has a PDB named checkout. From any directory, request that budget
+        as YAML with oc.
+      accept:
+        - oc get pdb checkout -n payments -o yaml
+        - oc get pdb/checkout -n payments -o yaml
+        - oc get poddisruptionbudget checkout -n payments -o yaml
+        - oc get poddisruptionbudgets checkout -n payments -o yaml
+        - oc get poddisruptionbudget/checkout -n payments -o yaml
+        - oc get poddisruptionbudgets.policy checkout -n payments -o yaml
+        - kubectl get pdb checkout -n payments -o yaml
+        - kubectl get poddisruptionbudget checkout -n payments -o yaml
+      hints:
+        - match: ^oc (drain|delete)
+          say: Inspect the budget before a maintenance action. This task reads an object; it changes nothing.
+        - match: shop
+          say: Transfer the example to checkout in payments; the example's shop budget is a different object.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n payments, oc looks in your current project. The budget checkout is in payments.
+        - match: ^(?!.*checkout).*$
+          say: Name the budget, checkout. Without a name, oc lists every PDB in the project.
+        - match: ^(?!.*(-o|--output)[ =]?yaml).*$
+          say: Add -o yaml. The default table hides the spec and status fields you need to compare.
+      hint: Use get with kind pdb, name checkout, namespace payments and output yaml.
+      then: The API would return checkout's specification and status if your identity can read it. Compare the allowance
+        with healthy replicas before planning a drain. Nothing is submitted here.
+    - kind: ask
+      id: budget-blocks-drain
+      prompt: All three matching replicas are healthy. Why does a normal drain refuse to evict one?
+      choices:
+        - text: The spread rule forbids removing a pod from its zone
+          why: Spread constraints influence where new pods are placed. They do not decide whether a pod may be
+            evicted.
+        - text: The budget leaves no voluntary disruption allowed
+          why: With minAvailable 3 and three healthy replicas, evicting any one would break the budget. The drain
+            keeps retrying until the budget or the replica count changes.
+        - text: A drain only evicts pods that are not Ready
+          why: A drain tries to evict every evictable pod on the node, Ready or not. The budget is what holds
+            the healthy ones back.
+      answer: 1
+      evidence: |
+        kind: PodDisruptionBudget
+        spec:
+          minAvailable: 3
+          selector:
+            matchLabels: {app: shop}
+    - kind: teach
+      id: dead-stateful-node
+      title: A silent storage writer needs extra care
+      body: |
+        A StatefulSet pod has a stable identity and often a persistent volume. If its node is unreachable,
+        Kubernetes cannot know whether the old process is still writing. The pod can remain Terminating,
+        preventing a replacement with the same identity.
+
+        After verifying that the node is powered off, an administrator can use the
+        `node.kubernetes.io/out-of-service` taint with `NoExecute`. Pods without a matching toleration are
+        force-deleted and volume detach can proceed, allowing recovery elsewhere. Remove the taint after
+        repair. Applying it to a node that is still running risks concurrent writers and corruption.
+    - kind: order
+      id: safe-stateful-recovery
+      prompt: A StatefulSet pod is stuck on an unreachable node. Put the recovery decisions in a safe order.
+      items:
+        - Confirm the node is powered off and cannot keep writing
+        - Follow the documented administrator procedure for the out-of-service taint
+        - Check pod replacement, volume attachment and application data
+        - After node repair, remove the taint and verify node health
+      why: Preventing two writers comes before forcing deletion or detachment; a replacement pod is only part of verifying
+        recovery.
+    - kind: teach
+      id: storage-topology
+      title: Check where the data can move
+      body: |
+        A pod can be ready to move while its volume cannot. **ReadWriteOnce** describes writable mounting
+        by one node; it does not define the volume's zone. The storage backend and a volume's node affinity
+        can still restrict it to one zone, leaving a replacement Pending elsewhere.
+
+        Confirming that the old writer stopped solves a concurrency risk. It does not copy the data to a
+        surviving zone. Database or storage replication must cover the failure domain you intend to survive.
+    - kind: teach
+      id: infrastructure-and-topologies
+      title: Check the shared services too
+      body: |
+        Dedicated **infrastructure nodes** can host routers, the registry and monitoring away from application
+        contention. A label or taint alone does not move those components: configure their placement and enough
+        replicas across independent domains. Subscription treatment depends on the supported workloads actually
+        running there, not merely on the infra label.
+
+        The depth table compares the topologies from [Install the platform](/lesson/n.installation): standard,
+        compact, arbiter, single-node and hosted control planes. None removes the need to check load balancers,
+        storage and emergency access. A compact three-node cluster must have enough remaining capacity after
+        losing one node; an arbiter is a lower-cost node that takes part in control-plane quorum decisions but
+        does not run the full set of control-plane services.
+    - kind: reflect
+      id: explain-availability
+      prompt: Explain why three shop replicas do not prove availability, and name the evidence you would request before
+        promising it.
+      model: |
+        I need to know where the replicas, routers and data live, and which hosts, zones or sites can fail
+        together. I would inspect placement and capacity, test the request path during a failure, and check
+        maintenance budgets. The surviving copies must carry traffic while detection and replacement take place.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can count quorum, trace shared failure domains, distinguish placement from disruption protection,
+        and explain why node recovery takes time. You can also identify when a silent storage writer needs
+        confirmed power-off before forced recovery.
+
+        Next, [Export and import an application](/lesson/p.export-import) moves an application by hand, and [Stateful workloads, backup and disaster recovery](/lesson/e.stateful-dr) covers what to restore
+        when replicas and storage do not survive. The depth sections hold the timing, topology and diagnosis tables.
+  sections:
+    - id: control-plane-and-etcd-quorum
+      title: Quorum arithmetic
+      depth: true
+      body: |
+        | Members | Majority | Failures tolerated |
+        |---|---|---|
+        | 1 | 1 | 0 |
+        | 2 | 2 | 0 |
+        | 3 | 2 | 1 |
+        | 4 | 3 | 1 |
+        | 5 | 3 | 2 |
+
+        Quorum is a majority of voting members. Ordinary OpenShift deployments use three control-plane nodes; the documented bare-metal scaling option permits four or five.
+    - id: what-fails-and-what-survives
+      title: Worker latency profile reference
+      depth: true
+      body: |
+        | Profile | kubelet reports every | node marked unhealthy after | default post-taint toleration |
+        |---|---|---|---|
+        | `Default` | 10 s | 40 s | 300 s |
+        | `MediumUpdateAverageReaction` | 20 s | 2 min | 60 s |
+        | `LowUpdateSlowReaction` | 1 min | 5 min | 60 s |
+
+        The eviction column is the profile's default pod toleration after the unhealthy-node taint, not total application recovery time. Custom tolerations, failure detection, scheduling, storage and startup affect the observed delay. Change profiles as a set through the supported configuration; do not edit individual parameters.
+    - id: topologies
+      title: Topology reference
+      depth: true
+      body: |
+        | Topology | Nodes | Tolerates | Use |
+        |---|---|---|---|
+        | Standard | 3 control plane + N workers | 1 control-plane loss; workload survival depends on worker capacity and placement | production |
+        | Compact | 3 nodes with all roles | 1 node loss, if remaining capacity is sufficient | small production / edge |
+        | Two-node with arbiter | 2 control-plane nodes + 1 lower-cost arbiter node (takes part in quorum; does not run the full control plane) | 1 node loss, with sufficient surviving workload capacity | edge sites (generally available since 4.20) |
+        | Single Node OpenShift | 1 | nothing | edge, labs (OpenShift Local is single-node) |
+        | Hosted control planes | control planes as pods on a management cluster | depends on hosting cluster | many clusters at scale |
+
+        The two-node topology with fencing is Technology Preview in 4.21. Arbiter support is generally available from 4.20. A compact cluster needs enough surviving capacity for workloads and platform services. Hosted control planes also depend on the management cluster and the worker/data-plane failure domains.
+    - id: what-goes-wrong
+      title: Availability diagnosis
+      depth: true
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | one node fails and the service goes down | `oc get pods -o wide` shows all replicas on one node or zone | no spreading | topology spread constraints or anti-affinity on node and zone |
+        | a cluster update stalls on one node | the node stays `SchedulingDisabled`; events show evictions refused by a disruption budget | a PDB that allows no disruption (`maxUnavailable: 0`, or `minAvailable` equal to replicas) | allow at least one disruption and run enough replicas |
+        | StatefulSet pod stuck `Terminating` for an hour | its node is `NotReady`; the VolumeAttachment still names that node | the node never confirmed the pod stopped | confirm power-off, then follow the documented out-of-service recovery procedure |
+        | pods Pending after a zone outage | `oc describe pod` events: volume node affinity conflict | the volume backend or node affinity constrains it to the failed zone | replicate data across zones; restore or re-provision |
+        | `oc` commands time out or return etcd errors, and no change succeeds | `etcd` ClusterOperator degraded; two control-plane nodes down | lost quorum | restore the failed hosts, or quorum restoration on a survivor |
+    - id: infra-and-single-node
+      title: Infrastructure placement and local-cluster limits
+      depth: true
+      body: |
+        An infra label does not place or protect services by itself. Configure router, registry,
+        monitoring and supported logging placement explicitly, with suitable replicas and storage.
+        Infrastructure-only subscription treatment depends on the supported workloads actually
+        running on those nodes; an application workload changes the classification.
+
+        OpenShift Local has one node and one etcd member: quorum is one. Losing it loses the API,
+        routers and workloads together. A spread constraint has no second node to use. A PDB that
+        protects an existing pod can prevent its voluntary eviction, but cannot create an alternative
+        destination. Multi-node and multi-zone resilience cannot be demonstrated on that topology.
+
+        MachineHealthChecks can automate unhealthy-machine replacement on supported Machine API
+        installations. They do not eliminate the need to prove a storage writer has stopped before
+        forcing StatefulSet recovery.
+  review:
+    - q: How long do pods stay on a NotReady node by default before eviction?
+      a: 300 seconds (default tolerations for not-ready and unreachable taints), after the node has been marked unhealthy.
+    - q: Why 3 etcd members and not 2?
+      a: 'Quorum is a majority: 2 members tolerate 0 failures, 3 tolerate 1.'
+    - q: What does a PodDisruptionBudget protect against, and what does a too-strict one break?
+      a: Voluntary disruptions such as drains; one that allows no disruption blocks drains and upgrades.
+    - q: What keeps working when etcd loses quorum?
+      a: Existing containers and traffic can continue if their nodes and dependencies survive. API writes stop, so controllers
+        cannot create or reschedule pods.
+    - q: When is the out-of-service taint used, and what does it do?
+      a: 'After confirming the node is powered off, an administrator applies the out-of-service taint with NoExecute:
+        pods without a matching toleration are force-deleted and volumes can detach. Verify recovery and remove the taint
+        after repair.'
+    - q: What changes with a worker latency profile, and why use a slower one?
+      a: Related reporting, health-detection and default eviction timings change together. Slower detection can avoid
+        false transitions on high-latency networks; it does not add capacity.
+    - q: Does ReadWriteOnce mean a volume is limited to one zone?
+      a: No. It describes writable mounting on one node; backend topology and node affinity determine zone restrictions.
+  labs: []
+  limits: |
+    This is a conceptual lesson with command-writing tasks. OpenShift Local has one node and an etcd quorum of one, with no second failure domain. A learner cannot taint or drain nodes. Real failure, spreading and drain experiments require a disposable multi-node cluster and appropriate administrator access. No commands are run here.
+  references:
+    - title: 'Kubernetes: Taint-based evictions'
+      url: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/#taint-based-evictions
+    - title: 'Kubernetes: Pod disruption budgets'
+      url: https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+    - title: 'Kubernetes: Topology spread constraints'
+      url: https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+    - title: 'Kubernetes: Node shutdowns (non-graceful shutdown and the out-of-service taint)'
+      url: https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
+    - title: 'OpenShift 4.21: Worker latency profiles'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/scalability_and_performance/scaling-worker-latency-profiles
+    - title: 'OpenShift 4.21: Infrastructure nodes'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/machine_management/creating-infrastructure-machinesets
+    - title: 'OpenShift 4.21: Machine roles (control plane sizing)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/architecture/control-plane
+    - title: 'OpenShift 4.21: Restoring etcd quorum for high availability clusters'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/control-plane-backup-and-restore
+    - title: 'OpenShift 4.21 release notes: two-node topologies status (arbiter generally available, fencing Technology Preview)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/release_notes/
+    - title: 'Kubernetes 1.34: Persistent volumes, access modes and node affinity'
+      url: https://v1-34.docs.kubernetes.io/docs/concepts/storage/persistent-volumes/
+    - title: 'OpenShift 4.21: Two-node arbiter and fencing topology requirements'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/installing_a_two_node_openshift_cluster/installing_a_two_node_openshift_cluster
+
+- id: e.stateful-dr
+  title: Stateful workloads, backup and disaster recovery
+  subtitle: Application backup and restore with OADP, consistency, RPO and RTO
+  module: p4-enterprise
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 30
+  level: 3
+  supports: 'OpenShift 4.21 with OADP 1.5, based on Velero 1.16: DPA configuration, backup locations, Backups, Restores,
+    Schedules, CSI snapshots, Data Mover and Kopia File System Backup. OADP 1.6
+    (Velero 1.18) also supports OpenShift 4.22 and no longer makes Restic backups,
+    although it still restores Restic backups taken earlier. These are
+    documentation examples and command-writing tasks; OADP and off-cluster object storage are absent here.'
+  concepts:
+    - storage.dr
+    - k8s.workloads
+  prerequisites:
+    - e.storage
+  objective: |
+    Decide what must be protected for a stateful application, design an OADP backup that can really be restored
+    (resources, volume data, consistency, storage location), restore it safely, and turn RPO and RTO targets into a
+    schedule and a tested restore procedure.
+  flow:
+    - kind: teach
+      id: situation
+      title: Which backup brings back the orders?
+      body: |
+        The shop database team asks for a cluster backup. Yesterday's orders live on a persistent volume;
+        the application definitions are in Git; the cluster's API objects live in etcd. Those are different
+        things to recover, even though the team uses one word for them.
+
+        You will choose protection for each layer, decide whether a copy survives the intended failure,
+        and design a restore drill with measurable data-loss and recovery-time targets.
+
+        OpenShift API for Data Protection (**OADP**) is an add-on based on Velero. It protects selected
+        application resources and data. It is not a supported full-cluster, etcd or Operator recovery tool.
+        OADP and off-cluster object storage are absent here; all examples are described, with no execution.
+        [Export and import an application](/lesson/p.export-import) moved objects and an image by hand and
+        listed what that left behind: volume data, Secrets, consistency in time. OADP is the tool that covers them.
+    - kind: teach
+      id: protect-three-layers
+      body: |
+        An etcd backup protects API objects, including Secrets. It contains no application volume contents.
+        Git can recreate reviewed definitions such as Deployments, Services and Routes. Persistent data needs
+        its own snapshot, file copy, database backup or replication.
+
+        These layers must agree after recovery. Rewinding API objects to yesterday does not rewind the database
+        disk to yesterday. An object created after the snapshot can disappear from the API while its storage
+        still exists. Reserve etcd recovery for the control-plane procedures covered next in the path.
+    - kind: ask
+      id: etcd-not-orders
+      prompt: You restore etcd from 02:00. The database wrote orders to its volume at 09:00. What did the snapshot restore?
+      choices:
+        - text: API objects, leaving volume contents separate
+          why: etcd stores API state; the database's bytes require their own recovery plan.
+        - text: API objects and all volume bytes together
+          why: PersistentVolume objects describe storage but do not contain the data stored there.
+        - text: Only the database rows older than 02:00
+          why: An etcd snapshot has no database rows to select or restore.
+      answer: 0
+    - kind: teach
+      id: configure-oadp
+      title: How OADP is configured
+      body: |
+        A **DataProtectionApplication** (DPA) is the custom resource that configures OADP in the `openshift-adp`
+        project. It lists the plugins to load, the places backups are stored, and whether to run the **node
+        agent**, the per-node service that copies volume data.
+
+        The OpenShift plugin is mandatory: it handles OpenShift resources and internal images. Other plugins
+        support the chosen storage provider and CSI snapshots.
+    - kind: teach
+      id: controller-and-location
+      title: Give the backup a surviving destination
+      body: |
+        A **BackupStorageLocation** names the object-storage destination and its credentials. Velero keeps
+        resource archives there. Its Available phase means the location is reachable, not that the application
+        is recoverable. Keep the bucket outside the cluster and storage failure domains you are protecting.
+
+        A second cluster can discover backups through the same bucket. It still needs suitable Operators,
+        storage classes, credentials and permissions before an application can be restored.
+    - kind: show
+      id: backup-selection
+      origin: example
+      caption: 'OpenShift 4.21 OADP documentation and Velero 1.16 Backup API: illustrative shop Backup'
+      code: |
+        apiVersion: velero.io/v1
+        kind: Backup
+        metadata:
+          name: shop-nightly
+          namespace: openshift-adp
+        spec:
+          includedNamespaces: [shop]
+          storageLocation: offsite
+          snapshotMoveData: true
+          ttl: 720h0m0s
+      notice: |
+        This assumes a configured offsite location, working CSI snapshots and the Data Mover prerequisites.
+        snapshotMoveData requests moving snapshot contents to the bucket; setting the field alone does not
+        install those components. The selection includes the namespace rather than relying on every dependency
+        carrying an application label.
+    - kind: ask
+      id: missing-secret
+      prompt: A Backup selects app=shop. Its required password Secret has no label. What should the restore test expose?
+      choices:
+        - text: The Secret follows the pod reference automatically
+          why: Selection does not generally traverse pod references to include unlabelled Secrets.
+        - text: Containers cannot start without their Secret
+          why: The Secret was outside the selection, so a pod requiring it cannot start its containers.
+        - text: The Backup rejects every label-based selection
+          why: Label filtering is supported; the author must ensure the selected resources form a recoverable application.
+      answer: 1
+      evidence: |
+        # Backup selection
+        spec:
+          includedNamespaces: [shop]
+          labelSelector:
+            matchLabels: {app: shop}
+        ---
+        # Required password Secret
+        kind: Secret
+        metadata:
+          name: database-password
+          namespace: shop
+    - kind: teach
+      id: snapshot-boundary
+      title: A snapshot can share the failure
+      body: |
+        A CSI snapshot asks the storage driver to preserve a point-in-time view. Its data normally remains
+        in the storage backend. The bucket can hold the snapshot's metadata without holding its contents.
+
+        With the built-in **Data Mover**, the node agent reads the snapshot and uses the Kopia backup engine to upload its data
+        to the backup bucket. **File System Backup** also uses the node agent and Kopia, but copies files from
+        mounted volumes rather than requiring snapshot support. It supports neither raw block volumes nor hostPath.
+
+        Match the method to the failure: a local snapshot may help undo deletion, while loss of its entire
+        backend requires a surviving copy elsewhere. Off-cluster is insufficient if the same failed array
+        also holds the backup bucket.
+    - kind: ask
+      id: array-loss
+      guess: true
+      prompt: Only CSI snapshots protect the database; no data is moved to the bucket. The entire backend is lost. What
+        survives?
+      choices:
+        - text: Resource archives and all database contents
+          why: A resource archive includes snapshot references, not an independent copy of the snapshot's bytes.
+        - text: Resource archives without the database contents
+          why: The data shared the backend's failure domain; the next step contrasts the three methods.
+        - text: Nothing, including the independent bucket's archives
+          why: The independent bucket survives; losing the backend removes its snapshots, not the resource archive.
+      answer: 1
+    - kind: teach
+      id: choosing-volume-method
+      body: |
+        For backend loss, choose Data Mover or File System Backup to an independent bucket, or use a
+        database-native backup stored elsewhere. Data Mover needs CSI snapshot support and can handle block
+        volumes on supported platforms. File System Backup can cover file volumes without snapshots, such
+        as suitable NFS volumes. Restic is deprecated in OADP 1.5, and OADP 1.6 (OpenShift 4.22) no longer makes
+        Restic backups; use the documented Kopia path.
+
+        None of those method names proves database consistency. The depth table compares their requirements
+        and where the bytes live.
+    - kind: teach
+      id: consistent-data
+      title: Capture a state the database can recover
+      body: |
+        A snapshot of a live volume is generally **crash-consistent**: recovery resembles restarting after
+        a power loss. Snapshots taken at different times across several volumes need extra coordination.
+        Copying live database files at different times can produce a set the database cannot recover at all.
+
+        **Application-consistent** protection coordinates with the application. Velero pre/post backup hooks
+        can run application commands before and after capture, for example to quiesce writes and then resume
+        them. Backup hooks default to failing on errors and to a 30-second timeout; restore exec hooks default
+        to continuing. A filesystem freeze alone does not prove the database's application-level guarantees; use its supported procedure.
+
+        For a busy database, its native backup and continuous log archiving are often the appropriate data
+        protection, with OADP protecting surrounding resources. Restore hooks can prepare data before startup.
+    - kind: ask
+      id: live-files
+      prompt: A file backup completes, but the restored database reports inconsistent files. Which change addresses the
+        cause?
+      choices:
+        - text: Use the database's supported backup procedure
+          why: A supported consistent capture addresses files copied at incompatible points in the database's history.
+        - text: Retain the same inconsistent files for longer
+          why: Retention preserves copies; it cannot make a captured set consistent.
+        - text: Increase the restored Deployment's replica count
+          why: More processes using the same damaged data do not repair the backup.
+      answer: 0
+    - kind: teach
+      id: restore-collisions
+      title: Restore beside the damaged application
+      body: |
+        A **Restore** selects a Backup and can map its source namespace into a different namespace. That
+        gives you a place to inspect the recovered application before replacing the damaged one. Isolate
+        test copies from production traffic and external side effects.
+
+        Velero normally skips objects that already exist. ServiceAccounts are an exception: selected fields
+        are merged. A Completed restore can therefore leave a damaged Deployment unchanged, with warnings.
+        `existingResourcePolicy: update` requests best-effort patches; it does not overwrite existing volume data.
+
+        Velero restores dependencies in an ordered process. Reinstall required Operators first and follow
+        their recovery guidance; map storage classes if the target uses different names.
+    - kind: show
+      id: mapped-restore
+      origin: example
+      caption: 'Velero 1.16 Restore API and restore reference: namespace mapping and inspection example'
+      code: |
+        apiVersion: velero.io/v1
+        kind: Restore
+        metadata:
+          name: shop-drill
+          namespace: openshift-adp
+        spec:
+          backupName: shop-nightly
+          includedNamespaces: [shop]
+          namespaceMapping:
+            shop: shop-restore-test
+          restorePVs: true
+        # After creating the Restore on an equipped cluster:
+        # oc describe restores.velero.io shop-drill -n openshift-adp
+      notice: |
+        The Restore object lives in openshift-adp; its recovered application goes into shop-restore-test.
+        Inspect phase, warnings and errors, then check the data and application. Running pods alone are
+        insufficient, especially if the phase is PartiallyFailed.
+    - kind: try
+      id: inspect-payments-restore
+      body: A described OADP cluster has Restore payments-drill in openshift-adp. From any directory, use describe and
+        its fully qualified resource kind to inspect it.
+      accept:
+        - oc describe restores.velero.io payments-drill -n openshift-adp
+        - oc describe restore.velero.io payments-drill -n openshift-adp
+        - oc describe restores.velero.io/payments-drill -n openshift-adp
+        - oc -n openshift-adp describe restores.velero.io payments-drill
+        - oc describe restores.velero.io payments-drill --namespace=openshift-adp
+        - oc describe restores.velero.io -n openshift-adp payments-drill
+        - oc describe restore.velero.io/payments-drill -n openshift-adp
+        - oc --namespace openshift-adp describe restores.velero.io payments-drill
+        - oc -n openshift-adp describe restores.velero.io/payments-drill
+        - oc describe restores.velero.io/payments-drill --namespace=openshift-adp
+        - oc --namespace openshift-adp describe restores.velero.io/payments-drill
+        - oc -n openshift-adp describe restore.velero.io payments-drill
+        - oc describe restore.velero.io payments-drill --namespace=openshift-adp
+        - oc --namespace openshift-adp describe restore.velero.io payments-drill
+        - oc -n openshift-adp describe restore.velero.io/payments-drill
+        - oc describe restore.velero.io/payments-drill --namespace=openshift-adp
+        - oc --namespace openshift-adp describe restore.velero.io/payments-drill
+      hints:
+        - match: shop|payments-restore-test
+          say: Inspect payments-drill, the Restore object, in openshift-adp; the recovered application's namespace is
+            separate.
+        - match: ^oc .*get
+          say: get can inspect objects too, but this task practises describe to collect the restore details and events.
+        - match: '^oc describe restore[s]? '
+          say: Use restores.velero.io to identify the Velero API explicitly rather than another installed restore resource.
+      hint: Use describe, restores.velero.io, payments-drill and the openshift-adp namespace.
+      then: On that cluster, describe would expose the Restore's state and any recorded events. Investigate partial failures
+        and warnings before testing the recovered data. This field only checks your command.
+    - kind: ask
+      id: completed-unchanged
+      prompt: A restore into the original namespace skips an existing damaged Deployment. What explains the unchanged
+        application?
+      choices:
+        - text: The default restore preserves existing objects
+          why: Skipping existing objects is expected; use a controlled replacement or namespace mapping after reviewing
+            warnings.
+        - text: Completed guarantees every old object was replaced
+          why: Completed is a workflow phase, not proof of replacement or usable application data.
+        - text: Only an etcd rollback can replace a Deployment
+          why: Reapply its definition or restore it deliberately; cluster-wide rollback is unnecessary for this application
+            repair.
+      answer: 0
+    - kind: teach
+      id: recovery-targets
+      title: Translate the business targets
+      body: |
+        **Recovery point objective (RPO)** is the maximum acceptable lost work, measured in time.
+        **Recovery time objective (RTO)** is the maximum acceptable time to restore service after disruption.
+
+        A daily backup can leave roughly a day of unprotected writes, and more if runs fail or take a long
+        time. A 15-minute order RPO needs a design whose successfully protected recovery points stay within
+        that interval, often database log archiving or replication. A schedule alone proves neither target.
+
+        RTO includes detecting the incident, making decisions, obtaining infrastructure and credentials,
+        restoring bytes, starting applications and validating service. A warm standby can reduce rebuild
+        time, but only a measured exercise establishes whether it is fast enough.
+    - kind: ask
+      id: stale-recovery-point
+      prompt: Orders have a 15-minute RPO and a four-hour RTO. The latest recoverable copy is 23 hours old. Which
+        conclusion follows?
+      choices:
+        - text: The four-hour RTO covers the data-loss gap
+          why: RTO measures time to restore service, not how much recent data may be lost.
+        - text: The protected recovery point misses the RPO
+          why: Twenty-three hours of potentially lost orders exceeds the fifteen-minute allowance.
+        - text: A completed Backup guarantees the promised RPO
+          why: Completion says the backup workflow finished; the age and consistency of the recoverable data determine
+            its recovery point.
+      answer: 1
+    - kind: order
+      id: drill-sequence
+      prompt: Order a drill that tests an ordinary scheduled backup rather than a specially prepared copy.
+      items:
+        - Choose a recent scheduled Backup and prepare an isolated target
+        - Restore with required Operators, storage mappings and credentials available
+        - Investigate phase, warnings and failures; verify data and service behaviour
+        - Compare protected data and total recovery time with RPO and RTO
+        - Repair the runbook and clean up the isolated copy
+      why: A drill tests selection, dependencies and service recovery together; record pre-restore delays as well as
+        the copying time.
+    - kind: teach
+      id: schedule-and-permissions
+      body: |
+        A **Schedule** combines a cron expression with a Backup template. Set retention through `ttl`,
+        monitor successful completion, and allow enough time and resources for jobs to finish. Backup
+        frequency and retention are separate decisions.
+
+        Administrators normally create Backups and Restores in `openshift-adp`. OADP 1.5 self-service,
+        when enabled and constrained by an administrator, lets namespace administrators use NonAdminBackup
+        and NonAdminRestore for their own namespaces. It does not grant arbitrary cluster-wide recovery rights.
+    - kind: reflect
+      id: explain-the-plan
+      prompt: The shop promises at most 15 minutes of lost orders and four hours of outage. Explain what nightly OADP
+        backups leave unproven.
+      model: |
+        Nightly backups can lose far more than 15 minutes of orders, so the database needs more frequent
+        recoverable points, such as continuous log archiving. The copies must survive the cluster and storage
+        failure. We must rehearse a restore and measure the whole recovery interval, checking actual data and
+        service behaviour before claiming a four-hour RTO.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can separate API state, definitions and data; choose a volume protection method by its failure
+        domain; and test consistency, selection and restore collisions. You can turn RPO and RTO into
+        evidence a restore drill must produce.
+
+        Next, [Day-2 operations, etcd backup and recovery](/lesson/i.day2-backup) deals with recovering the
+        control plane itself. The depth sections keep OADP object, method and troubleshooting tables for reference.
+  sections:
+    - id: how-oadp-works
+      title: OADP object reference
+      depth: true
+      body: |
+        | Object (`velero.io/v1`) | What it is |
+        |---|---|
+        | **BackupStorageLocation** | an object-storage bucket (S3-compatible, Azure, Google Cloud) plus credentials; where resource archives and file-level data land. Phase `Available` means Velero can reach it |
+        | **VolumeSnapshotLocation** | where a cloud provider's native snapshots are taken, for the provider plugins that use them |
+        | **Backup** | one run: which namespaces, resources and labels, which storage location, how volumes are handled, a `ttl` (30 days by default, Velero's default) |
+        | **Schedule** | a cron expression and a Backup template; creates Backups on time |
+        | **Restore** | which Backup to restore, with filters and mappings |
+
+        These five resources use velero.io/v1. The DataProtectionApplication configures their supporting OADP installation and plugins. A Backup defaults to 30 days of retention unless ttl is set (Velero's default; OADP's examples set it explicitly). Provider-native VolumeSnapshotLocations and CSI snapshot classes serve different mechanisms; use the documentation for the chosen driver.
+    - id: what-a-backup-captures
+      title: Selection and protection boundaries
+      depth: true
+      body: |
+        | Captured (when selected) | Not captured, or not supported |
+        |---|---|
+        | namespaced objects in the included namespaces, filtered by resource type and labels | etcd and the control plane; full-cluster backup |
+        | cluster-scoped objects tied to them, such as a claim's PersistentVolume (other cluster-scoped objects only if you include them) | Operators: exclude them from application backups, and reinstall them from Git or OLM |
+        | images in the internal registry, through the `openshift` plugin | volume snapshots created by other software |
+        | volume data, by snapshot or by file copy | `hostPath` volumes with File System Backup |
+        | | anything in an external database or service the application calls |
+
+        Exclude Operators from application backups, reinstall them on the target first and follow their application recovery guidance. Label selection must include required Secrets and other dependencies; pod references do not automatically include them.
+    - id: volume-data-three-ways
+      title: Volume protection methods
+      depth: true
+      body: |
+        | Method | How | Where the data ends up | Survives loss of the storage system? |
+        |---|---|---|---|
+        | **CSI snapshot** | Velero's CSI support creates a VolumeSnapshot through a VolumeSnapshotClass labelled `velero.io/csi-volumesnapshot-class: "true"` | inside the storage system, as a snapshot | **no**: the snapshot shares the fate of the storage backend |
+        | **CSI snapshot + built-in Data Mover** (`snapshotMoveData`) | the snapshot is taken, then the node agent reads it with Kopia and uploads it (DataUpload objects) | the backup bucket, deduplicated and incremental | yes, if the bucket is independent |
+        | **File System Backup** (`defaultVolumesToFsBackup`, Kopia; Restic is deprecated in OADP 1.5 and no longer used for new backups in 1.6) | the node agent reads the mounted volume's files from the running pod | the backup bucket, incremental | yes, if the bucket is independent |
+
+        The bucket must survive the failed backend, cluster and site as required by the plan. Data Mover needs supported CSI snapshots and node-agent configuration; block-mode support is platform-dependent. Kopia File System Backup handles mounted file volumes, not raw block or hostPath volumes. A snapshot alone normally shares its backend's fate.
+    - id: restore-details
+      title: Restore mechanics and consistency details
+      depth: true
+      body: |
+        Velero restores resource dependencies before their consumers, following a priority list. OADP
+        sets its own list, which differs from upstream Velero's default and starts with
+        SecurityContextConstraints; CustomResourceDefinitions, namespaces, storage and snapshot
+        resources, PersistentVolumes and claims, ServiceAccounts, Secrets and ConfigMaps also come
+        before the remaining resources, which follow in alphabetical order. Use the OADP reference for
+        the full list and overrides.
+
+        Existing objects are skipped by default. Existing ServiceAccounts are merged in specific
+        fields, including referenced Secrets, imagePullSecrets and missing labels or annotations.
+        existingResourcePolicy: update is a best-effort patch policy, not a volume-data overwrite.
+        Storage-class mapping uses the documented restore plugin ConfigMap. Snapshot data must still
+        be accessible, or the backup must contain a completed off-backend data copy.
+
+        Backup hooks run in a selected pod container. Commands do not automatically run through a
+        shell. Defaults are onError: Fail and a 30-second timeout. Pair quiesce and resume operations
+        and test error handling. Restore hooks can use init containers to prepare data before startup.
+        Use a supported database procedure for consistent multi-volume or live-file capture.
+    - id: rpo-rto-and-the-real-plan
+      title: Recovery target design examples
+      depth: true
+      body: |
+        | Target | Typical design |
+        |---|---|
+        | RPO hours, RTO hours | OADP Schedules with Data Mover or File System Backup to an off-site bucket; restore into a rebuilt or standby cluster |
+        | RPO minutes, RTO under an hour | database-native continuous backup or asynchronous replication to a second site, plus GitOps to recreate definitions |
+        | RPO near zero, RTO minutes | synchronous replication across zones or sites, run by the database or storage layer, and applications on several clusters |
+
+        These are design candidates, not guarantees. Successful backup age, replication lag and application consistency determine the recovery point. RTO includes incident detection, decisions, infrastructure preparation, restore and service verification.
+    - id: what-goes-wrong
+      title: Backup and restore diagnosis
+      depth: true
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | backups never start or fail at once | `oc get backupstoragelocations -n openshift-adp`: phase `Unavailable` | wrong bucket, region, endpoint or credentials Secret; CA for an internal S3 endpoint missing | fix the DPA's backup location until the phase is `Available` |
+        | Backup `PartiallyFailed` | `oc describe backup <name> -n openshift-adp` lists errors and warnings; Velero logs | a hook failed or timed out, a volume could not be snapshotted, a resource could not be read | fix the item; rerun; never ignore partial failures |
+        | volumes missing from the backup | the Backup shows no snapshots and no file-level uploads | no VolumeSnapshotClass with the Velero label for that driver, and File System Backup not enabled | add the class or enable the node agent and FSB |
+        | restore `Completed` but the application is unchanged | Restore warnings say objects already exist | non-destructive restore skipped them | restore into a mapped namespace, or remove the objects first |
+        | restored pods Pending on another cluster | `oc describe pvc` shows an unknown StorageClass | the class does not exist on the target | map storage classes during the restore |
+        | restored database will not start | its logs show recovery or corruption errors | crash-consistent or file-level copy of a live database | add quiesce hooks, or use the database's own backup |
+  review:
+    - q: Does an etcd backup protect application data on PVs?
+      a: No. It restores cluster objects only; data needs volume or application-level backups.
+    - q: Define RPO and RTO.
+      a: 'RPO: maximum acceptable data loss (time). RTO: maximum acceptable time to restore service.'
+    - q: What is the difference between a crash-consistent and an application-consistent backup?
+      a: Crash-consistent capture resembles recovery after power loss; application-consistent capture uses the application's
+        supported coordination or native backup. Live file copies and uncoordinated multi-volume snapshots need special
+        care and restore testing.
+    - q: Name the five OADP (Velero) APIs a backup design uses.
+      a: BackupStorageLocation, VolumeSnapshotLocation, Backup, Schedule and Restore, configured through a DataProtectionApplication.
+    - q: Where does volume data end up with a CSI snapshot, with the Data Mover, and with File System Backup?
+      a: 'CSI snapshot: inside the storage system. Data Mover and File System Backup: uploaded by the node agent (Kopia)
+        to the backup bucket.'
+    - q: What does a Velero restore do with an object that already exists?
+      a: 'It normally skips the object; ServiceAccounts have a field-merge exception. existingResourcePolicy: update
+        requests best-effort patches and does not overwrite volume data.'
+  labs: []
+  limits: |
+    OADP is not installed and no off-cluster object storage is configured. The examples are not executed. Installing and configuring OADP needs an administrator; the course learner cannot create Backups in openshift-adp. Practise on a disposable cluster with an independent bucket. A full disaster-recovery drill should use a separate cluster and exercise the intended failure domain.
+  enterprise: |
+    Platform teams run OADP with off-site buckets, Schedules per application tier and retention set by policy;
+    database teams add continuous, database-native protection for low RPOs. Every critical application has a restore
+    drill on the calendar, run into a second cluster, with the measured RPO and RTO kept as audit evidence.
+  references:
+    - title: 'OpenShift 4.21: Introduction to OADP'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/oadp-application-backup-and-restore
+    - title: 'OpenShift 4.21: Control plane backup and restore'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/control-plane-backup-and-restore
+    - title: 'OpenShift 4.21 docs source: OADP backup, Schedule and Restore CRs, Data Mover, File System Backup (enterprise-4.21)'
+      url: https://github.com/openshift/openshift-docs/tree/enterprise-4.21/backup_and_restore/application_backup_and_restore
+    - title: 'Velero 1.16: How Velero works (backup TTL, default 30 days)'
+      url: https://velero.io/docs/v1.16/how-velero-works/
+    - title: 'Velero 1.16: Restore reference'
+      url: https://velero.io/docs/v1.16/restore-reference/
+    - title: 'Velero 1.16: Backup API type'
+      url: https://velero.io/docs/v1.16/api-types/backup/
+    - title: 'Velero 1.16: Resource filtering'
+      url: https://velero.io/docs/v1.16/resource-filtering/
+    - title: 'Kubernetes: Volume snapshots'
+      url: https://kubernetes.io/docs/concepts/storage/volume-snapshots/
+    - title: 'Kubernetes 1.34: Secrets (optional and required Secrets)'
+      url: https://v1-34.docs.kubernetes.io/docs/concepts/configuration/secret/
+    - title: 'Velero 1.16: Backup hooks'
+      url: https://velero.io/docs/v1.16/backup-hooks/
+    - title: 'Velero 1.16: Restore API type'
+      url: https://velero.io/docs/v1.16/api-types/restore/
+    - title: 'Velero 1.16: CSI snapshot data movement'
+      url: https://velero.io/docs/v1.16/csi-snapshot-data-movement/
+    - title: 'Velero 1.16: File System Backup'
+      url: https://velero.io/docs/v1.16/file-system-backup/
+    - title: 'Velero 1.16: Restore hooks'
+      url: https://velero.io/docs/v1.16/restore-hooks/
+
+- id: i.day2-backup
+  title: Day-2 operations, etcd backup and recovery
+  subtitle: Backing up the control plane, choosing the smallest recovery, and designing for cluster loss
+  module: p4-enterprise
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 25
+  level: 3
+  supports: 'OpenShift 4.21 etcd backup script (cluster-backup.sh), restore to a previous cluster state (cluster-restore.sh),
+    quorum restoration (quorum-restore.sh) and the documented restore test procedure, all run on control-plane hosts
+    with cluster-admin; automated etcd backups (EtcdBackup and Backup APIs) are Technology Preview and need the TechPreviewNoUpgrade
+    feature set. OpenShift Local runs a single etcd member that the course must not disturb: nothing here is executed.'
+  concepts:
+    - ent.etcd-backup
+    - ent.day2
+  prerequisites:
+    - c.machineconfig-upgrades
+    - e.stateful-dr
+  objective: |
+    Identify recurring platform operations and assess an etcd backup for usable, same-release recovery. Choose the smallest documented recovery for a failure and design a rehearsed cluster rebuild against agreed RPO and RTO.
+  flow:
+    - kind: teach
+      id: situation
+      title: The backup exists, but can you use it?
+      body: |
+        An administrator finds last week's etcd snapshot on a control-plane host. Since then the cluster
+        has been updated, its certificates have changed, and nobody has checked where the companion archive
+        went. A file named backup is not yet a recovery plan.
+
+        **Day-2 operations** are the recurring work after installation: updates, capacity, certificates,
+        access, monitoring and recovery. Each needs an owner, a frequency and evidence that it happened.
+        A **runbook** is the tested procedure that turns that responsibility into repeatable work.
+
+        You will assess an etcd backup, choose the least disruptive recovery for a failure, and plan for a
+        lost site. Host commands are documentation examples; this lesson executes nothing.
+    - kind: teach
+      id: scope-of-etcd
+      title: Protect the control plane separately from application data
+      body: |
+        [Stateful workloads, backup and disaster recovery](/lesson/e.stateful-dr) separated definitions,
+        persistent data and cluster state. The etcd snapshot protects stored API objects, including Secrets.
+        It does not contain database files or other persistent volume contents.
+
+        That scope makes etcd recovery wide-reaching and disruptive: rolling back its objects affects every
+        team. Recover an application from Git and its application backups when the API is healthy. Reserve
+        control-plane recovery for failures that require it.
+    - kind: ask
+      id: recover-namespace
+      recalls: e.stateful-dr
+      prompt: The API is healthy, but shop was deleted. Which recovery limits the impact to that application?
+      choices:
+        - text: Git definitions and application data backups
+          why: They recover the application without rolling other teams' API objects back to an earlier state.
+        - text: Last night's cluster-wide etcd snapshot restore
+          why: This rewinds every team's objects and still does not restore the shop's volume contents.
+        - text: Quorum restoration on a control-plane survivor
+          why: Quorum restoration repairs a lost etcd majority; the healthy API already stored this deletion.
+      answer: 0
+    - kind: teach
+      id: two-backup-files
+      title: Keep both files from one backup
+      body: |
+        The documented backup uses one invocation of `cluster-backup.sh` on one control-plane host.
+        An administrator enters the host environment through a root debug shell and runs the script there.
+        It saves the etcd snapshot and static pod resources together.
+
+        The pair is `snapshot_<timestamp>.db` and `static_kuberesources_<timestamp>.tar.gz`.
+        When etcd encryption is enabled, the archive contains keys required to use the snapshot. Protect
+        both as sensitive data, copy both off the host, and store the key-bearing archive separately from
+        the snapshot while retaining their matching timestamp.
+    - kind: show
+      id: documented-backup
+      origin: example
+      caption: 'OpenShift 4.21 control plane backup and restore: administrator host-shell example, no output recorded'
+      code: |
+        $ oc debug --as-root node/<control-plane-node>
+        $ chroot /host
+        $ /usr/local/bin/cluster-backup.sh /home/core/assets/backup
+      notice: |
+        These lines describe successive contexts: local CLI, debug container, then host. They are not a
+        single command to paste. A cluster-wide proxy requires the documented proxy environment setup first.
+        The output directory is temporary staging, not a surviving backup destination.
+    - kind: ask
+      id: one-file-missing
+      prompt: An encrypted cluster's snapshot is safe off-site, but its matching static_kuberesources archive is lost.
+        What is missing?
+      choices:
+        - text: Only a redundant copy of the snapshot
+          why: The archive holds static pod resources and encryption keys; it is not a second snapshot.
+        - text: Required resources and encryption keys
+          why: The documented restore needs the matching archive as well as the snapshot.
+        - text: The database files stored on each PV
+          why: Neither backup file contains application volume bytes; those need separate protection.
+      answer: 1
+    - kind: teach
+      id: release-and-certificate-boundaries
+      title: A usable backup matches the release
+      body: |
+        OpenShift requires a restore backup from the same **z-stream release**, the complete version such
+        as 4.21.8. A 4.21.5 backup is not a matching backup for a 4.21.8 cluster. Keep a backup before an
+        update, and take a fresh one after the update has settled at the new release. A pre-update backup
+        does not provide a general downgrade procedure.
+
+        Do not back up before the first certificate rotation completes, about 24 hours after installation.
+        Those early backups contain certificates that will have expired. Prefer off-peak backups because
+        snapshots have a high I/O cost, and label the stored pair with its release and timestamp.
+    - kind: show
+      id: inspect-version
+      origin: example
+      caption: 'OpenShift 4.21 update and CLI documentation: read the cluster release before choosing a backup'
+      code: |
+        $ oc get clusterversion version -o yaml
+      notice: |
+        An administrator can inspect status.desired.version and update history. A progressing update needs
+        its documented recovery guidance; reading one version field is not permission to restore or downgrade.
+        The local oc client version alone does not identify the cluster's release.
+    - kind: try
+      id: inspect-etcd-health
+      body: In a described cluster where you can read ClusterOperators, use get to request the etcd ClusterOperator as
+        YAML from any directory. It is cluster-scoped.
+      accept:
+        - oc get clusteroperator etcd -o yaml
+        - oc get clusteroperators etcd -o yaml
+        - oc get co etcd -o yaml
+        - oc get clusteroperator/etcd -o yaml
+        - oc get clusteroperators/etcd -o yaml
+        - oc get co/etcd -o yaml
+        - oc get clusteroperator etcd --output=yaml
+        - oc get clusteroperators etcd --output yaml
+        - oc get co etcd --output=yaml
+        - oc get clusteroperator -o yaml etcd
+        - oc get clusteroperator etcd --output yaml
+        - oc get clusteroperator/etcd --output=yaml
+        - oc get clusteroperator/etcd --output yaml
+        - oc get clusteroperators etcd --output=yaml
+        - oc get clusteroperators/etcd --output=yaml
+        - oc get clusteroperators/etcd --output yaml
+        - oc get co etcd --output yaml
+        - oc get co/etcd --output=yaml
+        - oc get co/etcd --output yaml
+        - oc get clusteroperator etcd -oyaml
+        - oc get clusteroperators etcd -oyaml
+        - oc get co etcd -oyaml
+        - oc get clusteroperator/etcd -oyaml
+        - oc get co/etcd -oyaml
+      hints:
+        - match: ^oc .*get pods
+          say: Pods show individual processes. This task reads the cluster-scoped Operator's aggregate health conditions.
+        - match: ^oc version
+          say: The version example taught get with YAML output; apply that pattern to the etcd ClusterOperator.
+        - match: ^oc .*get .*etcd
+          say: Name the kind clusteroperator (or co), the object etcd and YAML output; no project selects this object.
+      hint: Use get with clusteroperator, the name etcd and output yaml.
+      then: The API would return the etcd Operator's conditions, including Available, Progressing and Degraded. They
+        guide diagnosis; they do not prove every application is recovered. Nothing runs here.
+    - kind: ask
+      id: patch-release-match
+      prompt: A cluster was updated from 4.21.6 to 4.21.9 at midnight. Its last etcd backup ran at 22:00 the evening
+        before. Can a restore to a previous cluster state use it?
+      choices:
+        - text: Yes, both releases are 4.21
+          why: The requirement is the exact z-stream release, not only the 4.21 minor version.
+        - text: No, the backup was taken at 4.21.6
+          why: A cluster running 4.21.9 needs a backup taken at 4.21.9, and this one predates the update. Take a
+            fresh pair once the update has settled.
+        - text: Yes, if the companion archive is restored with it
+          why: Both files of a pair are required, but the archive carries the same release as the snapshot and
+            cannot resolve a mismatch.
+      answer: 1
+    - kind: teach
+      id: automate-with-care
+      body: |
+        OpenShift 4.21's automated single and recurring etcd backup APIs are Technology Preview.
+        They use `EtcdBackup` and recurring `Backup` objects with storage and retention settings.
+        Enabling them requires `TechPreviewNoUpgrade`, which cannot be disabled and prevents minor-version
+        updates. It is inappropriate for production clusters.
+
+        Production automation can schedule the documented host script and its protected off-host copy.
+        Monitor completion and retrieval, not only the scheduler. An automation job that succeeds before
+        its copy fails has not produced a surviving backup.
+    - kind: ask
+      id: preview-in-production
+      prompt: A production team proposes TechPreviewNoUpgrade to get recurring etcd backups. Which alternative preserves
+        the supported production approach?
+      choices:
+        - text: Enable it now and remove it next week
+          why: The feature set cannot be disabled and blocks minor-version updates.
+        - text: Automate the documented script and off-host copy
+          why: The documented backup workflow can be scheduled without enabling the irreversible preview feature set.
+        - text: Keep the preview but write to another PVC
+          why: Changing the storage destination does not change the feature's support or update constraints.
+      answer: 1
+    - kind: teach
+      id: choose-recovery
+      title: Choose the smallest recovery
+      body: |
+        If one etcd member fails while quorum survives, follow member replacement rather than rolling back
+        the cluster. Expired control-plane certificates have their own recovery procedure.
+
+        On an HA cluster that has lost quorum, `quorum-restore.sh` can form a new single-member etcd from a
+        surviving host's local data, without a backup. The procedure includes stopping other members so
+        they cannot form a competing cluster. Recent changes absent from the chosen survivor can be lost.
+        The remaining online members then rejoin it automatically, as the procedure describes.
+
+        A restore to a previous cluster state uses `cluster-restore.sh` with a same-release backup.
+        It rewinds all stored API objects and is a destructive last resort. If the API can still retrieve
+        data, Red Hat says not to restore etcd from a backup; diagnose and repair instead.
+    - kind: ask
+      id: surviving-local-data
+      prompt: An HA cluster lost quorum, but a surviving host has local etcd data. Which documented path can work without
+        a backup?
+      choices:
+        - text: Quorum restoration on the recovery host
+          why: It forms a new single-member cluster from local data, with the documented precautions and possible data
+            loss.
+        - text: Application restore into a mapped namespace
+          why: Application recovery requires a functioning control plane; it cannot restore etcd quorum.
+        - text: Snapshot restore from an older minor release
+          why: That requires a backup and fails the documented release-match requirement.
+      answer: 0
+    - kind: teach
+      id: rollback-consequences
+      title: An old API state meets today's disks
+      body: |
+        After an etcd rollback, host files and storage have not travelled back in time. Operators can
+        disagree with static resources on disk. A restored object can refer to a missing volume, old
+        credentials or a device whose name changed. API VolumeAttachment objects are restored, but the
+        storage system's actual attachment can still reflect a later state.
+
+        Red Hat documents severe possible consequences, including lost volume tracking, deleted workloads,
+        reimaged machines and stale certificate bundles. Follow the version-specific procedure and its
+        troubleshooting guidance. A working API is the start of verification, not the end.
+    - kind: teach
+      id: rebuild-path
+      title: A lost site needs a rebuild design
+      body: |
+        If every control-plane host and disk is gone, design around rebuilding a cluster from automation,
+        applying definitions from Git, and recovering application data from independent backups or replication.
+        The documented etcd restore repairs the original cluster; it is not a supported portable template
+        for a newly installed cluster elsewhere.
+
+        A warm standby avoids installation delays. Active applications on multiple clusters can reduce
+        traffic-switching time, but need a data consistency and routing design. Neither topology guarantees
+        an RTO by its name.
+
+        Keep installation inputs, Git, backup buckets, vault credentials, certificates and any disconnected
+        image mirrors available outside the failed site's dependencies. Fleet management needs its own
+        backup and recovery plan too.
+    - kind: order
+      id: rehearse-and-verify
+      prompt: Order the preparation and evidence for a control-plane recovery rehearsal on a disposable cluster.
+      items:
+        - Select the matching backup pair and verify independent emergency host access
+        - Follow the documented test procedure, including isolating non-recovery members
+        - Recover the control plane and rejoin the other members as documented
+        - Check Operators, storage, data and application traffic
+        - Record total recovery time and update the runbook with manual repairs
+      why: The recovery must be possible without its normal login path, avoid competing etcd clusters, and prove service
+        beyond API availability.
+    - kind: reflect
+      id: explain-three-paths
+      prompt: Explain when you would replace a member, restore quorum, roll back etcd, or rebuild elsewhere.
+      model: |
+        With quorum intact, I replace an unhealthy member. With quorum lost and surviving local data, I assess
+        the documented quorum restoration. An etcd rollback is a destructive last resort requiring the matching
+        backup pair and release. For a lost site I rebuild from automation, Git and application data protection,
+        then measure recovery against the agreed targets.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can assess an etcd backup's files, location, certificate timing and release match; choose a
+        recovery path by the scope of failure; and demand a timed rehearsal that checks storage and applications.
+        The depth tables keep the broader day-2 responsibilities and failure diagnosis close at hand.
+
+        Next, the path examines [Secrets, tokens, supply chain and audit](/lesson/f.secrets-supplychain), including
+        credentials and trusted delivery that a rebuilt platform also needs.
+  sections:
+    - id: the-day-2-list
+      title: Day-2 ownership checklist
+      depth: true
+      body: |
+        | Area | What the platform team does | Evidence it is done |
+        |---|---|---|
+        | Certificates | most platform certificates rotate automatically; custom ingress and API certificates do not | expiry dates tracked, renewal runbook |
+        | Updates | channels, maintenance windows, Control Plane Only (formerly EUS-to-EUS) updates between even-numbered releases, a backup before each update | update history, pre-update backup |
+        | Capacity | requests against allocatable, headroom for a node or zone loss, node scaling | capacity review |
+        | etcd health | the etcd Operator defragments automatically; you watch database size and disk latency | alerts, dashboards |
+        | Backups | etcd snapshots, application backups with OADP, off-site copies | restore drills |
+        | Identity and access | identity provider, group sync, emergency access, removal of leavers | access reviews |
+        | Governance | quotas, project template, policies, operator updates, image pruning | Git history |
+        | Audit | audit log forwarding and retention | the SIEM holds them |
+
+        Give every area a named owner, a repeat frequency, a tested runbook and retrievable evidence. Custom API and ingress certificates need a renewal plan even though many platform certificates rotate automatically. The etcd Operator handles defragmentation; watch database size and disk latency rather than adding unreviewed host maintenance.
+    - id: recovery-choose-the-smallest
+      title: Recovery decision reference
+      depth: true
+      body: |
+        | Situation | Smallest tool | Backup needed? |
+        |---|---|---|
+        | one etcd member unhealthy, quorum intact | replace the unhealthy member (documented procedure) | no |
+        | quorum lost on an HA cluster (two of three members down) | `quorum-restore.sh` on one surviving host: it starts a new single-member etcd from that host's local data; the other online members rejoin automatically | no, but unreplicated writes may be lost |
+        | control-plane certificates expired (cluster off for a long time) | the expired-certificates recovery procedure | no |
+        | the cluster must go back to an earlier state (critical objects destroyed, no other way) | **restore to a previous cluster state** with `cluster-restore.sh` and a same-z-stream backup | yes |
+        | one application or namespace deleted, API healthy | GitOps for definitions, OADP or database backups for data | application backups |
+        | the whole cluster or site lost | rebuild from automation, then GitOps and OADP restore from the off-site bucket | installation automation, Git, application backups |
+    - id: restore-storage-effects
+      title: What rollback can leave inconsistent
+      depth: true
+      body: |
+        | Restored API view | External state that may differ | Verification |
+        |---|---|---|
+        | static pod and Operator configuration | files left on control-plane disks | Operator conditions and documented recovery issues |
+        | PVs, PVCs and VolumeAttachment objects | actual volumes, provider attachments and credentials | storage events and provider-side state |
+        | local-storage references | device names and local symlinks | documented local-storage repair |
+        | certificates and cluster objects | clients and machines that progressed after the snapshot | certificate, node and application checks |
+
+        The API objects for volume attachments are stored in etcd. Their provider-side effects and
+        application bytes are not rewound by restoring those objects. Do not detach an active writer
+        merely because an old API object describes a different attachment.
+    - id: designing-for-cluster-loss
+      title: Cluster-loss design options
+      depth: true
+      body: |
+        | Design | What comes back, and how | Typical RTO | Cost |
+        |---|---|---|---|
+        | **Rebuild and restore** | install a new cluster from automation, let GitOps apply platform and application definitions, restore data with OADP from an off-site bucket | hours | lowest |
+        | **Warm standby cluster** | a second cluster already installed and configured by GitOps; data restored or replicated; traffic switched by DNS or a global load balancer | under an hour | a second cluster |
+        | **Active-active** | applications run on several clusters at once; data replicated by the application; the global load balancer stops sending traffic to the failed one | minutes | the highest, and application changes |
+
+        Time estimates in this table are illustrative planning ranges, not product guarantees. Measure the complete disruption-to-service interval in a rehearsal. Store installation automation, Git, credentials, certificates, image mirrors and backup data independently of the site being protected. Protect the fleet hub too.
+    - id: what-goes-wrong
+      title: Control-plane recovery diagnosis
+      depth: true
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | restore attempted from a backup of a different z-stream release (Red Hat requires the same one) | the backup's release differs from the cluster's (`oc get clusterversion`) | backup taken before an update | back up before every update; keep backups labelled with their exact version |
+        | restore cannot use the snapshot | only `snapshot_*.db` was kept | `static_kuberesources_*` (and its keys) missing | keep both files, stored separately |
+        | the backup was lost with the node | the files were under `/home/core/assets/backup` on the failed host | never copied off | copy off-host automatically, encrypted |
+        | after a restore, a database pod loops | events show a missing volume or an attachment to another node | PV state outside etcd moved on | verify the writer is stopped, then follow the storage recovery and attachment procedure |
+        | after a restore, Operators stay degraded | `oc get clusteroperators` shows Degraded or Progressing for a long time | conflicts between restored objects and files on hosts | follow the documented issue list; this is why rehearsals matter |
+        | quorum restoration lost recent changes | objects created minutes before the failure are missing | the recovery host had not replicated them | choose the most up-to-date surviving host; re-apply from Git |
+    - id: backup-and-test-checklist
+      title: Backup and rehearsal checklist
+      depth: true
+      body: |
+        Keep the matching snapshot and static resource archive, stored securely off-cluster and
+        separated because the archive can contain encryption keys. Record the exact z-stream release.
+        Take regular backups after the first certificate rotation, before updates and again after
+        updates settle. The pre-update pair is not a generic supported downgrade mechanism.
+
+        Automated EtcdBackup and recurring Backup APIs are Technology Preview in OpenShift 4.21, and still in 4.22.
+        TechPreviewNoUpgrade cannot be removed and prevents minor-version updates. Production
+        automation should use the documented script and include monitored secure off-host transfer.
+
+        The documented restore test needs non-production hosts and SSH access. It stops etcd and
+        disables the kubelet on non-recovery members before restoring on the recovery host; follow
+        the exact procedure for the topology. The documentation notes that recovery can take up to 15
+        minutes after the restore script; that is not a complete service RTO. A single-node cluster has its
+        own documented procedure (restoring to a previous cluster state for a single node), and the
+        backup must come from the same z-stream release there too.
+        Record Operator and storage repairs, verify application traffic, and rehearse site rebuild too.
+  review:
+    - q: What does an etcd snapshot contain, and what does it not?
+      a: All Kubernetes objects (including Secrets); not persistent volume data.
+    - q: Why must etcd backups be encrypted and stored off-cluster?
+      a: They contain every Secret, and a backup on the failed cluster is useless.
+    - q: Which two files does cluster-backup.sh write?
+      a: snapshot_<timestamp>.db and static_kuberesources_<timestamp>.tar.gz (which holds the encryption keys when etcd
+        encryption is on).
+    - q: Which backup can a restore to a previous cluster state use?
+      a: One taken on the same z-stream release as the cluster (for example 4.21.8 for 4.21.8).
+    - q: When do you take etcd backups?
+      a: Regularly and off-peak where possible, after the first certificate rotation about 24 hours after installation,
+        before every update and after it settles at the new release. Keep matching pairs securely off-cluster.
+    - q: What does quorum-restore.sh do?
+      a: On an HA cluster that lost quorum, it creates a new single-member etcd from one surviving host's local data;
+        the other hosts rejoin. No backup is needed, but unreplicated writes can be lost.
+  labs: []
+  limits: |
+    No backup or recovery command is executed. These operations need root access on control-plane hosts and can disrupt the entire cluster. OpenShift Local has one etcd member and is not a place to experiment with HA quorum failure. Use a disposable cluster and the documented topology-specific restore test procedure.
+  enterprise: |
+    Platform teams automate the etcd backup script and its encrypted off-host copy, back up before every update, keep
+    the key archive in a separate vault, and rehearse both the restore and the full rebuild path (automation, GitOps,
+    OADP) on a schedule, with the measured recovery times reported against the agreed RTO.
+  references:
+    - title: 'OpenShift 4.21: Backing up and restoring etcd data'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/control-plane-backup-and-restore
+    - title: 'OpenShift 4.21: Disaster recovery (quorum restoration, restoring to a previous cluster state, testing restore
+        procedures)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/control-plane-backup-and-restore#disaster-recovery
+    - title: 'OpenShift 4.21 docs source: disaster recovery scenarios and persistent storage issues (enterprise-4.21)'
+      url: https://github.com/openshift/openshift-docs/tree/enterprise-4.21/backup_and_restore/control_plane_backup_and_restore
+    - title: 'OpenShift 4.21: etcd performance and defragmentation'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/etcd/etcd-performance
+    - title: 'OpenShift 4.21: Introduction to OADP'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/oadp-application-backup-and-restore
+    - title: 'OpenShift 4.21: Updating clusters (Control Plane Only updates)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/updating_clusters/index
+
+- id: i.multicluster
+  title: Running many clusters
+  subtitle: Fleet management, security and registries (ACM, ACS, Quay)
+  module: p4-enterprise
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 25
+  level: 3
+  supports: Red Hat Advanced Cluster Management for Kubernetes (with the multicluster engine for Kubernetes operator),
+    Red Hat Advanced Cluster Security for Kubernetes and Red Hat Quay, add-ons bundled in OpenShift Platform Plus. None
+    is installed on the course's OpenShift Local cluster; this lesson is architecture.
+  concepts:
+    - ent.multicluster
+    - sec.supplychain
+  prerequisites:
+    - i.ha-architecture
+    - e.stateful-dr
+  objective: |
+    Explain what changes when an organisation runs tens of clusters, what ACM, ACS and Quay each add and how their
+    components are placed, how they work together from image push to compliance report, and how each becomes a
+    dependency that must itself be made highly available and backed up.
+  flow:
+    - kind: teach
+      id: situation
+      title: Thirty clusters, three different questions
+      body: |
+        An audit asks whether thirty production clusters share the same baseline. Security asks which run
+        a newly vulnerable image. A disconnected site asks where its next release will come from. Checking
+        each cluster by hand cannot give timely, repeatable answers.
+
+        You will separate fleet configuration, workload security and image distribution, then follow the
+        dependencies they introduce. Red Hat Advanced Cluster Management (**ACM**), Advanced Cluster Security
+        (**ACS**, also written RHACS) and Quay cover those needs. They are add-ons offered together in OpenShift Platform Plus;
+        none is installed here. All manifests and commands in this lesson are documentation examples.
+    - kind: teach
+      id: acm-management
+      title: ACM manages the fleet's desired state
+      body: |
+        ACM uses a **hub** cluster to manage other, complete clusters. Their **klusterlet** agents receive
+        work and report status. The multicluster engine for Kubernetes provides cluster lifecycle operations,
+        including supported creation, import, upgrades and hosted control planes.
+
+        ACM adds governance, search, application placement and optional multicluster observability. The
+        observability service needs its own persistent object storage. Application placement can connect
+        a cluster selection to Argo CD ApplicationSets; it does not by itself replicate database data.
+    - kind: ask
+      id: hub-failure-prediction
+      guess: true
+      prompt: The ACM hub goes offline. The managed clusters and their storage remain healthy. What happens to their
+        applications?
+      choices:
+        - text: They stop when the klusterlet disconnects
+          why: Managed clusters run their own workloads; their agents are not the application's control plane.
+        - text: They continue on their own clusters
+          why: Their local control planes keep working; the next step identifies the management functions affected.
+        - text: They automatically move to a different region
+          why: Hub failure does not trigger application and data failover across clusters automatically.
+      answer: 1
+    - kind: teach
+      id: hub-recovery
+      body: |
+        A hub outage interrupts hub-dependent lifecycle work, new policy distribution and the fleet view.
+        Workloads continue on healthy managed clusters, and already installed local policy controllers may
+        continue reconciling their existing policies. Central management is not the same as local execution.
+
+        Protect the hub as production infrastructure. ACM's cluster backup operator uses OADP and a
+        BackupSchedule to preserve hub resources in object storage. An active-passive design restores
+        backups on a passive hub and uses a controlled activation procedure. It is not an automatic transfer
+        of the application's data or traffic.
+    - kind: teach
+      id: policy-placement
+      title: A baseline needs a rule and a target
+      body: |
+        An ACM **Policy** wraps templates such as ConfigurationPolicy, OperatorPolicy or CertificatePolicy.
+        A **Placement** selects managed clusters; a **PlacementBinding** connects that selection to policies.
+        For configuration policies, `inform` reports differences and `enforce` asks the controller to repair
+        them. Enforcement support depends on the template controller.
+
+        Start by observing the effect on a small selection. Review violations, owners and exceptions before
+        enforcing across production. A label selecting every cluster can turn one mistaken rule into a fleet outage.
+    - kind: show
+      id: policy-read-example
+      origin: example
+      caption: 'ACM 2.16 governance documentation: inspect a hub policy and its PlacementBinding'
+      code: |
+        $ oc get policies.policy.open-cluster-management.io tenant-baseline -n fleet-policies -o yaml
+        $ oc get placementbindings.policy.open-cluster-management.io tenant-baseline -n fleet-policies -o yaml
+      notice: |
+        In this described hub, both objects already exist in fleet-policies. The policy holds the rules;
+        the binding tells you which placement to inspect next. No sample status is asserted here.
+    - kind: try
+      id: inspect-new-policy
+      body: Connected to a described ACM hub, with read permission in fleet-policies, request the image-baseline Policy
+        as YAML using its fully qualified kind. Directory does not matter.
+      accept:
+        - oc get policies.policy.open-cluster-management.io image-baseline -n fleet-policies -o yaml
+        - oc get policies.policy.open-cluster-management.io/image-baseline -n fleet-policies -o yaml
+        - oc -n fleet-policies get policies.policy.open-cluster-management.io image-baseline -o yaml
+        - oc get policies.policy.open-cluster-management.io image-baseline -o yaml -n fleet-policies
+        - oc get policies.policy.open-cluster-management.io image-baseline --namespace=fleet-policies --output=yaml
+        - oc get policy.policy.open-cluster-management.io image-baseline -n fleet-policies -o yaml
+        - oc get policy.policy.open-cluster-management.io/image-baseline -n fleet-policies -o yaml
+        - oc get policies.policy.open-cluster-management.io --namespace fleet-policies image-baseline --output yaml
+        - oc get policies.policy.open-cluster-management.io image-baseline --output yaml --namespace fleet-policies
+        - oc -n fleet-policies get policies.policy.open-cluster-management.io/image-baseline -o yaml
+        - oc get policies.policy.open-cluster-management.io/image-baseline -o yaml -n fleet-policies
+        - oc get policies.policy.open-cluster-management.io/image-baseline --namespace=fleet-policies --output=yaml
+        - oc get policies.policy.open-cluster-management.io/image-baseline --output yaml --namespace fleet-policies
+        - oc -n fleet-policies get policy.policy.open-cluster-management.io image-baseline -o yaml
+        - oc get policy.policy.open-cluster-management.io image-baseline -o yaml -n fleet-policies
+        - oc get policy.policy.open-cluster-management.io image-baseline --namespace=fleet-policies --output=yaml
+        - oc get policy.policy.open-cluster-management.io image-baseline --output yaml --namespace fleet-policies
+        - oc -n fleet-policies get policy.policy.open-cluster-management.io/image-baseline -o yaml
+        - oc get policy.policy.open-cluster-management.io/image-baseline -o yaml -n fleet-policies
+        - oc get policy.policy.open-cluster-management.io/image-baseline --namespace=fleet-policies --output=yaml
+        - oc get policy.policy.open-cluster-management.io/image-baseline --output yaml --namespace fleet-policies
+        - oc get policies.policy.open-cluster-management.io image-baseline -n fleet-policies -oyaml
+        - oc get policies.policy.open-cluster-management.io/image-baseline -n fleet-policies -oyaml
+        - oc get policy.policy.open-cluster-management.io image-baseline -n fleet-policies -oyaml
+        - oc get policy.policy.open-cluster-management.io/image-baseline -n fleet-policies -oyaml
+        - oc -n fleet-policies get policies.policy.open-cluster-management.io image-baseline -oyaml
+      hints:
+        - match: tenant-baseline
+          say: Use the new policy image-baseline; the worked example inspected a different rule.
+        - match: placementbindings
+          say: A PlacementBinding selects where a policy goes. Read the Policy itself to inspect its rule and status.
+        - match: '^oc .*get policy '
+          say: Use policies.policy.open-cluster-management.io to identify ACM's Policy API explicitly.
+      hint: Use get with policies.policy.open-cluster-management.io, image-baseline, namespace fleet-policies and YAML
+        output.
+      then: The hub would return that Policy's templates and compliance status. Inspect its placement separately before
+        concluding which clusters it covers. This task submits no API request.
+    - kind: ask
+      id: baseline-audit
+      prompt: Auditors need per-cluster evidence that tenant projects have the required NetworkPolicy and OAuth settings.
+        Which capability fits?
+      choices:
+        - text: Quay repository mirroring and robot accounts
+          why: They distribute and control access to images; they do not check arbitrary cluster objects.
+        - text: ACM governance and selected cluster placement
+          why: Governance compares cluster configuration with declared policies and reports compliance for the selected
+            clusters.
+        - text: ACS process collection from container nodes
+          why: Process evidence helps runtime security; it is not the declared configuration baseline requested here.
+      answer: 1
+    - kind: teach
+      id: acs-components
+      title: ACS observes what the fleet runs
+      body: |
+        ACS separates **Central services**, which hold the portal, API and shared security data, from
+        **secured cluster services** on each protected cluster. Sensor watches cluster objects and coordinates
+        with Central. Collector runs on nodes and reports process and network activity through Sensor.
+        The admission controller can reject deployments under enforced policies.
+
+        Scanner V4 indexes image content and matches it against vulnerability data. On OpenShift secured
+        clusters its indexer is installed by default, while matching stays central; the depth table
+        separates them. A new vulnerability
+        feed can turn yesterday's clean image into today's finding without changing the image's bytes.
+    - kind: ask
+      id: runtime-shell
+      prompt: Security wants evidence of a shell started inside an already running container. Which ACS component observes
+        that activity?
+      choices:
+        - text: Collector on the node
+          why: Collector observes runtime process activity and reports it through Sensor.
+        - text: The deployment admission controller
+          why: Admission checks object requests; it does not observe arbitrary processes started inside an existing container.
+        - text: The image vulnerability matcher
+          why: Image contents and vulnerability records cannot show that a particular process ran.
+      answer: 0
+    - kind: teach
+      id: security-stages
+      body: |
+        ACS policies can participate at build, deploy and runtime. A pipeline can check an image before
+        promotion. Admission enforcement can refuse a deployment that violates configured criteria. Runtime
+        policies detect activity after containers start.
+
+        These checks need explicit integration and configuration. Scanning an image does not automatically
+        prevent it from being deployed. Begin with reporting, review the actual violations, and agree who
+        can approve narrow exceptions before enabling enforcement. A blanket rule against every critical
+        vulnerability can also block an urgent release intended to fix an incident.
+    - kind: ask
+      id: enforce-gradually
+      prompt: An enforced critical-CVE policy blocks an urgent incident fix because of an unpatched library it does not
+        touch. What should already exist?
+      choices:
+        - text: A switch that turns the policy off fleet-wide during incidents
+          why: That removes the control for every team at the moment changes are most hurried. A narrow exception
+            keeps it in force everywhere else.
+        - text: A narrow, time-limited exception with a named approver
+          why: Exceptions agreed before enforcement let a justified release proceed and leave an audit trail.
+        - text: A rescan after deployment, so nothing is ever blocked
+          why: Moving the check after deployment turns enforcement into reporting. That can be a rollout stage, but
+            it does not give the blocked release a way through.
+      answer: 1
+    - kind: teach
+      id: quay-access
+      title: Quay supplies images with scoped access
+      body: |
+        Quay is an image registry. Organisations and teams separate repository access; **robot accounts**
+        supply credentials for automation. Give a pipeline push access only to its repositories, and a
+        consuming cluster only the pull access it needs. Separate accounts make rotation and investigation smaller.
+
+        Clair scans image contents for known vulnerabilities. Repository mirroring can copy images from
+        upstream sources into a site's registry, but it needs connectivity for each synchronisation or a
+        planned transfer process for an isolated network. A disconnected site cannot pull through a link it lacks.
+    - kind: ask
+      id: robot-token
+      prompt: One robot can push to every team's repository. Its token leaks from one pipeline. What is the exposure?
+      choices:
+        - text: Only images built by the leaking pipeline
+          why: The token's permissions belong to the robot, not the pipeline that happened to expose it.
+        - text: All repositories writable by that robot
+          why: Anyone holding the token can exercise all of its repository grants.
+        - text: Only repositories lacking vulnerability scans
+          why: Scanning evaluates image content; it does not revoke a leaked push credential.
+      answer: 1
+    - kind: teach
+      id: registry-availability
+      title: Replication still has dependencies
+      body: |
+        Quay geo-replication shares one registry's metadata and replicates image blobs between regional
+        storage backends. It requires a shared database, common configuration and access from each region
+        to the others' object storage. Health monitoring and a global load balancer must handle site outages;
+        geo-replication does not supply automatic failover or database replication.
+
+        Separate registries with repository mirroring fit sites that cannot meet those shared-service
+        requirements. Neither design works without an image availability plan. During a registry outage,
+        running containers can continue, while a new pod needing an uncached image can fail with
+        ImagePullBackOff. Node replacement is precisely when local caches may disappear.
+    - kind: order
+      id: delivery-path
+      prompt: Order a configured delivery path that combines the registry, workload security and fleet management.
+      items:
+        - Build the image and evaluate build-stage security policy
+        - Push the approved image to Quay with a scoped robot
+        - Review its digest in Git and place the application on selected clusters
+        - Evaluate configured deploy-time admission policy on those clusters
+        - Observe runtime activity and fleet baseline compliance
+      why: Image supply, cluster selection, admission and runtime checks act at different points; installing the products
+        alone does not connect them.
+    - kind: reflect
+      id: explain-dependencies
+      prompt: Explain to a manager why a fleet design must budget for recovering the hub, security services and registry
+        themselves.
+      model: |
+        Those services answer different questions, but each becomes an operational dependency. A lost hub
+        removes central management, unavailable security services can affect configured checks, and a lost
+        registry prevents some new pods from starting. We need independent storage, monitoring, backups and
+        rehearsed recovery for the management services as well as the managed applications.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can choose ACM for fleet configuration and lifecycle, ACS for workload security, and Quay for
+        governed image supply. You can trace the path from a build to runtime evidence and identify the
+        shared services that need their own recovery plans.
+
+        Next, [Policy as code](/lesson/n.policy-governance) examines how rules are reviewed,
+        rolled out and enforced. The depth tables keep product selection and component placement for reference.
+  sections:
+    - id: acm-hub-and-managed-clusters
+      title: ACM capability reference
+      depth: true
+      body: |
+        | Capability | How it works |
+        |---|---|
+        | governance | a **Policy** wraps templates (ConfigurationPolicy, OperatorPolicy, CertificatePolicy); a **Placement** selects clusters by label; a **PlacementBinding** connects the two; `inform` reports; supported template controllers can `enforce` changes |
+        | application placement | GitOps applications (Argo CD ApplicationSets or ACM subscriptions) sent to the clusters a Placement selects |
+        | observability | collects health metrics from managed OpenShift clusters into the hub; needs persistent object storage and is enabled after installation |
+        | search and inventory | one console view of resources across clusters |
+
+        Hub-dependent distribution and lifecycle operations are affected by a hub outage. Already installed managed-cluster controllers can continue local reconciliation. Back up the hub with the cluster backup operator and rehearse passive-hub activation.
+    - id: acs-component-reference
+      title: ACS component placement
+      depth: true
+      body: |
+        | Location | Component | Role |
+        |---|---|---|
+        | Central services | Central and Central DB | portal, API, policy and shared security data |
+        | Central services | Scanner V4 Indexer, Matcher and DB | image indexing, vulnerability matching and scanner data |
+        | secured cluster | Sensor | observes API and Collector events; coordinates policy evaluation and actions |
+        | secured cluster | admission controller | deployment enforcement when configured |
+        | secured-cluster nodes | Collector | process and network observations |
+        | secured cluster (installed by default on OpenShift) | Scanner V4 Indexer and DB | image indexing close to the cluster's registries, used for delegated scanning; Central performs matching |
+
+        RHACS 4.9 also documents the deprecated StackRox Scanner and its dependency requirements.
+        Scanner placement depends on installation and delegated scanning configuration; do not assume
+        every secured cluster runs a complete independent vulnerability matcher.
+    - id: how-they-fit
+      title: Choose a capability by the required evidence
+      depth: true
+      body: |
+        | Need | Product | Not this one, because |
+        |---|---|---|
+        | the same NetworkPolicy and OAuth settings on 40 clusters, with a compliance report | ACM governance | ACS checks workloads and images, not arbitrary cluster configuration |
+        | block Deployments whose image has a fixable critical CVE | ACS deploy-time policy | ACM can distribute policy engines but does not scan images |
+        | detect a shell started inside a production container | ACS runtime (Collector) | ACM and Quay do not observe running processes |
+        | serve images to disconnected sites, with per-team rights | Quay with site-local images, scoped access and an appropriate mirroring or transfer design | the integrated registry can serve authenticated clients outside its cluster once exposed through a Route, but it is tied operationally to its hosting cluster |
+        | create and upgrade clusters, including hosted control planes | ACM (multicluster engine) | ACS and Quay do not manage clusters |
+    - id: registry-failure-domains
+      title: Registry replication and access design
+      depth: true
+      body: |
+        | Mechanism | What it provides | Dependency to test |
+        |---|---|---|
+        | team and repository grants | human access boundaries | membership and minimum required privileges |
+        | scoped robot account | automation credentials for push or pull | rotation and the repositories exposed by a leak |
+        | Clair scans | known vulnerability findings | current feeds and configured policy response |
+        | repository mirroring | copies between distinct repositories or registries | connectivity or transfer plan, lag and credentials |
+        | geo-replication | asynchronously copied blobs for one logical registry | shared database, shared Redis, inter-region storage access and external traffic failover |
+
+        Geo-replication does not replicate the database or automatically redirect clients after a
+        storage failure. Use suitable health checks and a global load balancer. Asynchronous blob
+        copies can lose recent pushes when a site is permanently lost before replication completes.
+        Fully isolated sites cannot meet the cross-region shared-service requirements; design local
+        registries and a controlled image-transfer process instead.
+  review:
+    - q: Which product enforces the same configuration policy across 20 clusters?
+      a: ACM (governance policies).
+    - q: Which product detects a shell spawned in a running production container?
+      a: ACS (runtime detection).
+    - q: Which three objects distribute an ACM governance policy to clusters?
+      a: Policy (the rules), Placement (which clusters), PlacementBinding (connects them).
+    - q: What happens to managed clusters when the ACM hub fails, and how is the hub protected?
+      a: Managed-cluster workloads keep running; hub-dependent distribution, lifecycle and fleet visibility are interrupted.
+        Local installed controllers can continue. Hub backup and controlled active-passive recovery use the cluster backup
+        operator and OADP.
+    - q: Which ACS components run on every secured cluster?
+      a: Sensor, admission controller and node Collectors run on secured clusters. On OpenShift secured clusters the
+        Scanner V4 indexer is installed by default too; vulnerability matching remains in Central services.
+    - q: What are Quay robot accounts for, and how should they be scoped?
+      a: Credentials for automation (push and pull); one per pipeline or consumer, limited to the repositories it needs.
+  labs: []
+  limits: |
+    ACM, ACS and Quay are not installed here. These documentation examples and command-writing tasks do not contact a hub or secured cluster. A real product exercise needs suitable clusters, storage, credentials and administrator access. The OLM labs teach the installation mechanism; they do not demonstrate these products.
+  references:
+    - title: 'Red Hat Advanced Cluster Management for Kubernetes 2.15: About'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.15/html-single/about/index
+    - title: 'Red Hat Advanced Cluster Management for Kubernetes 2.15: Business continuity (hub backup and restore)'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.15/html-single/business_continuity/index
+    - title: 'Red Hat Advanced Cluster Management for Kubernetes 2.16: Governance'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.16/html-single/governance/index
+    - title: 'Red Hat Advanced Cluster Security for Kubernetes 4.9: Architecture'
+      url: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.9/html-single/architecture/index
+    - title: 'Red Hat Quay 3.15: Use Red Hat Quay (organisations, robot accounts, Clair)'
+      url: https://docs.redhat.com/en/documentation/red_hat_quay/3.15/html-single/use_red_hat_quay/index
+    - title: 'Red Hat Quay 3.15: Geo-replication'
+      url: https://docs.redhat.com/en/documentation/red_hat_quay/3.15/html/manage_red_hat_quay/georepl-intro
+    - title: 'Red Hat OpenShift Platform Plus: About'
+      url: https://docs.redhat.com/en/documentation/openshift_platform_plus/4/discover-opp_about
+
+- id: i.platform-team
+  title: Running a platform team
+  subtitle: Paved roads, ownership, exceptions and measuring the platform
+  module: p4-enterprise
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 22
+  level: 2
+  supports: Organisational practice for any OpenShift estate, using the CNCF TAG App Delivery platforms white paper (platform
+    attributes, capabilities and measures of success) and the SRE practices of the reliability module.
+  concepts:
+    - ent.governance
+    - ent.teaching
+    - change.control
+  prerequisites:
+    - h.slo-incidents
+  objective: |
+    Describe the responsibilities between application, platform, security and infrastructure teams, design
+    self-service paved roads with guardrails and a documented exception path, measure whether the platform helps,
+    and practise the habits that make a platform engineer trusted: evidence, runbooks, teaching and saying "not yet"
+    clearly.
+  flow:
+    - kind: teach
+      id: situation
+      title: Three days to get a project
+      body: |
+        Twenty application teams need projects, pipelines, access and monitoring. Today every request waits
+        in a platform ticket queue for three days. Giving everyone administrator access would remove the
+        queue while removing the controls the organisation relies on.
+
+        A platform team builds shared capabilities with safe defaults and offers them through self-service.
+        Its users are the application teams. You will design a small service they can use independently,
+        decide who owns the exceptions, and choose evidence that shows whether it helps.
+
+        This lesson uses organisational decisions, an ordering task and a written explanation. There is no
+        cluster procedure to run.
+    - kind: teach
+      id: platform-product
+      title: Start with a user need
+      body: |
+        Treat the platform as a product: talk to its users, document its guarantees and limits, and measure
+        whether they adopt it. The CNCF platforms white paper recommends self-service, secure defaults and
+        composable capabilities that reduce what users must remember.
+
+        Start with the **thinnest viable platform**, the smallest useful layer over existing providers.
+        For the project queue, that might be a reviewed onboarding template and a clear request interface.
+        It need not begin with a new portal, a custom scheduler and every possible pipeline feature.
+    - kind: ask
+      id: first-investment
+      prompt: Users wait three days for identical projects. Which first investment tests a useful platform capability?
+      choices:
+        - text: Automate their standard project onboarding
+          why: It targets observed user friction with a small capability whose time and adoption can be measured.
+        - text: Install every available Operator before onboarding
+          why: An installed capability has value only if it solves a user need; this does not address the queue.
+        - text: Require a detailed ticket for each unchanged request
+          why: Repeated manual approval preserves the queue rather than making the safe standard case self-service.
+      answer: 0
+    - kind: teach
+      id: ownership
+      title: Make the handoffs explicit
+      body: |
+        Agree responsibilities before an incident. In a typical arrangement, application teams own code,
+        images, manifests, probes, requests, application alerts and their data. The platform team owns
+        cluster operations and shared services. Security owns policy decisions and vulnerability response
+        expectations. Infrastructure owns hardware or cloud services, network, storage and external load balancers.
+
+        These are an example agreement, not universal job titles. Identity, certificates and backups often
+        cross teams, so name both the decision owner and the operator. The depth table makes this split
+        concrete; an incident coordinator keeps the evidence moving between owners.
+    - kind: ask
+      id: readiness-owner
+      prompt: Evidence shows a shop Route returns 503 because the application's readiness probe checks the wrong path.
+        Who changes the probe?
+      choices:
+        - text: The application team, with platform guidance
+          why: The probe is part of the application's definition; shared-router symptoms do not change that ownership.
+        - text: The infrastructure team, by replacing the router
+          why: The router is correctly avoiding unready endpoints; replacing it does not correct the probe path.
+        - text: The security team, by allowing more privileges
+          why: A failed readiness path is not evidence of a security refusal.
+      answer: 0
+    - kind: teach
+      id: paved-road
+      title: Make the standard case self-service
+      body: |
+        A **paved road** is a supported way to accomplish a common task with safe defaults. Project
+        onboarding can apply [quota and default resource limits](/lesson/o2.quotas-limits), network isolation
+        and access for the team's group. Versioned pipeline tasks and a reviewed deployment path can provide
+        the next capability.
+
+        **Guardrails** are enforced controls such as quota, [SCC](/lesson/f.scc) restrictions and
+        [admission policy](/lesson/n.policy-governance).
+        They remain in force even when a team chooses a different supported tool. A default-deny network
+        policy also needs the intended DNS and application allow rules; a secure project must still be usable.
+
+        Optional, composable capabilities and documented alternatives make unusual needs visible. Mandatory
+        controls can coexist with a choice of workflow.
+    - kind: show
+      id: onboarding-contract
+      origin: example
+      caption: 'CNCF Platforms White Paper and OpenShift 4.21 project creation documentation: illustrative service contract'
+      code: |
+        Request: team group, application name, environment, expected capacity
+        Standard result:
+          - project with reviewed quota and default limits
+          - group access with an agreed role
+          - network isolation plus documented required allow rules
+          - links to deployment and observability guidance
+        Owner: platform onboarding service
+        Exception route: named reviewer, recorded reason and review date
+      notice: |
+        This is a design sketch, not an API manifest. It states what the team receives and who owns the
+        gaps. The implementation may be a project request template or an automated Git onboarding workflow.
+    - kind: ask
+      id: unusual-build
+      prompt: A team needs a build the standard pipeline cannot express. Which response keeps both delivery and controls
+        visible?
+      choices:
+        - text: Offer a reviewed alternative under the controls
+          why: A supported alternative can meet a real need while preserving policy ownership and evidence.
+        - text: Make them use an unsupported external runner
+          why: An invisible workaround leaves the platform unable to understand credentials, supply-chain risks or support
+            needs.
+        - text: Grant cluster-admin so any pipeline will work
+          why: Broad cluster permissions are unrelated to the specific build limitation and remove useful safeguards.
+      answer: 0
+    - kind: teach
+      id: exceptions
+      title: An exception needs an owner and an end
+      body: |
+        Every useful platform meets a legitimate exception: a vendor image needs a fixed UID, or a batch
+        application needs more quota. Record the need and risk, name the decision owner, grant only what
+        solves the need, and set an expiry or review date in Git.
+
+        A fixed UID is not a request for full host access. First assess whether the image can be corrected;
+        otherwise a dedicated [ServiceAccount](/lesson/o2.service-accounts) with a narrowly suitable SCC may
+        be appropriate after review.
+        The security owner decides the policy exception; the platform team implements and verifies it.
+
+        An expiry date is only a promise unless someone reviews it or automation actually removes the grant.
+    - kind: ask
+      id: narrow-exception
+      prompt: A batch team needs 40 more CPUs of quota for a one-month migration. Which exception record is ready for
+        review?
+      choices:
+        - text: Unlimited quota on their project until the team says it is done
+          why: That grants far more than the stated need and has no end condition other than the requester's word.
+        - text: 40 more CPUs in their project, with an approver and an end date
+          why: The reviewer can judge the scope, who is accountable and when the grant ends.
+        - text: A cluster-admin role for the team lead until the migration ends
+          why: A broad role does not state the need, and it carries every right, not only the extra quota.
+      answer: 1
+    - kind: teach
+      id: change-process
+      title: Roll out a platform change as a service change
+      body: |
+        Platform defaults affect many users at once. Propose changes in Git, review them, test in
+        non-production, and announce user-visible effects with dates and migration guidance. Use a staged
+        rollout and a recovery plan. Some actions, including platform upgrades, do not support a general
+        rollback, so test the supported recovery path rather than promising reversibility.
+
+        A new network default needs application tests. An API removal needs an inventory of affected users
+        before the update. When a request cannot ship yet, explain the constraint, the decision owner and
+        the next checkpoint. Clear limits are more useful than silence.
+    - kind: order
+      id: rollout-sequence
+      prompt: Order the rollout of a new default onboarding policy that can change application connectivity.
+      items:
+        - Identify affected users and capture the proposed policy and reason in Git
+        - Review it with owners and test onboarding plus application traffic in non-production
+        - Announce the change date, migration guidance and exception route
+        - Roll out in stages while watching the agreed service measures
+        - Use the recovery plan if needed and record the outcome in the runbook
+      why: Policy review and traffic evidence precede broad impact; communication lets users prepare and measurements
+        guide the rollout.
+    - kind: teach
+      id: platform-measures
+      title: Measure what users can do
+      body: |
+        Closed tickets measure the platform team's workload. They cannot tell you whether users can
+        deliver safely without waiting. Measure time to a usable project, time to a first production change,
+        adoption, retention and user satisfaction alongside delivery outcomes.
+
+        DORA's delivery measures include change lead time, deployment frequency, failed deployment recovery
+        time, change fail rate and deployment rework rate. Use them to improve a service over time in
+        context, rather than rank unrelated teams. The depth table groups them with the CNCF paper's measures.
+    - kind: teach
+      id: platform-slos
+      body: |
+        The platform also needs service-level objectives (**SLOs**) for its own user-visible services:
+        project provisioning, build queue time and shared API or ingress availability, for example.
+        Choose an indicator that users experience and state its target and measurement window.
+
+        In [SLOs and incident response](/lesson/h.slo-incidents), an error budget links reliability
+        evidence to decisions about change. Apply that policy to platform services too. A project that
+        exists in the API but cannot resolve DNS is not a successful onboarding from the user's perspective.
+    - kind: ask
+      id: better-evidence
+      prompt: The team closed twice as many tickets, but onboarding still takes three days. Which evidence would show
+        improvement?
+      choices:
+        - text: A larger count of installed platform Operators
+          why: Installation counts measure supplied features, not whether teams can use them successfully.
+        - text: Shorter usable-project time and satisfied users
+          why: These directly test the original queue problem and the result users receive.
+        - text: More documents without checking their use
+          why: Documentation matters when it helps users succeed; document count alone does not demonstrate that.
+      answer: 1
+    - kind: teach
+      id: trust-through-evidence
+      title: Teach the reasoning during real work
+      body: |
+        During an incident, bring events, diffs and metrics. Show why the evidence points to a particular
+        owner, record changes, and state what remains unknown. In the readiness example, probe failures and
+        the absence of ready endpoints are more helpful than an argument about who owns a 503 response.
+
+        Write the repeatable procedure into a runbook and improve it after use. Explaining why readiness
+        protects traffic lets the application team solve the next probe problem themselves. A successful
+        handoff leaves both a working service and knowledge someone else can reuse.
+    - kind: reflect
+      id: explain-fixed-uid
+      prompt: Explain to a delivery manager how you would handle the fixed-UID request without leaving the team waiting
+        indefinitely.
+      model: |
+        I would confirm the actual image requirement and show the evidence. Full privileged access would
+        create unnecessary risk to the host and other teams, so we would assess an image fix or a narrow
+        ServiceAccount grant with the security owner. I would record the decision, scope and review date,
+        give a delivery checkpoint, and verify the application under the agreed permissions.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can turn a repeated request into a small self-service capability, state who owns each handoff,
+        and make exceptions narrow and reviewable. You can plan staged changes and judge the platform by
+        user outcomes and its own reliability targets.
+
+        This closes the platform path. Next, use its diagnostic and revisit the checks you missed.
+  sections:
+    - id: a-platform-is-a-product
+      title: Example ownership agreement
+      depth: true
+      body: |
+        | Team | Owns |
+        |---|---|
+        | Application | code, images, manifests/Helm values, probes, requests, app alerts, their data |
+        | Platform | clusters, operators, upgrades, project templates, GitOps tooling, shared ingress, platform alerts |
+        | Security | policies (SCC exceptions, ACS policies), audits, identity, vulnerability SLAs |
+        | Infrastructure | hardware/cloud, network, storage backends, load balancers, DNS, PKI |
+
+        Use this as an example to adapt, not a universal division of job titles. Name the decision owner, operator and escalation route for work crossing teams.
+    - id: paved-roads-and-guardrails
+      title: Paved-road implementation reference
+      depth: true
+      body: |
+        | Paved-road element | Built with | Guardrail it carries |
+        |---|---|---|
+        | a new project in minutes | project request template, or a GitOps onboarding pull request | default ResourceQuota and LimitRange, default-deny NetworkPolicy, team group bound to an agreed project role |
+        | a pipeline that works on day one | shared, versioned pipeline tasks | builds once, scans, pushes by digest |
+        | deployment | an Argo CD Application per team | changes reviewed in Git, drift corrected |
+        | observability | user workload monitoring, logging with per-project access | teams see their own data only |
+        | access | groups from the corporate directory | joiners and leavers handled in one place |
+
+        A project request template must include the intended resources; defaults do not appear automatically. Choose the team role by need rather than always granting admin. Network isolation also needs the appropriate DNS and application allow rules. Supported alternative workflows must still obey mandatory controls.
+    - id: measuring-the-platform
+      title: Platform measurement reference
+      depth: true
+      body: |
+        | Family | Examples |
+        |---|---|
+        | user satisfaction and productivity | active users and retention, satisfaction surveys |
+        | organisational efficiency | time from request to fulfilment, time to deploy a new service to production, time for a newcomer's first change |
+        | product delivery | the DORA software delivery measures: deployment frequency, change lead time, change fail rate, failed deployment recovery time (DORA's current guide adds deployment rework rate) |
+
+        Interpret delivery metrics in the context of one service over time; avoid ranking unrelated teams. Pair user measures with platform SLOs such as usable-project latency and build queue time. Document an error-budget policy and the action it triggers.
+    - id: exception-and-change-reference
+      title: Exception and change checklist
+      depth: true
+      body: |
+        | Decision | Evidence to keep |
+        |---|---|
+        | why the standard workflow cannot meet the need | concrete requirement and tested failure |
+        | who accepts the risk | named policy owner and approval record |
+        | what is granted | narrow subject, capability and scope in reviewed configuration |
+        | when it ends | expiry or review date, with an owner or automation to act |
+        | how a default changes | non-production evidence, staged rollout and user communication |
+        | how recovery works | supported recovery procedure, tested before rollout |
+
+        A date in Git does not itself remove an SCC grant. Review and remove expired exceptions.
+        Some changes support rollback, but an OpenShift update is not generally reversible. State
+        the supported recovery path instead of promising that every platform change can be undone.
+  review:
+    - q: 'Who owns probe definitions and resource requests: the application or the platform team?'
+      a: The application team (with platform guidance and defaults).
+    - q: What is a paved road, and what makes it work?
+      a: A supported self-service workflow with safe defaults, useful documentation and composable capabilities. Offer
+        reviewed alternatives while keeping mandatory guardrails enforced.
+    - q: Name the four parts of a workable exception process.
+      a: A request with need and risk, an owner who decides, the narrowest grant, and an expiry or review date recorded
+        in Git.
+    - q: What is the 'thinnest viable platform'?
+      a: The smallest platform layer over what providers already offer, grown only where users need more.
+    - q: Name the DORA software delivery measures.
+      a: Deployment frequency, change lead time, change fail rate, failed deployment recovery time and deployment rework
+        rate; interpret them in context over time.
+    - q: Why does a platform need its own SLOs?
+      a: So that slow builds or failed rollouts are judged against an agreed target instead of argued about.
+  labs: []
+  limits: |
+    This is organisational practice: there is nothing to run on a cluster, single-node or not. The guardrails a
+    paved road is built from (quotas, RBAC through groups, network policies) are practised as a project administrator
+    in the quotas, groups and NetworkPolicy labs and in the challenges. The cluster-wide pieces need cluster-admin,
+    which the learner identity does not have; they are shown done by an administrator and rolled back in recordings:
+    the project request template in Project templates and self-provisioning (n.project-templates), and an admission
+    policy in Policy as code (n.policy-governance).
+  references:
+    - title: 'CNCF TAG App Delivery: Platforms white paper'
+      url: https://tag-app-delivery.cncf.io/whitepapers/platforms/
+    - title: 'DORA: Software delivery performance metrics'
+      url: https://dora.dev/guides/dora-metrics-four-keys/
+    - title: 'Google SRE workbook: Example error budget policy'
+      url: https://sre.google/workbook/error-budget-policy/
+    - title: 'OpenShift 4.21: Configuring project creation (project request template)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects
+    - title: 'OpenShift 4.21: Updating clusters and supported recovery considerations'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/updating_clusters/index
+
+- id: p.ldap-oidc
+  title: 'Corporate identity: LDAP and OIDC'
+  subtitle: Identity providers, group synchronisation and the joiner, mover, leaver lifecycle
+  module: p5-identity
+  mode: ENTERPRISE_ARCHITECTURE
+  minutes: 35
+  level: 3
+  supports: 'OpenShift 4.21 built-in OAuth server (`oauth.config.openshift.io` named `cluster`) with the LDAP and OpenID
+    Connect identity providers; LDAP group synchronisation with `oc adm groups sync` and an LDAPSyncConfig file (RFC
+    2307, Active Directory, augmented Active Directory); direct authentication with an external OIDC provider (`authentication.config.openshift.io`
+    named `cluster`, `type: OIDC`), generally available since 4.20.5 (Technology Preview in 4.19 and earlier 4.20.z releases).
+    OpenShift Local has no corporate directory or OIDC provider, and no LDAP or OIDC login was configured for the course:
+    this lesson is a reading with documentation examples. Group synchronisation against a test directory is recorded in
+    the next lesson, and adding an identity provider to OAuth/cluster in the HTPasswd lesson.'
+  concepts:
+    - ocp.auth
+    - ocp.users-identities
+    - sec.rbac
+  prerequisites:
+    - n.htpasswd-users
+  objective: |
+    Design how a cluster trusts the corporate directory: configure an LDAP or OpenID Connect identity provider, choose
+    a mapping method, keep groups in step with the directory, grant access through groups, and diagnose the failures
+    that lock people out or leave leavers in.
+  flow:
+    - kind: teach
+      id: situation
+      title: The directory changed; did cluster access change?
+      body: |
+        A developer moves out of the payments team on Friday. IT changes the corporate directory, the
+        company's central list of people and groups, but on Monday the developer can still deploy to
+        payments. Login works, yet authorisation has not followed the organisational change.
+
+        You will separate identity verification, group membership and role grants; configure the trust
+        relationship on paper; and trace when joiner, mover and leaver changes reach the API.
+
+        OpenShift Local has no corporate directory or OIDC provider, so the LDAP and OIDC logins here are
+        documented examples and command-writing tasks. Two parts were done for real elsewhere in the course:
+        [Add an HTPasswd identity provider](/lesson/n.htpasswd-idp) added a provider to `OAuth/cluster` and
+        rolled it back, and the next lesson synchronises groups from a small test directory. Changing login on
+        a cluster you depend on needs administrator access and a disposable cluster.
+    - kind: teach
+      id: identity-access-split
+      title: Three decisions belong to different systems
+      body: |
+        In [Manage local users](/lesson/n.htpasswd-users), an identity provider verifies who a
+        person is. Corporate LDAP (the Lightweight Directory Access Protocol, spoken by directory servers
+        such as Active Directory) or OpenID Connect (**OIDC**, a single sign-on protocol) replaces the local
+        password list with the company's directory or login service. Authentication still does not grant
+        project access.
+
+        The directory owns group membership. The platform owns RoleBindings and ClusterRoleBindings that
+        grant groups their permissions. Prefer those group grants to individual bindings so routine moves
+        change membership rather than many independent grants. Exceptional user grants must still be tracked.
+    - kind: teach
+      id: two-auth-paths
+      body: |
+        With the default built-in OAuth server, configure identity providers in `OAuth` named `cluster`: the
+        same `identityProviders` list that the HTPasswd provider joined. That server accepts a provider's login, maps an Identity to a User, and issues an OpenShift OAuth
+        token. Group objects supply membership for RBAC.
+
+        **Direct OIDC authentication** instead configures `Authentication` named `cluster` with `type: OIDC`.
+        The API validates the external provider's tokens. It removes the OAuth services and User, Identity
+        and Group APIs. In 4.21 it supports one provider. You must choose the architecture before designing
+        group automation; an LDAP sync job needs Group objects to write.
+    - kind: ask
+      id: direct-migration
+      prompt: A cluster uses LDAP group-sync jobs. Before switching to direct OIDC, what dependency must the team redesign?
+      choices:
+        - text: Group-object sync and claim-based RBAC names
+          why: Direct OIDC removes Group objects, so membership must come from claims matching the bound group names.
+        - text: Only the password in the LDAP bind Secret
+          why: A new bind password cannot preserve an API removed by the new authentication architecture.
+        - text: Only the old OAuth token's expiry setting
+          why: Direct OIDC uses external tokens and removes the built-in OAuth token path.
+      answer: 0
+    - kind: teach
+      id: ldap-search-bind
+      title: LDAP searches for exactly one person
+      body: |
+        The LDAP provider searches first, using the configured base distinguished name (**DN**, the unique
+        path of a directory entry), attribute and filter. If the directory requires it, a service account's
+        bind DN and password authorise that search; to bind is to authenticate to the directory. The search
+        must return exactly one entry. Only then does the provider bind as that entry, using the person's
+        password.
+
+        An LDAP URL describes host, base DN, attribute, scope and filter. With `insecure: false`, an
+        `ldaps://` URL uses TLS directly and `ldap://` uses StartTLS. Keep certificate verification enabled.
+        Insecure LDAP exposes passwords; it is not a repair for a missing trusted CA.
+    - kind: show
+      id: ldap-provider-example
+      origin: example
+      caption: 'OpenShift 4.21 identity provider documentation: illustrative LDAP entry in the existing OAuth provider
+        list'
+      code: |
+        # Entry under spec.identityProviders of OAuth/cluster
+        - name: corp-ldap
+          mappingMethod: claim
+          type: LDAP
+          ldap:
+            url: "ldaps://ldap.example.com/ou=people,dc=example,dc=com?uid?sub?(objectClass=person)"
+            bindDN: "cn=ocp-reader,ou=services,dc=example,dc=com"
+            bindPassword: {name: ldap-bind}
+            ca: {name: ldap-ca}
+            insecure: false
+            attributes:
+              id: [dn]
+              preferredUsername: [uid]
+              name: [cn]
+              email: [mail]
+      notice: |
+        ldap-bind is a Secret in openshift-config with key bindPassword. ldap-ca is a ConfigMap there with
+        key ca.crt. The sample uses the entry DN as its identity identifier; moving that entry can change
+        the identifier, so choose attributes with the directory owner. Add to the live provider list rather
+        than replacing other login paths. Watch the authentication Operator after a real change.
+    - kind: ask
+      id: ambiguous-person
+      prompt: Two different people have uid=bob, in ou=people and in ou=contractors. The provider searches
+        dc=example,dc=com on uid, and neither can log in. Which change lets both in?
+      choices:
+        - text: Set mappingMethod to add so that duplicate names merge
+          why: Mapping happens after a successful bind. These logins fail earlier, at the search, because two
+            entries match.
+        - text: Search on a unique attribute, such as mail
+          why: A login name that matches one entry gives the provider a single DN to bind as. Check with the
+            directory owner that the attribute really is unique.
+        - text: Set insecure to true so the search skips TLS checks
+          why: insecure controls TLS only. It does not change how many entries the search returns, and it
+            exposes passwords.
+      answer: 1
+    - kind: teach
+      id: oidc-provider
+      title: OIDC supplies a stable subject and suggested names
+      body: |
+        With the built-in OAuth server, OIDC is another provider entry. It needs an HTTPS issuer supporting
+        OIDC discovery, a registered client, a client-secret Secret in `openshift-config` with key
+        `clientSecret`, and any required trusted CA under `ca.crt` in a ConfigMap there.
+
+        Register the OAuth callback URL for this cluster and provider. The provider's `sub` claim identifies
+        the person: Identity `corp-sso:<sub>`. A preferred username only proposes the OpenShift User name;
+        it is not the OIDC identity key. Browser login or the OAuth token-request page supports providers
+        that cannot handle a command-line password challenge.
+    - kind: show
+      id: oidc-provider-example
+      origin: example
+      caption: 'OpenShift 4.21 OpenID Connect provider documentation: entry for the built-in OAuth server'
+      code: |
+        - name: corp-sso
+          mappingMethod: claim
+          type: OpenID
+          openID:
+            issuer: https://sso.example.com/realms/corp
+            clientID: openshift
+            clientSecret: {name: corp-sso-client}
+            ca: {name: corp-sso-ca}
+            extraScopes: [email, profile]
+            claims:
+              preferredUsername: [preferred_username, email]
+              name: [name]
+              email: [email]
+              groups: [groups]
+        # Registered callback:
+        # https://oauth-openshift.apps.<cluster>.<domain>/oauth2callback/corp-sso
+      notice: |
+        This is an entry in the existing identityProviders list, not a complete replacement OAuth object.
+        The issuer and callback must match the real provider registration. Group claims are read at login;
+        they are not a continuous directory feed.
+    - kind: teach
+      id: identity-mapping
+      title: A second provider must not claim the wrong account
+      body: |
+        `mappingMethod` handles an identity without an existing mapping. With **claim**, the default,
+        an available preferred name can become a new User, but a name already mapped to another identity
+        causes failure. **add** can attach the new identity to an existing User. **lookup** requires the
+        User, Identity and mapping to have been provisioned already.
+
+        During a controlled provider migration, add can preserve existing User names and grants. It also
+        trusts the new provider to assert those names: a provider that lets an attacker register alice
+        could give them the existing alice account. Use only trusted naming authorities and a reviewed
+        migration. The documented 4.21 methods are claim, add and lookup.
+    - kind: ask
+      id: collision-during-migration
+      prompt: 'User alice already maps to HTPasswd. A new LDAP identity proposes alice with mappingMethod: claim. What
+        happens?'
+      choices:
+        - text: It joins alice and inherits her roles
+          why: That would be add behaviour; claim does not automatically attach another identity to an already mapped
+            User.
+        - text: The new identity's login fails
+          why: The preferred name is already mapped; the migration needs a deliberate mapping decision.
+        - text: It invents alice2 and copies the roles
+          why: The documented claim method neither invents a free name nor copies grants to it.
+      answer: 1
+    - kind: teach
+      id: sync-separate-from-login
+      title: LDAP login does not fill groups
+      body: |
+        LDAP authentication and group synchronisation are separate. An administrator runs the groups sync
+        subcommand with an **LDAPSyncConfig** describing the connection, searches and membership attributes.
+        It writes OpenShift Group objects using member names.
+
+        Those names must match the actual OpenShift User names. If login produces uid names and sync
+        produces mail addresses, the same people appear as different subjects. Mapping methods can preserve
+        an existing name, so verify real Users as well as the proposed preferredUsername.
+
+        RFC 2307 configurations read membership from groups; Active Directory reads memberOf on users;
+        augmented Active Directory also queries groups for names. The depth reference keeps a complete
+        example and the schema distinctions.
+    - kind: show
+      id: preview-sync
+      origin: example
+      caption: 'OpenShift 4.21 Syncing LDAP groups documentation: preview and confirmation examples'
+      code: |
+        $ oc adm groups sync --sync-config=sync.yaml
+        $ oc adm groups sync --sync-config=sync.yaml --confirm
+      notice: |
+        With an existing valid sync.yaml, the first command previews the Group objects. The second writes
+        them. No output is fabricated here. A preview does not create or update groups, even if its proposed
+        objects look correct.
+    - kind: try
+      id: confirm-different-sync
+      body: In a described administrator workspace, reviewed payments-sync.yaml is in the current directory. Type the
+        command that writes its LDAP group sync.
+      accept:
+        - oc adm groups sync --sync-config=payments-sync.yaml --confirm
+        - oc adm groups sync --confirm --sync-config=payments-sync.yaml
+        - oc adm groups sync --sync-config payments-sync.yaml --confirm
+        - oc adm groups sync --confirm --sync-config payments-sync.yaml
+        - oc adm groups sync --sync-config=./payments-sync.yaml --confirm
+        - oc adm groups sync --sync-config payments-sync.yaml --confirm=true
+        - oc adm groups sync --sync-config=payments-sync.yaml --confirm=true
+        - oc adm groups sync --confirm=true --sync-config=payments-sync.yaml
+        - oc adm groups sync --sync-config ./payments-sync.yaml --confirm
+        - oc adm groups sync --confirm=true --sync-config payments-sync.yaml
+        - oc adm groups sync --confirm --sync-config=./payments-sync.yaml
+        - oc adm groups sync --sync-config=./payments-sync.yaml --confirm=true
+        - oc adm groups sync --confirm=true --sync-config=./payments-sync.yaml
+        - oc adm groups sync --confirm --sync-config ./payments-sync.yaml
+        - oc adm groups sync --sync-config ./payments-sync.yaml --confirm=true
+        - oc adm groups sync --confirm=true --sync-config ./payments-sync.yaml
+      hints:
+        - match: '(?:=| )(?:(?:\./)?sync\.yaml)(?: |$)'
+          say: Use the reviewed payments-sync.yaml file for this task, rather than the example file or another team's
+            configuration.
+        - match: --dry-run|--confirm=false
+          say: You have already reviewed the preview. The explicit confirm flag is what permits the sync to write Group
+            objects.
+        - match: ^oc adm groups sync
+          say: Provide payments-sync.yaml through sync-config, and add confirm so the command writes rather than previews.
+      hint: Use the groups sync subcommand of oc adm, the sync-config file payments-sync.yaml and confirm.
+      then: On the described cluster, the command would create or update the selected Groups and their member lists.
+        The task here checks your text only; it has no directory or cluster to modify.
+    - kind: ask
+      id: names-do-not-match
+      prompt: Login creates User bob. Sync writes bob@example.com into team-payments. Why does the group's edit grant
+        not reach Bob?
+      choices:
+        - text: Every group grant requires a new login
+          why: With built-in OAuth, current Group objects supply membership; another login does not repair a different
+            member name.
+        - text: The member and User names differ
+          why: RBAC membership matches names, so bob@example.com does not identify User bob.
+        - text: The edit role accepts only individual users
+          why: A RoleBinding can grant edit to a group; the subject-name mismatch is the problem.
+      answer: 1
+      evidence: |
+        kind: Group
+        metadata: {name: team-payments}
+        users: [bob@example.com]
+        ---
+        kind: User
+        metadata: {name: bob}
+    - kind: teach
+      id: operate-sync
+      title: A successful sync is a recurring responsibility
+      body: |
+        Sync replaces selected member lists; manual edits to synced groups can disappear at the next run.
+        Its LDAP UID and sync-time annotations identify origin and freshness. A deleted directory group
+        needs a separate prune operation; sync alone does not remove its OpenShift Group.
+
+        A scheduled CronJob needs a protected bind credential, trusted CA, config mounts and narrowly
+        scoped group-write permissions. `concurrencyPolicy: Forbid` avoids overlapping Jobs. Alert on failures
+        and stale sync times. An allow-list bounds which directory groups are imported; missing or out-of-scope
+        members require deliberate error handling. Nested Active Directory groups need the documented recursive
+        membership query and explicit group selection.
+    - kind: teach
+      id: oidc-group-timing
+      title: When does changed membership reach the API?
+      body: |
+        With built-in OAuth and OIDC groups claims, login updates Group objects. The server adds the person
+        to claimed groups and removes previously synced memberships for that provider. It can delete its
+        generated empty groups. No login means no refresh; it does not poll the directory. Red Hat does
+        not support Microsoft Entra ID with this built-in path when group names must be synchronised.
+
+        Built-in OAuth resolves Group objects during request authentication, so a completed LDAP sync can
+        change permissions for existing tokens, subject to authentication caching. Direct OIDC instead uses
+        the presented token's group claims, including any configured prefix. Changing the directory does
+        not rewrite a token already issued; the provider's token lifetime matters.
+    - kind: ask
+      id: leaver-tokens
+      prompt: A leaver's OIDC account is disabled. Built-in OAuth last refreshed their groups on Friday. What still needs
+        attention?
+      choices:
+        - text: Existing tokens and stale cluster membership
+          why: Disabling the provider prevents new logins but does not itself revoke OpenShift tokens or refresh old
+            claim-based groups.
+        - text: Nothing, since every request checks the directory
+          why: An OpenShift OAuth token is not a fresh directory-password check on each request.
+        - text: Only the provider's password complexity setting
+          why: Password policy cannot remove existing cluster memberships, direct grants or already issued tokens.
+      answer: 0
+    - kind: teach
+      id: offboarding
+      title: Close the gaps for movers and leavers
+      body: |
+        For LDAP sync, remove a leaver from directory groups or use tested queries that exclude disabled
+        accounts, then verify the successful sync removes membership. Disabling an account alone may leave
+        it in every group. For built-in OIDC claim groups, a leaver may never log in again to refresh them.
+
+        With built-in OAuth, delete the leaver's User to invalidate its OAuth access and remove the Identity
+        mappings as part of cleanup. Review individual bindings and stale group grants: bindings outlive
+        their subjects and can apply again when a name is reused. Default OAuth access-token lifetime is
+        24 hours, so waiting for expiry may exceed your offboarding target.
+
+        With direct OIDC there are no User or Group objects to delete. Plan for the external token lifetime
+        and supported provider revocation controls, and verify access is denied within the required interval.
+    - kind: ask
+      id: preview-no-change
+      prompt: The sync preview showed correct Groups, but the API's membership remains old. Which missing step best explains
+        it?
+      choices:
+        - text: Running the reviewed sync with confirmation
+          why: Without confirm, the sync only displays proposed objects and does not update the API.
+        - text: Waiting for each member's next password change
+          why: LDAP sync writes Groups independently of password changes or individual logins.
+        - text: Adding more RoleBindings to the old names
+          why: Additional grants do not apply the proposed membership update and can leave stale access.
+      answer: 0
+    - kind: teach
+      id: emergency-access-and-migration
+      title: Keep an independent way in
+      body: |
+        Keep a separately secured administrator kubeconfig that does not depend on the provider being
+        repaired, and audit its use. Before changing provider configuration, test that emergency path and
+        preserve the live configuration.
+
+        Direct OIDC is generally available from 4.20.5, but switching architecture removes OAuth and user
+        APIs and does not guarantee preservation of existing authentication configuration. Back up users,
+        groups, OAuth clients and provider settings first. Align claim prefixes with RBAC subjects, retire
+        Group-object automation, and plan for an API-server revision rollout that can take twenty minutes
+        or more. The documented CLI login uses the oc-oidc exec plugin and a browser-based provider flow.
+    - kind: order
+      id: diagnose-login
+      prompt: Order a diagnosis when everyone using one LDAP provider suddenly fails to log in.
+      items:
+        - Use the tested independent administrator access path
+        - Inspect authentication Operator conditions and OAuth server logs
+        - Check CA trust, bind credentials and the configured directory search
+        - Repair the identified cause while preserving other providers
+        - Verify login and a representative group's effective permissions
+      why: An independent login lets you inspect the broken path; successful authentication and correct authorisation
+        need separate verification.
+    - kind: reflect
+      id: explain-offboarding
+      prompt: Explain why disabling a directory account is only the first step in built-in OAuth offboarding.
+      model: |
+        It prevents new directory logins, but existing OpenShift OAuth tokens can remain valid and directory
+        groups may still contain the person. I remove their memberships, verify sync where used, delete the
+        User and Identity mappings, and review direct bindings and stale groups. I then test that the
+        former account cannot use its previous access.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can trace LDAP search and bind, distinguish an identity from a proposed User name, and assess
+        claim, add and lookup before a migration. You can separate preview from confirmed group sync and
+        explain why each authentication architecture has different membership and offboarding delays.
+
+        Next, [Synchronise groups from LDAP](/lesson/p.ldap-group-sync) writes a directory's groups into the cluster. Later, [GitOps with Argo CD](/lesson/gx.argocd) keeps cluster and application configuration in Git and lets a
+        program apply it. Practise identity changes only on a disposable cluster with a test directory and
+        independent emergency access.
+        The depth sections keep configuration, lifecycle and diagnosis references.
+  sections:
+    - id: two-architectures
+      title: Authentication architecture reference
+      depth: true
+      body: |
+        | | Built-in OAuth server (default) | Direct authentication with an external OIDC provider |
+        |---|---|---|
+        | Who issues tokens | the cluster's OAuth server, after the identity provider accepted the person | the external OIDC provider; the Kubernetes API server validates its tokens |
+        | Configured in | `OAuth` named `cluster`, `spec.identityProviders` (a list: several providers at once) | `Authentication` named `cluster`, `spec.type: OIDC`, `spec.oidcProviders` (one provider only in 4.21) |
+        | Provider types | LDAP, OpenID Connect, HTPasswd, GitHub, GitLab, Google, Keystone, basic authentication, request header | OpenID Connect only |
+        | User, Identity, Group objects | yes (`user.openshift.io`) | **removed**, with the OAuth APIs, the OAuth server and its clients |
+        | Groups come from | Group objects: LDAP sync, the OIDC `groups` claim at login, or manual | the token's groups claim, with an optional prefix |
+
+        Direct OIDC is generally available from 4.20.5; 4.19 and earlier 4.20.z releases treated it as Technology Preview. Back up existing authentication resources and test independent administrator access before switching. Only one direct provider is supported in 4.21. Built-in OAuth permits a list of providers.
+    - id: mapping-methods
+      title: Identity mapping methods
+      depth: true
+      body: |
+        | Method | New identity, preferred name free | Preferred name already taken by another identity's User | Use it when |
+        |---|---|---|---|
+        | `claim` (default) | creates User and Identity | **login fails** | one provider per person |
+        | `add` | creates User and Identity | maps the new Identity to the **existing** User | several providers, or a migration, must land on the same User |
+        | `lookup` | **login fails** until an administrator creates the User, the Identity and the mapping | uses whatever mapping exists | an allow-list: only provisioned people may log in |
+
+        These rules apply to a new unmapped identity. Existing explicit mappings take precedence. The documented 4.21 methods are claim, add and lookup. Do not design around the legacy generate behaviour. Provision User, Identity and mapping for lookup; use add only across naming authorities you trust.
+    - id: ldap-group-sync
+      title: LDAP membership schema reference
+      depth: true
+      body: |
+        | Schema | Membership stored on | Queries you write |
+        |---|---|---|
+        | `rfc2307` | the group (`member`) | groups and users |
+        | `activeDirectory` | the user (`memberOf`) | users only |
+        | `augmentedActiveDirectory` | the user (`memberOf`), with group entries for names | users and groups |
+    - id: ldap-sync-config-reference
+      title: Example LDAPSyncConfig and operational options
+      depth: true
+      body: |
+        The following is an illustrative file adapted from the OpenShift 4.21 LDAP group-sync
+        documentation. It is configuration, not command output. The file and CA paths are on the
+        machine or container running sync; these are not OAuth Secret or ConfigMap references.
+
+        ```yaml
+        kind: LDAPSyncConfig
+        apiVersion: v1
+        url: ldaps://ldap.example.com:636
+        bindDN: cn=ocp-reader,ou=services,dc=example,dc=com
+        bindPassword: {file: /etc/secrets/bindPassword}
+        ca: /etc/ldap-ca/ca.crt
+        rfc2307:
+          groupsQuery: {baseDN: "ou=groups,dc=example,dc=com", scope: sub, derefAliases: never, pageSize: 0}
+          groupUIDAttribute: dn
+          groupNameAttributes: [cn]
+          groupMembershipAttributes: [member]
+          usersQuery: {baseDN: "ou=people,dc=example,dc=com", scope: sub, derefAliases: never, pageSize: 0}
+          userUIDAttribute: dn
+          userNameAttributes: [uid]
+        ```
+
+        | Setting or operation | Meaning |
+        |---|---|
+        | userNameAttributes | names written to Group membership; must match actual User names |
+        | whitelist / blacklist files | allow or deny selected group identifiers, one per line |
+        | type=openshift | refresh groups already imported by an earlier sync |
+        | confirm | permit writes after reviewing the default preview |
+        | openshift.io/ldap.uid and openshift.io/ldap.sync-time | directory origin and last successful sync time |
+        | tolerateMemberNotFoundErrors / tolerateMemberOutOfScopeErrors | deliberate handling for missing or out-of-scope members |
+        | nested AD membership | use explicit group selection and the documented LDAP_MATCHING_RULE_IN_CHAIN query |
+        | separate prune operation | remove previously synced Groups whose directory group disappeared |
+
+        The scheduled CronJob needs a ServiceAccount with the documented get, list, create and
+        update group permissions, protected credentials and CA mounts. Avoid overlapping jobs
+        with concurrencyPolicy: Forbid; monitor job results and sync freshness. Review prune as
+        carefully as sync. Deleting a Group does not delete bindings naming it.
+    - id: joiners-movers-leavers
+      title: Membership lifecycle reference
+      depth: true
+      body: |
+        | Event | LDAP login + group sync | OIDC with `groups` claim (built-in OAuth) | Direct OIDC |
+        |---|---|---|---|
+        | joiner | added to the directory group; the next sync adds the name, even before the first login | the group is filled at first login | rights at first login |
+        | mover | next sync moves the name between groups | at next login | at next token |
+        | leaver | account disabled: no new login; the name stays in synced groups until they remove it from the directory groups (or the sync queries exclude disabled accounts) and the next sync runs | no new login; group membership stays until a login that will never come | no new token; existing token valid until it expires |
+
+        Built-in OAuth tokens can remain valid after the directory disables an account. Remove memberships, delete the User and Identity mappings, and review direct bindings. Current Group objects affect built-in OAuth authorisation after authentication cache propagation. With direct OIDC, issued claims persist until token replacement or expiry under the provider and API authentication design.
+    - id: what-goes-wrong
+      title: Identity diagnosis reference
+      depth: true
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | nobody from the provider can log in; login page shows an error | conditions of `oc get clusteroperators authentication`; `oc logs` of the `oauth-openshift` pods in `openshift-authentication` mention certificate verification | the CA ConfigMap is missing, in the wrong namespace, or not under key `ca.crt`; the directory's certificate was renewed by a new CA | put the issuing CA in `ca.crt` in `openshift-config`; never "fix" it with `insecure: true` |
+        | nobody can log in, the directory's own tools work | the OAuth server logs a bind failure during the search phase | wrong `bindDN`, expired service-account password, Secret key not `bindPassword` | correct the Secret and DN; rotate the service password with a plan |
+        | one person cannot log in | the user search returns two entries, or none (filter, base DN, scope) | duplicate `uid` in two subtrees; account outside the base DN | narrow the base DN or filter, or fix the directory |
+        | login works, rights missing | `oc get groups` shows members as e-mail addresses while `oc get users` shows short names; effective permissions lack the intended project grant | `userNameAttributes` and `preferredUsername` disagree | align them, re-run the sync |
+        | Users named `jsmith2`, or "already mapped" errors | `oc get identities` shows two identities for one person | a claim collision, a legacy mapping or separately provisioned identities | inspect the mappings; use add only for a reviewed migration between trusted providers |
+        | a leaver still has access | Group `openshift.io/ldap.sync-time` is days old; the CronJob's last Jobs failed (`oc get jobs`, `oc logs`) | sync not running; the account was disabled but is still a member of the directory group; or OIDC groups waiting for a login | fix the job; remove the directory membership; delete the leaver's User and Identity |
+    - id: ldap-connection-reference
+      title: LDAP connection and attribute reference
+      depth: true
+      body: |
+        | Field | Interpretation |
+        |---|---|
+        | URL | host and port, base DN, login attribute, search scope and filter |
+        | omitted URL attribute / scope / filter | uid / sub / (objectClass=*) |
+        | search filter | combines the configured filter with the login attribute and supplied name |
+        | bindDN and bindPassword | paired service credentials when authenticated search is needed |
+        | insecure: false with ldaps:// | direct TLS with server certificate verification |
+        | insecure: false with ldap:// | StartTLS with server certificate verification |
+        | insecure: true | no TLS; cannot be combined with ldaps:// |
+        | OAuth bind password reference | Secret in openshift-config, key bindPassword |
+        | OAuth trusted CA reference | ConfigMap in openshift-config, key ca.crt |
+        | attribute lists | first non-empty value is used; a missing identity ID denies login |
+
+        Choose a stable identity identifier with the directory owner. A DN identifies an entry,
+        but a directory move or rename can change it. For built-in OIDC, the identity is based on
+        sub, while preferredUsername only suggests the User name. The clientSecret key and
+        registered callback must match the provider's client configuration.
+
+        Keep an independently authenticated emergency administrator kubeconfig under controlled
+        access and audit its use. Certificate trust errors need a correct CA chain, not insecure LDAP.
+  review:
+    - q: In which namespace, and under which keys, does the LDAP identity provider read its bind password and CA?
+      a: 'openshift-config: a Secret with key bindPassword and a ConfigMap with key ca.crt.'
+    - q: What does the LDAP provider do between receiving a login and accepting it?
+      a: Searches the base DN with the URL's attribute and filter, requires exactly one entry, then binds as that entry's
+        DN with the typed password.
+    - q: Compare the claim, add and lookup mapping methods.
+      a: For a new unmapped identity, claim creates a User when its preferred name is free and refuses a collision with
+        an already mapped User. add can attach it to that User; lookup requires a pre-provisioned mapping. Existing mappings
+        are used rather than recreated.
+    - q: What does oc adm groups sync do without --confirm?
+      a: 'A dry run: it prints the Group objects it would write and changes nothing.'
+    - q: When are groups from an OIDC groups claim updated with the built-in OAuth server?
+      a: Only when the person logs in; nothing changes between logins.
+    - q: What does direct authentication with an external OIDC provider remove?
+      a: The OAuth server and OAuth API server, the user.openshift.io APIs (User, Identity, Group), the OAuth APIs and
+        OAuth client configuration; groups then come from token claims.
+    - q: Does disabling the directory account revoke existing OpenShift OAuth tokens?
+      a: No. Complete offboarding by removing memberships, deleting the User and Identity mappings, reviewing bindings
+        and verifying denial. Direct OIDC needs its own external-token lifetime and revocation design.
+  labs: []
+  limits: |
+    This lesson executes no authentication changes, group sync or prune. They require a real directory or OIDC provider, cluster-wide permissions and a protected independent administrator access path. Changing OAuth can restart login services; direct OIDC rolls API servers and removes OAuth and user APIs. Practise only on a disposable cluster with a test provider. The command tasks compare text only.
+  enterprise: |
+    Production teams keep group grants in reviewed configuration, monitor sync freshness and failed Jobs, and verify offboarding rather than assuming a directory change revoked every token. Protect independent emergency access and audit its use.
+  references:
+    - title: 'OpenShift 4.21: Understanding identity provider configuration (mapping methods)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-identity-provider
+    - title: 'OpenShift 4.21: Configuring identity providers (LDAP and OpenID Connect)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/configuring-identity-providers
+    - title: 'OpenShift 4.21: Syncing LDAP groups'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/ldap-syncing
+    - title: 'OpenShift 4.21: Enabling direct authentication with an external OIDC identity provider'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/external-auth
+    - title: 'OpenShift 4.21: Configuring the internal OAuth server (token lifetime)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/configuring-internal-oauth
+    - title: 'OpenShift 4.21 release notes: Technology Preview status (authentication)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/release_notes/ocp-4-21-release-notes#ocp-release-notes-auth-tech-preview_release-notes
+    - title: 'OpenShift API: OAuth configuration types (mapping methods, OpenID claims)'
+      url: https://github.com/openshift/api/blob/release-4.21/config/v1/types_oauth.go
+    - title: 'Kubernetes: Authenticating with OpenID Connect tokens'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens
+    - title: 'RFC 4516: The LDAP URL format (replaces RFC 2255)'
+      url: https://www.rfc-editor.org/rfc/rfc4516
+    - title: OpenShift 4.20 release notes (direct authentication GA in 4.20.5)
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/release_notes/index
+    - title: 'OpenShift 4.21: Authentication and authorization (OpenID Connect provider support notes)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/authentication_and_authorization/index
+    - title: 'OpenShift 4.21 upstream token authenticator: User and Group lookup'
+      url: https://github.com/openshift/oauth-apiserver/blob/release-4.21/pkg/tokenvalidation/tokenauthenticator.go
+    - title: 'OpenShift 4.21 upstream token validator: User UID must match token'
+      url: https://github.com/openshift/oauth-apiserver/blob/release-4.21/pkg/tokenvalidation/uidvalidator.go

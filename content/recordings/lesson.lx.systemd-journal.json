@@ -1,0 +1,113 @@
+{
+ "lab": "lesson.lx.systemd-journal",
+ "kind": "lesson",
+ "lab_hash": "a7ac37a36cb31e34",
+ "recorded_at": "2026-10-15T17:16:48+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "systemctl --no-pager is-active crond sshd; systemctl --no-pager is-enabled crond",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "active\nactive\nenabled\n",
+   "stderr": "",
+   "combined": "active\nactive\nenabled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemctl --no-pager status crond -n 0",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "● crond.service - Command Scheduler\n     Loaded: loaded (/usr/lib/systemd/system/crond.service; enabled; preset: enabled)\n     Active: active (running) since Tue 2026-10-13 12:08:04 +00; 2 days ago\n   Main PID: 1214 (crond)\n      Tasks: 1 (limit: 99449)\n     Memory: 296.0K (peak: 9.0M)\n        CPU: 2.321s\n     CGroup: /system.slice/crond.service\n             └─1214 /usr/sbin/crond -n\n",
+   "stderr": "",
+   "combined": "● crond.service - Command Scheduler\n     Loaded: loaded (/usr/lib/systemd/system/crond.service; enabled; preset: enabled)\n     Active: active (running) since Tue 2026-10-13 12:08:04 +00; 2 days ago\n   Main PID: 1214 (crond)\n      Tasks: 1 (limit: 99449)\n     Memory: 296.0K (peak: 9.0M)\n        CPU: 2.321s\n     CGroup: /system.slice/crond.service\n             └─1214 /usr/sbin/crond -n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemctl --no-pager cat crond",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "# /usr/lib/systemd/system/crond.service\n[Unit]\nDescription=Command Scheduler\nAfter=auditd.service nss-user-lookup.target systemd-user-sessions.service time-sync.target ypbind.service autofs.service\n\n[Service]\nEnvironmentFile=/etc/sysconfig/crond\nExecStart=/usr/sbin/crond -n $CRONDARGS\nExecReload=/bin/kill -HUP $MAINPID\nKillMode=process\nRestart=on-failure\nRestartSec=30s\n\n[Install]\nWantedBy=multi-user.target\n\n",
+   "stderr": "",
+   "combined": "# /usr/lib/systemd/system/crond.service\n[Unit]\nDescription=Command Scheduler\nAfter=auditd.service nss-user-lookup.target systemd-user-sessions.service time-sync.target ypbind.service autofs.service\n\n[Service]\nEnvironmentFile=/etc/sysconfig/crond\nExecStart=/usr/sbin/crond -n $CRONDARGS\nExecReload=/bin/kill -HUP $MAINPID\nKillMode=process\nRestart=on-failure\nRestartSec=30s\n\n[Install]\nWantedBy=multi-user.target\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemd-run --user --unit=academy-demo --quiet sleep 300 && systemctl --user --no-pager status academy-demo -n 0 | head -n 4",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "● academy-demo.service - /usr/bin/sleep 300\n     Loaded: loaded (/run/user/1000/systemd/transient/academy-demo.service; transient)\n  Transient: yes\n     Active: active (running) since Thu 2026-10-15 17:16:40 +00; 21ms ago\n",
+   "stderr": "",
+   "combined": "● academy-demo.service - /usr/bin/sleep 300\n     Loaded: loaded (/run/user/1000/systemd/transient/academy-demo.service; transient)\n  Transient: yes\n     Active: active (running) since Thu 2026-10-15 17:16:40 +00; 21ms ago\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemctl --user stop academy-demo; systemctl --user --no-pager is-active academy-demo",
+   "as": "host",
+   "expect": "any",
+   "run": null,
+   "code": 3,
+   "stdout": "inactive\n",
+   "stderr": "",
+   "combined": "inactive\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemd-run --user --unit=academy-crash --quiet -p Restart=on-failure -p RestartSec=1 sh -c 'echo \"starting\"; echo \"config error: missing port\" >&2; exit 1'; sleep 8; systemctl --user --no-pager is-active academy-crash",
+   "as": "host",
+   "expect": "any",
+   "run": null,
+   "code": 3,
+   "stdout": "failed\n",
+   "stderr": "",
+   "combined": "failed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "journalctl --user-unit academy-crash --since -30s --no-pager -o cat | head -n 6",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Started /usr/bin/sh -c echo \"starting\"; echo \"config error: missing port\" >&2; exit 1.\nstarting\nconfig error: missing port\nacademy-crash.service: Main process exited, code=exited, status=1/FAILURE\nacademy-crash.service: Failed with result 'exit-code'.\nacademy-crash.service: Scheduled restart job, restart counter is at 1.\n",
+   "stderr": "",
+   "combined": "Started /usr/bin/sh -c echo \"starting\"; echo \"config error: missing port\" >&2; exit 1.\nstarting\nconfig error: missing port\nacademy-crash.service: Main process exited, code=exited, status=1/FAILURE\nacademy-crash.service: Failed with result 'exit-code'.\nacademy-crash.service: Scheduled restart job, restart counter is at 1.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemctl --user reset-failed academy-crash && echo cleaned up",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cleaned up\n",
+   "stderr": "",
+   "combined": "cleaned up\n",
+   "ok": true
+  }
+ ],
+ "seconds": 8,
+ "ok": true,
+ "problems": []
+}

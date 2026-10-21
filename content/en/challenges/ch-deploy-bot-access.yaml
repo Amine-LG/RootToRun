@@ -1,0 +1,225 @@
+id: ch.deploy-bot-access
+kind: challenge
+title: "Control project access"
+summary: "Give a deployment robot exactly the access it needs, and prove what it can and cannot do."
+module: r2-admin-challenges
+minutes: 25
+level: 2
+supports: "Graded on OpenShift 4.21.8. Needs only project admin rights in the challenge project."
+concepts: [sec.rbac, sec.serviceaccounts]
+prerequisites: [f.rbac, o2.service-accounts]
+namespace: academy-ch-access
+objective: |
+  Grant the ServiceAccount `ci-bot` the least privilege that lets it roll out new versions, with no direct API
+  permission to read Secrets, delete the application or create and change roles and bindings.
+background: |
+  **Where everything comes from.** The project starts with the ServiceAccount `ci-bot` and a Secret `db-credentials`
+  holding a made-up value; no workload runs. The grader asks the API what `ci-bot` may do; it never needs the robot's
+  token. The app creates the project `academy-ch-access` as your learner identity when you start the challenge and
+  applies the starting objects; everything else is yours to create. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press Grade, as the app's
+  own identities; Clean up deletes the project.
+symptom: |
+  The delivery pipeline authenticates as the ServiceAccount `ci-bot` (already created). Today it fails with
+  `Forbidden`. A colleague suggests "just give it edit". Before you do, read the requirements: the security review
+  will check effective permissions, not the names of the roles you bind.
+requirements:
+  - "`ci-bot` can **get, list, patch and update** Deployments in the project, and **watch** them too: `oc rollout status` watches the Deployment. (The recorded grader checks the first four; a check for `watch` waits for the next recording.)"
+  - "`ci-bot` can **list pods** and **read pod logs**, to report why a rollout failed."
+  - "`ci-bot` **cannot read Secrets**."
+  - "`ci-bot` **cannot delete** Deployments or Services."
+  - "`ci-bot` **cannot create RoleBindings** (it must not be able to grant itself or others more access)."
+setup:
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: ci-bot}
+  - |
+    apiVersion: v1
+    kind: Secret
+    metadata: {name: db-credentials}
+    stringData: {password: not-a-real-password}
+hints:
+  - "`oc auth can-i <verb> <resource> --as=system:serviceaccount:<project>:ci-bot` answers each requirement before the grader does."
+  - "Test the built-in `edit` role against the requirements before you trust it. Reading a cluster role may be forbidden to a project user, so measure it instead: bind it for a moment (`oc create rolebinding try-edit --clusterrole=edit --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access`), run the `oc auth can-i` checks from the first hint (or `oc auth can-i --list` with the same `--as`), then `oc delete rolebinding try-edit -n academy-ch-access`. Which requirement does it break?"
+  - "A Role lists rules (API groups, resources, verbs); a RoleBinding attaches it to a subject. Pod logs are the subresource `pods/log`; Deployments are in the `apps` group."
+fix:
+  - {cmd: "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access", meaning: "update Deployments, nothing else on them"}
+  - {cmd: "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access", meaning: "read pods and their logs"}
+  - {cmd: "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access", meaning: "bind deploy-bot to the ServiceAccount"}
+  - {cmd: "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access", meaning: "bind pod-reader to it too"}
+  - {cmd: "oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access", meaning: "no", expect: fail}
+checks:
+  - {id: patch-deploy, title: "ci-bot can patch deployments", type: can_i, as: ci-bot, verb: patch, resource: deployments.apps, expect: "yes", expect_text: "yes"}
+  - {id: update-deploy, title: "ci-bot can update deployments", type: can_i, as: ci-bot, verb: update, resource: deployments.apps, expect: "yes", expect_text: "yes"}
+  - {id: get-deploy, title: "ci-bot can get deployments", type: can_i, as: ci-bot, verb: get, resource: deployments.apps, expect: "yes", expect_text: "yes"}
+  - {id: list-deploy, title: "ci-bot can list deployments", type: can_i, as: ci-bot, verb: list, resource: deployments.apps, expect: "yes", expect_text: "yes"}
+  - {id: list-pods, title: "ci-bot can list pods", type: can_i, as: ci-bot, verb: list, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: pod-logs, title: "ci-bot can read pod logs", type: can_i, as: ci-bot, verb: get, resource: pods/log, expect: "yes", expect_text: "yes"}
+  - {id: no-secrets, title: "ci-bot cannot read Secrets (get, list or watch, any name)", type: rules_deny, as: ci-bot, forbid: [{resource: secrets, verbs: [get, list, watch]}], expect_text: "no rule allows reading secrets"}
+  - {id: no-delete, title: "ci-bot cannot delete Deployments or Services (any name, or all at once)", type: rules_deny, as: ci-bot, forbid: [{resource: deployments.apps, verbs: [delete, deletecollection]}, {resource: services, verbs: [delete, deletecollection]}], expect_text: "no rule allows deleting them"}
+  - {id: no-bindings, title: "ci-bot cannot grant access", type: rules_deny, as: ci-bot, forbid: [{resource: rolebindings.rbac.authorization.k8s.io, verbs: [create, update, patch]}, {resource: roles.rbac.authorization.k8s.io, verbs: [create, update, patch, bind, escalate]}], expect_text: "no rule allows creating or changing bindings or roles"}
+trials:
+  - id: edit-role
+    title: "The colleague's shortcut: bind the built-in edit role"
+    kind: wrong
+    expect: partial
+    expect_checks: {patch-deploy: pass, no-secrets: fail, no-delete: fail}
+    commands:
+      - {cmd: "oc create rolebinding ci-bot-edit --clusterrole=edit --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access"}
+  - id: user-not-sa
+    title: "Right role, wrong subject: bound to a user named ci-bot, not the ServiceAccount"
+    kind: wrong
+    expect: partial
+    expect_checks: {patch-deploy: fail, list-pods: fail, no-secrets: pass}
+    commands:
+      - {cmd: "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access"}
+      - {cmd: "oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access"}
+      - {cmd: "oc create rolebinding ci-bot-deploy --role=deploy-bot --user=ci-bot -n academy-ch-access"}
+      - {cmd: "oc create rolebinding ci-bot-pods --role=pod-reader --user=ci-bot -n academy-ch-access"}
+  - id: no-logs
+    title: "Pods readable, but not their logs"
+    kind: partial
+    expect: partial
+    expect_checks: {list-pods: pass, pod-logs: fail}
+    commands:
+      - {cmd: "oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access"}
+      - {cmd: "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-ch-access"}
+      - {cmd: "oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access"}
+      - {cmd: "oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access"}
+  - id: named-secret
+    title: "Looks least-privilege, but grants one named Secret: unnamed checks would miss it"
+    kind: wrong
+    expect: partial
+    expect_checks: {no-secrets: fail, patch-deploy: pass}
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-access"
+        stdin: |
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata: {name: pipeline}
+          rules:
+          - apiGroups: [apps]
+            resources: [deployments]
+            verbs: [get, list, watch, patch, update]
+          - apiGroups: [""]
+            resources: [pods, pods/log]
+            verbs: [get, list]
+          - apiGroups: [""]
+            resources: [secrets]
+            resourceNames: [db-credentials]
+            verbs: [get]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata: {name: pipeline-ci-bot}
+          roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pipeline}
+          subjects:
+          - {kind: ServiceAccount, name: ci-bot, namespace: academy-ch-access}
+  - id: one-role-yaml
+    title: "A correct alternative: one Role with two rules, written as YAML, bound with a different name"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-access"
+        stdin: |
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata: {name: pipeline}
+          rules:
+          - apiGroups: [apps]
+            resources: [deployments]
+            verbs: [get, list, watch, patch, update]
+          - apiGroups: [""]
+            resources: [pods, pods/log]
+            verbs: [get, list]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata: {name: pipeline-ci-bot}
+          roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pipeline}
+          subjects:
+          - {kind: ServiceAccount, name: ci-bot, namespace: academy-ch-access}
+  - id: v2-01-no-get
+    title: "Every permission asked for except reading a single Deployment (get)"
+    kind: partial
+    expect: partial
+    commands:
+    - cmd: oc create role deploy-bot --verb=list,watch,patch,update --resource=deployments.apps -n academy-ch-access
+    - cmd: oc create role pod-reader --verb=get,list --resource=pods,pods/log -n academy-ch-access
+    - cmd: oc create rolebinding bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc create rolebinding bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    expect_checks:
+      get-deploy: fail
+  - id: v2-02-list-secrets
+    title: "An extra Role that lets ci-bot list Secrets"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access
+    - cmd: oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access
+      expect: fail
+    - cmd: oc create role extra --verb=list --resource=secrets -n academy-ch-access
+    - cmd: oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    expect_checks:
+      no-secrets: fail
+  - id: v2-02-get-secrets
+    title: "An extra Role that lets ci-bot read one named Secret"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access
+    - cmd: oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access
+      expect: fail
+    - cmd: oc create role extra --verb=get --resource=secrets --resource-name=db-password -n academy-ch-access
+    - cmd: oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    expect_checks:
+      no-secrets: fail
+  - id: v2-02-deletecollection-deployments-apps
+    title: "An extra Role that lets ci-bot delete every Deployment at once (deletecollection)"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create role deploy-bot --verb=get,list,watch,patch,update --resource=deployments.apps -n academy-ch-access
+    - cmd: oc create role pod-reader --verb=get,list,watch --resource=pods,pods/log -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-deploy --role=deploy-bot --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc create rolebinding ci-bot-pods --role=pod-reader --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    - cmd: oc auth can-i get secrets --as=system:serviceaccount:academy-ch-access:ci-bot -n academy-ch-access
+      expect: fail
+    - cmd: oc create role extra --verb=deletecollection --resource=deployments.apps -n academy-ch-access
+    - cmd: oc create rolebinding extra --role=extra --serviceaccount=academy-ch-access:ci-bot -n academy-ch-access
+    expect_checks:
+      no-delete: fail
+root_cause: |
+  Effective permission is the union of every rule reachable from the subject through bindings. The built-in `edit`
+  role is convenient but grants far more than a pipeline needs: it can read Secrets (and therefore every credential
+  in the project) and delete almost everything. A Role scoped to the exact resources and verbs, bound to the
+  ServiceAccount itself (`--serviceaccount=<project>:<name>`, not `--user`), meets the requirements and nothing more.
+  Neither `edit` nor this Role lets the robot create RoleBindings, so it cannot grant access through the RBAC API.
+  This exercise denies direct Secret reads, workload deletion and RBAC writes; it does not make the robot harmless.
+  Updating a Deployment's pod template remains a trusted permission: the robot could mount `db-credentials` into a
+  container and read it back through the pod logs it may read, or run the pods as another ServiceAccount in the
+  project. Closing those indirect paths needs admission restrictions and a namespace that holds only what the
+  pipeline is trusted with.
+alternatives: |
+  One Role with several rules or several Roles: both are fine. Binding a ClusterRole with a RoleBinding is also fine
+  (the grant stays inside the project). The grader evaluates `oc auth can-i` for the ServiceAccount, so any set of
+  objects with the same effect passes.
+sre: |
+  For an access review, show the evidence, not the YAML: the `can-i` answers for each requirement, and
+  `oc adm policy who-can get secrets -n <project>` to show the robot is not on the list. Revisit robot permissions
+  when the pipeline changes; access granted "temporarily" tends to stay.
+questions:
+  - q: "Why is reading Secrets the decisive reason not to use the edit role here?"
+    a: "Secrets in the project hold credentials for databases, registries and other services. A robot that can read them can act as everything those credentials unlock, far beyond deploying."
+  - q: "The binding names `--user=ci-bot`. Why does the ServiceAccount still get Forbidden?"
+    a: "The ServiceAccount's username is `system:serviceaccount:<project>:ci-bot`. A User subject named ci-bot is a different identity."
+references:
+  - {title: "Kubernetes: Using RBAC authorization", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"}
+  - {title: "Kubernetes: Service accounts", url: "https://kubernetes.io/docs/concepts/security/service-accounts/"}

@@ -1,0 +1,341 @@
+# The first lesson of the Linux path (lx1-shell), written as a teaching flow: one small task done end to end.
+- id: lx.first-steps
+  title: "Your first minutes in a shell"
+  subtitle: "Where you are, what is there, and reading a file"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 12
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.shell, linux.files]
+  prerequisites: []
+  objective: |
+    Find out where you are, see what a directory holds, move into a directory and read a file, and fix a path
+    that points to the wrong place.
+  flow:
+    - kind: teach
+      id: situation
+      title: "A prompt and nothing else"
+      body: |
+        Someone gives you access to a Linux machine and asks you to read a note they left there. **Linux** is
+        an operating system, like Windows or macOS: the software that manages a computer and runs every other
+        program on it. Most servers run Linux, and everything else in this course runs on it too.
+
+        When you connect, there are no windows and no icons. A **terminal**, a window that shows only text,
+        displays one line, waiting:
+
+        ```
+        [learner@workstation ~]$
+        ```
+
+        This is a **shell**: a program that waits for you to type a command, runs it when you press Enter,
+        shows you the result and waits again. The line it shows while waiting is the **prompt**.
+    - kind: teach
+      id: prompt-parts
+      body: |
+        This prompt says who you are (`learner`), which machine you are on (`workstation`) and which directory
+        you are in. `~` is short for your **home directory**: the directory that belongs to your account, where
+        your own files live. The `$` ends the prompt: it is the shell saying it is ready for you. (For the
+        administrator's account, called `root`, it is a `#` instead.)
+
+        A **directory** is what a file manager calls a folder. The files are the same; you reach them
+        by typing instead of clicking.
+
+        To find the note, you need answers to three questions, in this order: where am I, what is here, and
+        what does this file say? Each has a command.
+    - kind: teach
+      id: one-place
+      title: "Where am I?"
+      body: |
+        A file manager window always shows one folder. The shell works the same way: at every moment it is
+        "in" exactly one directory, called the **current directory**. Commands that need a place use that one
+        unless you name another.
+
+        `pwd` (print working directory) tells you which directory that is.
+    - kind: try
+      id: pwd
+      body: "Type `pwd` and press Enter."
+      accept: ["pwd"]
+      hints:
+        - match: "^(PWD|Pwd)$"
+          say: "Commands are case-sensitive: `PWD` and `pwd` are different words to the shell. Type it in lower case."
+        - match: "^(cd|ls)"
+          say: "That command exists, but it answers a different question. The one that prints where you are is `pwd`, for print working directory."
+      hint: "It is three letters, for print working directory."
+      run: pwd
+      then: |
+        The answer is a **path**: the list of directories you would walk through to get here, starting from
+        the very top. The top of everything is written `/` and called the **root**. So this path reads: from
+        the root, go into `tmp`, then into `academy-lesson-…`.
+
+        The same word also names the administrator's account, `root`, met with the prompt. They are two
+        different things that share a name; the context always tells you which one is meant.
+
+        We recorded this lesson in a practice directory inside `/tmp`, which is why its name ends in random
+        letters. It was prepared for this lesson: a few files and directories were put in it, including the note
+        you are looking for. They are listed under "Before you start: source files" at the top of the page, so you can make the same
+        directory on your own machine. If you want to follow along, create those folders and files with your file
+        manager and a text editor; the shell commands for that come in a later lesson. On your own machine, a new
+        shell usually starts in your home directory, such as `/home/learner`.
+    - kind: teach
+      id: one-tree
+      body: |
+        Every file on a Linux machine sits somewhere below `/`. There are no separate drives like `C:` and
+        `D:`; everything hangs from one tree. You can see the first level of that tree by asking `ls` (list) to
+        show what is in `/`:
+    - kind: show
+      id: ls-root
+      run: ls /
+      highlight: [home, tmp]
+      notice: |
+        These are the entries directly under the root, mostly directories. Two of them matter today: `home`, where each user's
+        home directory lives, and `tmp`, where our practice directory is. You will meet `etc` (configuration)
+        and `var` (logs and data) in later lessons. The exact list varies a little from one system to
+        another; this machine also has a few directories of its own, such as `data`.
+    - kind: teach
+      id: what-is-here
+      title: "What is here?"
+      body: |
+        With no name after it, `ls` lists the current directory, wherever you are now.
+    - kind: try
+      id: ls
+      body: "Now type `ls`, with nothing after it, to list what is in the directory you are in."
+      accept: ["ls", "ls ."]
+      hints:
+        - match: "^ls /$"
+          say: "`ls /` lists the root, the top of the tree. To list the directory you are in, give `ls` no name at all."
+        - match: "^(LS|Ls)"
+          say: "Commands are case-sensitive. Type `ls` in lower case."
+      hint: "The command is two letters; with no name after it, it lists the current directory."
+      run: ls
+      then: |
+        Three names. A terminal shows them side by side; the recording captured them one per line.
+
+        There is a problem, though: you cannot tell which names are files and which are directories.
+        `ls -F` adds a small marker: a `/` after each directory.
+    - kind: show
+      id: ls-f
+      run: ls -F
+      highlight: [/]
+      notice: |
+        `notes/` and `reports/` are directories; `readme.txt` is a file. The `-F` is an **option**: a word
+        starting with `-` that changes what a command does. Many commands have options, and the next lesson
+        shows how to find them.
+    - kind: teach
+      id: long-listing
+      body: |
+        Another option, `-l` (a lower-case L, for "long"), prints one line of detail per entry. Today you only
+        need three parts of each line: the first character, the size and the name. The letters in between
+        say who may read or change the file; they get a lesson of their own later.
+    - kind: show
+      id: ls-l
+      run: ls -l
+      highlight: [readme.txt]
+      notice: |
+        - The **first character** is the type: `d` for a directory, `-` for an ordinary file.
+        - The number before the date is the **size** in bytes. `readme.txt` is 72 bytes: one byte for
+          each character of its single line, including the invisible end-of-line character.
+        - The **name** comes last.
+
+        You can ignore the `total` line and the other columns for now.
+    - kind: ask
+      id: read-ls-l
+      prompt: "In this `ls -l` output, which entries are directories?"
+      evidence: |
+        drwxr-xr-x. 2 learner learner  6 Oct 15 09:12 backup
+        -rw-r--r--. 1 learner learner 40 Oct 15 09:12 notes.txt
+        drwxr-xr-x. 2 learner learner 22 Oct 15 09:12 photos
+      choices:
+        - text: "`backup` and `photos`"
+          why: "Their lines start with `d`. `notes.txt` starts with `-`, so it is an ordinary file."
+        - text: "`notes.txt` only"
+          why: "A name ending in `.txt` looks like a file, and it is one. But the question was which entries are directories: those are the lines that start with `d`."
+        - text: "All three: `ls -l` only lists directories"
+          why: "`ls -l` lists everything in the directory, files included. The first character tells them apart: `d` for a directory, `-` for a file."
+      answer: 0
+    - kind: teach
+      id: move
+      title: "Moving into a directory"
+      body: |
+        The note is probably in `notes`. To look inside, you move there with `cd` (change directory),
+        followed by the name of the directory. `cd` prints nothing when it works; the only visible change is
+        the directory name in your prompt.
+    - kind: try
+      id: try-cd
+      body: "You are in the practice directory. Move into `notes`: type `cd`, a space, then the directory's name."
+      accept: ["cd notes", "cd notes/", "cd ./notes", "cd ./notes/"]
+      hints:
+        - match: "^cd /notes"
+          say: "A path that starts with `/` starts from the root, the very top of the tree. There is no `notes` directly under the root. Leave out the `/` so the shell looks inside the directory you are in."
+        - match: "^cd [Nn][Oo][Tt][Ee][Ss]/?$"
+          say: "Linux treats upper and lower case as different letters: `Notes` and `notes` are two different names. Type it exactly as `ls` showed it."
+        - match: "^notes"
+          say: "Start with the command, then the directory: `cd`, a space, then the name."
+        - match: "^ls"
+          say: "`ls` shows what is inside a directory without moving you. The task is to move into `notes`."
+      hint: "The command is `cd`, followed by a space and the name of the directory."
+      run: "cd notes; pwd; ls"
+      then: |
+        To show what changed, the recording ran three commands on one line, separated by `;`. A semicolon
+        runs commands one after another, as if you had pressed Enter between them.
+
+        `pwd` now ends in `/notes`, and `ls` lists what `notes` contains: two files.
+
+        From here on, the recordings show the directory you are in before the `$`, the way your prompt does:
+        `notes $` means "typed while in `notes`".
+    - kind: teach
+      id: read
+      title: "Reading the file"
+      body: |
+        `cat` prints the whole content of a file. You are in `notes`, so you can name the file directly:
+    - kind: show
+      id: cat
+      run: "cat welcome.txt"
+      notice: |
+        That is the note. `cat` is fine for short files like this one. Later you will meet commands that show
+        only part of a long file.
+    - kind: teach
+      id: paths-start-here
+      title: "Names are looked up from where you are"
+      body: |
+        Look again at how you named the file: only `welcome.txt`. The shell found it because you were in
+        `notes`. A name like this, with no `/` in front, is a **relative path**: it is looked up starting from
+        the current directory.
+
+        A path that starts with `/`, like the one `pwd` printed, is an **absolute path**: it starts from the
+        root and means the same thing wherever you are.
+    - kind: ask
+      id: guess-wrong-path
+      guess: true
+      prompt: "You are still in `notes`. You type `cat notes/welcome.txt`. What happens?"
+      choices:
+        - text: "It prints the note, as before"
+          why: "That would be true from the practice directory, one level up. From inside `notes`, the shell looks for another `notes` inside this one."
+        - text: "An error: no such file or directory"
+          why: "The path has no `/` in front, so the shell starts looking from where you are, `notes`, and finds no `notes` inside it. The next step shows the error."
+        - text: "It prints every file in `notes`"
+          why: "`cat` prints only the files you name. The interesting part is where it looks for `notes/welcome.txt`."
+      answer: 1
+    - kind: show
+      id: wrong-path
+      run: "cat notes/welcome.txt"
+      notice: |
+        The relative path `notes/welcome.txt` starts from where you are, which is already `notes`. So the
+        shell looks for `notes/notes/welcome.txt`. There is no `notes` inside `notes`, and `cat` says so.
+
+        This is the most common path mistake, and it has nothing to do with the file itself: the file is
+        fine, the starting point is wrong. When you see "No such file or directory" for a file you are sure
+        exists, run `pwd` first.
+    - kind: teach
+      id: going-up
+      title: "Going up a level"
+      body: |
+        Relative paths can also go up. Two dots, `..`, mean "the directory one level above this one". `cd ..`
+        takes you up one level. And `..` works inside a longer path too, without moving you.
+
+        Say you have gone up with `cd ..`, then into the other directory with `cd reports`. From there, `ls ..`
+        lists the directory above `reports`, the practice directory:
+    - kind: show
+      id: list-up
+      run: "ls .."
+      notice: "The three entries of the practice directory, listed from inside `reports`. You did not move: the prompt still says `reports`."
+    - kind: try
+      id: try-up
+      body: "You are in `reports`. Without leaving it, print `readme.txt`, which is in the directory above."
+      accept: ["cat ../readme.txt", "cat ./../readme.txt"]
+      hints:
+        - match: "^cat readme\\.txt$"
+          say: "From `reports`, a bare `readme.txt` is looked up inside `reports`, where it is not. You need to go up one level first, inside the path."
+        - match: "^cat /readme\\.txt$"
+          say: "A leading `/` starts at the root of the whole machine, not at the directory above you. Use `..` for \"one level up\"."
+        - match: "^cat \\.\\./?reports"
+          say: "`..` already takes you to the directory that holds `readme.txt`. Add the file name right after it."
+        - match: "^cd "
+          say: "That would work in two steps, but the task is to read the file without leaving `reports`. Put `..` in the path you give to `cat`."
+      hint: "Start with `cat`, then a path that goes up one level with `..` and then names the file."
+      run: "cat ../readme.txt"
+    - kind: ask
+      id: choose-path
+      prompt: "`pwd` prints `/home/learner/reports`. Which command prints `/home/learner/notes/todo.txt`?"
+      choices:
+        - text: "`cat ../notes/todo.txt`"
+          why: "`..` goes up from `reports` to `/home/learner`, then `notes/todo.txt` goes down into `notes`."
+        - text: "`cat notes/todo.txt`"
+          why: "This is relative to where you are, `reports`, so it names `/home/learner/reports/notes/todo.txt`: a different path from the one you want, whether or not something exists there."
+        - text: "`cat /notes/todo.txt`"
+          why: "The leading `/` starts at the root, so this looks for a `notes` directory directly under `/`. The absolute path would be `/home/learner/notes/todo.txt`."
+      answer: 0
+    - kind: reflect
+      id: explain-error
+      prompt: "A colleague in `notes` types `cat notes/welcome.txt` and gets \"No such file or directory\", although the file exists. In two sentences, what would you tell them?"
+      model: |
+        A path without a leading `/` is looked up from your current directory, and you are already in
+        `notes`, so the shell looks for `notes/notes/welcome.txt`. Type `cat welcome.txt`, or check where you
+        are with `pwd` first.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can land on any Linux prompt and answer the three questions: where am I (`pwd`), what is here
+        (`ls`, with `-F` or `-l` for more detail), and what does this file say (`cat`). You can move with `cd`,
+        and you know why a path can fail when the file is fine.
+
+        Every Linux system you meet later in this course answers these questions with the same commands:
+        servers, virtual machines (computers simulated in software), and eventually the inside of containers.
+
+        In the next lesson you look more closely at what you typed: what `-l` and `-F` are, how a command
+        knows what to work on, and how to find out what any command can do without leaving the terminal.
+  review:
+    - q: "Which command prints the directory you are in?"
+      a: "`pwd`. It prints an absolute path, starting from the root `/`."
+    - q: "In `ls -l` output, what does a line starting with `d` mean? And with `-`?"
+      a: "`d` is a directory; `-` is an ordinary file."
+    - q: "What does `..` mean in a path?"
+      a: "The directory one level up from the current one."
+    - q: "Where does a relative path such as `notes/todo.txt` start from?"
+      a: "From the current directory, the one `pwd` prints. A path starting with `/` starts from the root."
+  commands:
+    - cmd: pwd
+      meaning: "the absolute path of the current directory: a practice directory made for this recording"
+    - cmd: ls /
+      meaning: "the first level of the directory tree, directly under the root"
+    - cmd: ls
+      meaning: "the three names in the practice directory"
+    - cmd: ls -F
+      meaning: "the same names, with / after each directory"
+    - cmd: ls -l
+      meaning: "one line per entry: type, permissions, owner and group, size in bytes, date of the last change, name"
+    - cmd: "cd notes; pwd; ls"
+      meaning: "after cd, pwd ends in /notes and ls lists the two files inside notes"
+    - cmd: "cat welcome.txt"
+      cwd: notes
+      meaning: "inside notes, cat prints the whole file"
+    - cmd: "cat notes/welcome.txt"
+      cwd: notes
+      expect: fail
+      meaning: "inside notes, the relative path notes/welcome.txt points to notes/notes/welcome.txt, which does not exist"
+    - cmd: "ls .."
+      cwd: reports
+      meaning: ".. is the directory above: the practice directory, listed from inside reports"
+    - cmd: "cat ../readme.txt"
+      cwd: reports
+      meaning: ".. is the directory one level up, so this reads readme.txt from inside reports"
+  files:
+    readme.txt: |
+      This practice directory holds notes and reports for your first minutes.
+    notes/welcome.txt: |
+      Welcome to the shell.
+      You found this file with ls and read it with cat.
+    notes/todo.txt: |
+      1. Find out where I am
+      2. See what is here
+      3. Read one file
+    reports/october.txt: |
+      Three tasks done.
+  references:
+    - {title: "GNU Coreutils manual: pwd invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/pwd-invocation.html"}
+    - {title: "GNU Coreutils manual: ls invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/ls-invocation.html"}
+    - {title: "GNU Coreutils manual: What information is listed (ls -l)", url: "https://www.gnu.org/software/coreutils/manual/html_node/What-information-is-listed.html"}
+    - {title: "GNU Coreutils manual: cat invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/cat-invocation.html"}
+    - {title: "GNU Bash manual: Bourne shell builtins (cd)", url: "https://www.gnu.org/software/bash/manual/html_node/Bourne-Shell-Builtins.html"}
+    - {title: "Filesystem Hierarchy Standard 3.0", url: "https://refspecs.linuxfoundation.org/FHS_3.0/fhs/index.html"}

@@ -1,0 +1,163 @@
+{
+ "lab": "lab.image-pullers",
+ "kind": "lab",
+ "lab_hash": "0f3ba89980c25603",
+ "recorded_at": "2026-10-20T17:11:19+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "publish",
+   "cmd": "oc tag registry.access.redhat.com/ubi9/ubi-minimal:latest minimal:latest --reference-policy=local -n academy-img-src",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Tag minimal:latest set to registry.access.redhat.com/ubi9/ubi-minimal:latest.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "imported",
+   "cmd": "oc get istag minimal:latest -n academy-img-src",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             IMAGE REFERENCE                                                                                                                                    UPDATED\nminimal:latest   image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db   4 seconds ago\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "denied",
+   "cmd": "oc create deployment consumer --image=image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:latest -n academy-img-use -- sleep infinity",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/consumer created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "denied-read",
+   "cmd": "oc get pods -l app=consumer -n academy-img-use",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                        READY   STATUS             RESTARTS   AGE\nconsumer-655b8674dd-h9pf7   0/1     ImagePullBackOff   0          5s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "denied-read",
+   "cmd": "oc get events -n academy-img-use --field-selector reason=Failed",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON   OBJECT                          MESSAGE\n5s          Warning   Failed   pod/consumer-655b8674dd-h9pf7   Failed to pull image \"image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:latest\": unable to pull image or OCI artifact: pull image err: initializing source docker://image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:latest: reading manifest latest in image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal: authentication required; artifact err: get manifest: build image source: reading manifest latest in image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal: authentication required\n5s          Warning   Failed   pod/consumer-655b8674dd-h9pf7   Error: ErrImagePull\n4s          Warning   Failed   pod/consumer-655b8674dd-h9pf7   Error: ImagePullBackOff\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc policy add-role-to-user system:image-puller system:serviceaccount:academy-img-use:default -n academy-img-src",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:image-puller added: \"system:serviceaccount:academy-img-use:default\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc rollout restart deploy/consumer -n academy-img-use",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/consumer restarted\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc rollout status deploy/consumer -n academy-img-use --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"consumer\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"consumer\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"consumer\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"consumer\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "audit",
+   "cmd": "oc get rolebindings -n academy-img-src -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                   SUBJECT_NS        SUBJECT\nadmin                   admin                  <none>            developer\nsystem:deployers        system:deployer        academy-img-src   deployer\nsystem:image-builders   system:image-builder   academy-img-src   builder\nsystem:image-puller     system:image-puller    academy-img-use   default\nsystem:image-pullers    system:image-puller    <none>            system:serviceaccounts:academy-img-src\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "consumer-ready",
+    "title": "consumer runs from the source project's image",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"consumer\" not found"
+   },
+   {
+    "id": "grant-exists",
+    "title": "The image-puller grant names exactly that ServiceAccount",
+    "expect": "1 binding",
+    "status": "fail",
+    "observed": "0 matching rolebindings"
+   }
+  ],
+  "at": 1792516285.5377467
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "consumer-ready",
+    "title": "consumer runs from the source project's image",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "grant-exists",
+    "title": "The image-puller grant names exactly that ServiceAccount",
+    "expect": "1 binding",
+    "status": "pass",
+    "observed": "1 matching rolebindings"
+   }
+  ],
+  "at": 1792516306.9929774
+ },
+ "seconds": 28,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-img-use: gone",
+   "Project/academy-img-src: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

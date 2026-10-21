@@ -1,0 +1,107 @@
+id: inc.configmap-missing
+kind: incident
+title: "CreateContainerConfigError"
+summary: "The pod is created but its container never starts: the status says CreateContainerConfigError."
+module: a4-config-storage
+minutes: 10
+level: 1
+supports: "Recorded on OpenShift 4.21.8."
+concepts: [k8s.pod-lifecycle, sec.secrets]
+prerequisites: [o1.config-secrets]
+namespace: academy-inc-cm
+objective: |
+  Find out why the pod's container is never created, and make the portal run with the test project's settings
+  without changing its Deployment.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`, promoted from a test project. The app creates the project `academy-inc-cm` as your learner
+  identity when you start the incident, with everything listed here in the state the symptom describes; how it got
+  into that state is part of the investigation and is shown in the debrief. The images come from Red Hat's public
+  registry `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay
+  what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The portal was promoted from the test project with `oc apply`. Its Deployment came across; its pod never starts and
+  shows CreateContainerConfigError. The Deployment was reviewed with the release and must stay as it is. In the test
+  project the portal ran with two settings, `LOG_LEVEL=info` and `PORTAL_REGION=eu`; production needs the same.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            envFrom: [{configMapRef: {name: web-settings}}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get pods -n academy-inc-cm", meaning: "0/1 CreateContainerConfigError, 0 restarts: the container was never created, so it cannot crash"}
+  - {cmd: "oc get events -n academy-inc-cm --field-selector reason=Failed", meaning: "Error: configmap \"web-settings\" not found"}
+  - {cmd: "oc get configmaps -n academy-inc-cm", meaning: "web-content exists, web-settings does not (kube-root-ca.crt and openshift-service-ca.crt are created automatically in every project)"}
+hints:
+  - "The container cannot even be created. The event says which reference failed."
+  - "The Deployment came across but one of the objects it refers to did not."
+  - "Create the missing ConfigMap under the exact name the event reports, with the keys and values the test project uses: both settings named in the brief are graded. The waiting pod starts by itself once it exists."
+fix:
+  - {cmd: "oc create configmap web-settings -n academy-inc-cm --from-literal=LOG_LEVEL=info --from-literal=PORTAL_REGION=eu", meaning: "the settings the test project had"}
+  - {cmd: "oc get pods -n academy-inc-cm", meaning: "right after the fix it can still say CreateContainerConfigError (as recorded): the kubelet has not retried yet"}
+  - {cmd: "oc wait pod -l app=web --for=condition=Ready --timeout=90s -n academy-inc-cm", timeout: 120, meaning: "blocks until the pod is Ready (pod/web-7d57fcfc79-… condition met): the kubelet's next retry created and started the container, and its readiness probe passed"}
+  - {cmd: "oc get pods -l app=web -n academy-inc-cm", meaning: "the same pod, same name, AGE still counting, is now 1/1 Running with 0 restarts: no new rollout and no new pod, only the kubelet's retry"}
+  - {cmd: "oc exec deploy/web -n academy-inc-cm -- printenv LOG_LEVEL PORTAL_REGION", meaning: "info and eu: the container received the ConfigMap's keys as environment variables"}
+fix_wait: [web-ready, route-ok]
+checks:
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: env, title: "The container received LOG_LEVEL", type: exec, from: app=web, command: ["printenv", "LOG_LEVEL"], expect_output: "^info$", expect_text: "info"}
+  - {id: region, title: "The container received PORTAL_REGION", type: exec, from: app=web, command: ["printenv", "PORTAL_REGION"], expect_output: "^eu$", expect_text: "eu"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The container imports environment variables from ConfigMap `web-settings` (`envFrom`), which was never created in
+  this project. The kubelet cannot build the container's configuration, so it reports CreateContainerConfigError and
+  retries; once the ConfigMap exists the next retry succeeds, with no change to the Deployment.
+alternatives: |
+  - Mark the reference `optional: true` if the application has safe defaults.
+  - Promote applications as one unit (a Kustomize overlay, a Helm chart or a GitOps Application) so dependent objects
+    cannot be forgotten.
+sre: |
+  A volume that references a missing ConfigMap or Secret shows a different symptom: the pod stays ContainerCreating
+  with FailedMount events. Know both. Promotion by copying individual objects is the root process problem.
+questions:
+  - q: "Why did the pod recover without a restart or a new rollout?"
+    a: "The kubelet keeps retrying container creation; once the ConfigMap exists the retry succeeds."
+  - q: "What symptom would a missing ConfigMap used as a volume produce?"
+    a: "ContainerCreating with FailedMount events (configmap not found)."
+references:
+  - {title: "Kubernetes: Configure a pod to use a ConfigMap", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/"}
+  - {title: "Kubernetes: Pod lifecycle, container state Waiting", url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-state-waiting"}
+  - {title: "OpenShift 4.21: Investigating pod issues", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting#investigating-pod-issues"}
+symptom_checks: [web-ready, route-ok]  # monitoring-level evidence shown before the answer

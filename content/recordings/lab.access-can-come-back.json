@@ -1,0 +1,232 @@
+{
+ "lab": "lab.access-can-come-back",
+ "kind": "lab",
+ "lab_hash": "ae25227698cb4b5e",
+ "recorded_at": "2026-10-20T18:15:01+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "grant",
+   "cmd": "oc create serviceaccount scanner -n academy-ghost",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/scanner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc get serviceaccount scanner -n academy-ghost -o jsonpath='{.metadata.uid}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "02740c14-4942-48a1-a77f-b8ef44486942",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc policy add-role-to-user view system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"system:serviceaccount:academy-ghost:scanner\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "delete",
+   "cmd": "oc delete serviceaccount scanner -n academy-ghost",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount \"scanner\" deleted from academy-ghost namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "delete",
+   "cmd": "oc get serviceaccount scanner -n academy-ghost",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): serviceaccounts \"scanner\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "delete",
+   "cmd": "oc get rolebindings -n academy-ghost-target -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                               AGE   USERS       GROUPS                                        SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  22s   developer                                                 \nsystem:deployers        ClusterRole/system:deployer        20s                                                             academy-ghost-target/deployer\nsystem:image-builders   ClusterRole/system:image-builder   20s                                                             academy-ghost-target/builder\nsystem:image-pullers    ClusterRole/system:image-puller    20s               system:serviceaccounts:academy-ghost-target   \nview                    ClusterRole/view                   12s                                                             academy-ghost/scanner\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "delete",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reuse",
+   "cmd": "oc create serviceaccount scanner -n academy-ghost",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/scanner created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reuse",
+   "cmd": "oc get serviceaccount scanner -n academy-ghost -o jsonpath='{.metadata.uid}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "0adee026-f0b7-4efb-8cf4-b0ddf591afaa",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reuse",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "audit",
+   "cmd": "oc get rolebindings -n academy-ghost-target -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                   SUBJECT_NS             SUBJECT\nadmin                   admin                  <none>                 developer\nsystem:deployers        system:deployer        academy-ghost-target   deployer\nsystem:image-builders   system:image-builder   academy-ghost-target   builder\nsystem:image-pullers    system:image-puller    <none>                 system:serviceaccounts:academy-ghost-target\nview                    view                   academy-ghost          scanner\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "audit",
+   "cmd": "oc policy remove-role-from-user view system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view removed: \"system:serviceaccount:academy-ghost:scanner\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "audit",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "no-binding",
+    "title": "No binding in the target names scanner any more",
+    "expect": "0 bindings",
+    "status": "pass",
+    "observed": "0 matching rolebindings"
+   },
+   {
+    "id": "sa-back",
+    "title": "scanner exists again (the name was reused)",
+    "expect": "exists",
+    "status": "fail",
+    "observed": "Error from server (NotFound): serviceaccounts \"scanner\" not found"
+   },
+   {
+    "id": "revoked",
+    "title": "scanner can no longer list pods in the target",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can scanner list pods? no"
+   }
+  ],
+  "at": 1792520117.729467
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "no-binding",
+    "title": "No binding in the target names scanner any more",
+    "expect": "0 bindings",
+    "status": "pass",
+    "observed": "0 matching rolebindings"
+   },
+   {
+    "id": "sa-back",
+    "title": "scanner exists again (the name was reused)",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "serviceaccount/scanner exists"
+   },
+   {
+    "id": "revoked",
+    "title": "scanner can no longer list pods in the target",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can scanner list pods? no"
+   }
+  ],
+  "at": 1792520156.9625993
+ },
+ "seconds": 56,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ghost: gone",
+   "Project/academy-ghost-target: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

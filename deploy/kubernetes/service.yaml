@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: static-site
+  labels: {app.kubernetes.io/name: static-site}
+spec:
+  selector: {app.kubernetes.io/name: static-site}
+  ports: [{name: http, port: 80, targetPort: http}]

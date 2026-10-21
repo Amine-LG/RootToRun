@@ -1,0 +1,1354 @@
+# Declarative and GitOps lessons, written as teaching flows: gx.declarative is in module b1-declarative
+# (administration track); gx.argocd, gx.argocd-ops and gx.openshift-gitops are in module p6-gitops (enterprise
+# platform track). Kubernetes commands are recorded with kubectl against OpenShift Local as the ordinary learner
+# identity. Argo CD is not installed on the practice cluster:
+# Argo CD manifests and statuses in these lessons are examples, marked as such, never recordings.
+- id: gx.declarative
+  title: "Why clusters drift"
+  subtitle: "From commands typed at 3 a.m. to files in Git"
+  module: b1-declarative
+  mode: REAL_LAB
+  minutes: 22
+  level: 2
+  supports: "Kubernetes 1.34 (kubectl 1.34) and Git 2. Recorded on OpenShift Local as an ordinary user, in a temporary namespace, with the Kubernetes client bundled with oc, invoked as kubectl."
+  concepts: [deploy.declarative, gitops.drift]
+  prerequisites: [a.what-kubernetes-does, lx.files-text]
+  labs: [inc.gitops-drift]
+  record_on: cluster
+  objective: |
+    Explain why changes made with commands make a cluster hard to maintain, apply a directory of manifests,
+    detect drift with kubectl diff, correct it, and use Git to record who changed what and why.
+  flow:
+    - kind: ask
+      id: recall-desired
+      recalls: a.what-kubernetes-does
+      prompt: "A look back. A Deployment declares 2 replicas, and both pods are deleted. What happens?"
+      choices:
+        - text: "Its controller creates 2 new pods"
+          why: "The Deployment's desired state is still 2, so the controller closes the gap."
+        - text: "Nothing, until someone recreates them"
+          why: "That is what happens to a pod created on its own. A Deployment's controller keeps its pods at the declared number."
+        - text: "The Deployment is deleted too"
+          why: "Deleting pods never touches the Deployment that owns them; it recreates them."
+      answer: 0
+    - kind: teach
+      id: story
+      title: "A change nobody remembers"
+      body: |
+        Inside the cluster, a Deployment's controller keeps the pods matching the Deployment. But who keeps the
+        Deployment itself matching what the team intended?
+
+        Picture an ordinary month. At 3 a.m. during an incident, someone runs `kubectl scale deployment web
+        --replicas=5` and the incident ends. Two weeks later, someone else edits a setting directly in the
+        cluster to test an idea, and forgets it. Nothing records either change: no reason, no author, no way to
+        undo it except from memory.
+
+        After a few months, the cluster works, but nobody can say exactly how it is configured, or rebuild it
+        if it were lost. The live objects have **drifted** away from what anyone wrote down, if anyone wrote
+        anything down at all.
+    - kind: teach
+      id: files
+      title: "Describing the application in files"
+      body: |
+        The first step out of this is to keep the description in files, called **manifests**, and to change
+        the cluster only by applying them. A manifest is the same object you created with commands, written
+        as YAML. Here is the Deployment for this lesson:
+    - kind: show
+      id: manifest
+      run: "cat config/deployment.yaml"
+      highlight: ["replicas: 2"]
+      notice: |
+        `kind` says what it is, `metadata.name` names it, and `spec` is the desired state: two replicas of a
+        pod running the web server image. The directory `config` also holds a Service for it.
+    - kind: ask
+      id: manifest-replicas
+      prompt: "In this manifest, which line states how many pods should run?"
+      choices:
+        - text: "`replicas: 2`, under `spec`"
+          why: "`spec` is the desired state, and `replicas` is the number of pods the controller keeps running."
+        - text: "`name: web`, under `metadata`"
+          why: "`metadata.name` only names the object; it says nothing about how many pods to run."
+        - text: "`containerPort: 8080`"
+          why: "That is the port the container listens on, not how many copies run."
+      answer: 0
+    - kind: teach
+      id: apply
+      body: |
+        `kubectl apply -f <file or directory>` reads the manifests and creates the objects they describe, or
+        updates the fields they set when the object already exists. Running it again when nothing changed
+        does nothing. This is the **declarative** way: you state the result, as files, and the tool works out
+        the steps. Applying one file first, to see what it prints:
+    - kind: show
+      id: apply-one
+      run: "kubectl apply -f config/deployment.yaml"
+      notice: "`created`: the Deployment did not exist, so `apply` created it. The directory also holds a Service, which has not been applied yet."
+    - kind: try
+      id: try-apply
+      body: "Now apply every manifest in the `config` directory. Expect the Deployment to be reported differently from the Service."
+      accept: ["kubectl apply -f config/", "kubectl apply -f config", "kubectl apply -f ./config/", "kubectl apply -f ./config", "kubectl apply --filename config/", "kubectl apply --filename config", "kubectl apply --filename ./config/", "kubectl apply --filename ./config", "kubectl apply --filename=config/", "kubectl apply --filename=config", "kubectl apply --filename=./config/", "kubectl apply --filename=./config", "kubectl apply -f=config/", "kubectl apply -f=config", "kubectl apply -f=./config/", "kubectl apply -f=./config", "oc apply -f config/", "oc apply -f config", "oc apply -f ./config/", "oc apply -f ./config", "oc apply --filename config/", "oc apply --filename config", "oc apply --filename ./config/", "oc apply --filename ./config", "oc apply --filename=config/", "oc apply --filename=config", "oc apply --filename=./config/", "oc apply --filename=./config", "oc apply -f=config/", "oc apply -f=config", "oc apply -f=./config/", "oc apply -f=./config"]
+      hints:
+        - match: "^(kubectl|oc) create"
+          say: "`create` fails when the object already exists, so it cannot be repeated for the same object. `apply` creates or updates, whichever is needed."
+        - match: "^(kubectl|oc) apply config"
+          say: "`apply` needs `-f` (file) before the path: `kubectl apply -f <file or directory>`."
+        - match: "^(kubectl|oc) apply -f config/deployment\\.yaml$"
+          say: "That applies only the Deployment. The task is the whole directory, so give `config/`."
+      hint: "`kubectl apply`, the option `-f`, then the directory."
+      run: "kubectl apply -f config/"
+      then: "The Deployment is `unchanged`, because the file already matched it, and the Service is `created`. Applying a directory handles each file in turn. From now on, the files say what the cluster should contain."
+    - kind: teach
+      id: diff
+      title: "Seeing drift: kubectl diff"
+      body: |
+        `kubectl diff -f config/` asks the cluster: "if I applied these files now, what would change?" It
+        prints the differences and changes nothing. Its **exit status** also answers: `0` when the cluster
+        matches the files, `1` when it differs. That is what makes it usable in scripts. The recording prints
+        the status after each run.
+    - kind: show
+      id: diff-clean
+      run: "kubectl diff -f config/; echo \"exit status: $?\""
+      notice: "No differences and exit status 0: the cluster matches the files."
+    - kind: show
+      id: drift
+      body: "Now the 3 a.m. fix, typed as a command:"
+      run: "kubectl scale deployment web --replicas=5"
+    - kind: ask
+      id: guess-diff
+      guess: true
+      prompt: "You run `kubectl diff -f config/` again. What do you expect it to report?"
+      choices:
+        - text: "Nothing: the scale was done with kubectl too"
+          why: "The tool used does not matter. What matters is whether the live object still matches the file. The next step shows the answer."
+        - text: "The replica count: 5 live, 2 in the file"
+          why: "See the next step."
+        - text: "An error: the Deployment was changed by hand"
+          why: "Changing an object by hand is allowed; `diff` only compares. The next step shows what it reports."
+      answer: 1
+    - kind: show
+      id: diff-drift
+      run: "kubectl diff -f config/; echo \"exit status: $?\""
+      highlight: ["replicas"]
+      notice: |
+        The first lines are `diff`'s header: it compared a copy of the live object (`LIVE`) with what the live
+        object would become after applying the files (`MERGED`). After that, lines starting with `-` are the
+        live object and lines starting with `+` the result of applying; the other lines are context.
+
+        The live Deployment says 5, the file says 2, and the exit status is 1. That is drift, made visible.
+        `generation` is a counter the API increases each time the specification changes: applying would change
+        it once more, from 2 to 3.
+    - kind: ask
+      id: which-wins
+      prompt: "You now run `kubectl apply -f config/`. What happens to the Deployment?"
+      choices:
+        - text: "It goes back to 2 replicas"
+          why: "`apply` makes the live object match the files, and the file says 2. The manual change is undone."
+        - text: "It keeps 5: the most recent change wins"
+          why: "`apply` does not compare dates. It makes the cluster match the files you give it."
+        - text: "It is deleted and created again"
+          why: "`apply` changes the fields that differ, in place. The Deployment and its unchanged pods stay."
+      answer: 0
+    - kind: show
+      id: correct
+      run: "kubectl apply -f config/; sleep 5; kubectl get deployment web"
+      notice: |
+        `configured` means `apply` changed something; `unchanged` that the Service already matched. The
+        Deployment is back to 2 (`2/2`): applying restored the file's replica count. If 5 had been the
+        intended repair, the file would have to change before applying again.
+
+        `apply` creates or updates the objects the files describe; it does not delete live objects whose
+        file was removed. A clean `kubectl diff` therefore means "these files match", not "nothing else
+        exists in the cluster". Now notice the weakness: the files are on one person's disk. Who changed them last, and why? If
+        someone edits them, the old version is gone.
+    - kind: teach
+      id: git
+      title: "Git: a history of the desired state"
+      body: |
+        **Git** is a version control system: it records every change to a set of files as a **commit**, with
+        an author, a date, a message saying why, and the exact difference. Any earlier version can be brought
+        back. Teams already use it for program code; using it for manifests gives the cluster's desired state
+        the same history.
+
+        Every Git command below runs from the practice directory, and `git -C config` means "run this inside
+        the `config` directory", so no command depends on where the last one left you. First, turn `config`
+        into a repository:
+    - kind: show
+      id: git-init
+      run: "git -C config init -b main"
+      notice: "`init` creates the hidden `.git` directory that holds the history, and `-b main` names the first branch `main`. Nothing is recorded yet. (The recording also set the author name and email of this repository, which Git requires for a commit; that setup is not shown.)"
+    - kind: show
+      id: git-add
+      run: "git -C config add . && git -C config status --short"
+      notice: |
+        A commit records a **staged** snapshot: you choose which files go into the next commit with
+        `git add`, and a file that is not staged is not in the commit, even if it sits in the directory.
+        `git status --short` lists what is staged: both manifests (`A` means added). The `.` after `add` means
+        everything in the directory.
+    - kind: ask
+      id: staged-edit
+      prompt: "You edit `deployment.yaml` again after `git add .`, before committing. Is that edit in the commit?"
+      choices:
+        - text: "No: the commit holds what was staged"
+          why: "The snapshot is taken from the staging area. The new edit has to be staged with another `git add` to be included."
+        - text: "Yes: a commit takes the files as they are now"
+          why: "A commit takes the staged versions, not the current contents of the directory."
+        - text: "The commit fails until the edit is undone"
+          why: "Git allows this; the commit succeeds and `git status` then shows the edit as not staged."
+      answer: 0
+    - kind: show
+      id: git-commit
+      run: "git -C config commit -m 'web: two replicas' && git -C config log --oneline"
+      notice: "`-m` gives the message saying why; Git reports the new commit on branch `main` and the two files it holds. `log --oneline` then lists the history, one line per commit: a short hash, the identifier of that snapshot, and its message. From here on, every change to the desired state is a commit."
+    - kind: ask
+      id: what-commit-adds
+      prompt: "Someone commits a change that sets 3 replicas in `config/deployment.yaml` but never runs `kubectl apply`. What does the cluster run?"
+      choices:
+        - text: "Still 2: only the files changed"
+          why: "A commit records a change to the files only. Applying it is a separate step, and Git does not see the cluster."
+        - text: "3 replicas, as the commit says"
+          why: "Git knows nothing about the cluster. Only `kubectl apply` changes live objects; `kubectl get` and `kubectl diff` show their state."
+        - text: "Whatever the commit message says"
+          why: "A message records the author's intent and reason; it can be wrong, and it never changes the cluster. The live state is what the cluster reports."
+      answer: 0
+    - kind: teach
+      id: change-through-git
+      body: |
+        Now a real change: the team needs 3 replicas for a sales event. Instead of `kubectl scale`, someone
+        edits the file (in this lesson the recording made the edit for you, changing 2 to 3). `git diff`
+        shows an uncommitted change, so you can review it before it is recorded.
+    - kind: try
+      id: try-git-diff
+      body: "Show the uncommitted change in the `config` repository, from the practice directory."
+      accept: ["git -C config diff", "git -C config/ diff", "cd config && git diff"]
+      hints:
+        - match: "^git diff$"
+          say: "Run from the practice directory, plain `git diff` is not inside the repository. Use `git -C config diff`."
+        - match: "^git -C config (commit|add)"
+          say: "That records or stages the change. The task is only to look at it first: `git diff`."
+      hint: "`git -C config`, then the subcommand that shows the difference."
+      run: "git -C config diff"
+      then: "The same `-` and `+` notation: one line changed, from 2 to 3. Git compares the working file with the last commit."
+    - kind: teach
+      id: commit-a
+      body: |
+        To record it, `git commit -a` stages every change to files that Git already tracks (the two manifests)
+        and commits them. A brand new file is not tracked yet, so `-a` would leave it out until you run
+        `git add` on it.
+    - kind: show
+      id: commit-apply
+      run: "git -C config commit -a -m 'web: three replicas for the sales event' && git -C config log --oneline"
+      notice: "Two commits now, the newest first, each with its reason. If the change causes trouble, the previous commit says exactly what to go back to."
+    - kind: ask
+      id: untracked-file
+      prompt: "You edit `config/deployment.yaml` and also create a new file `config/ingress.yaml`, then run `git commit -a -m 'add ingress'`. What does the commit contain?"
+      choices:
+        - text: "Nothing from the new file"
+          why: "`-a` stages only files Git already tracks. The new file stays untracked until `git add config/ingress.yaml`."
+        - text: "The new file, as it is in the directory"
+          why: "Being in the directory is not enough: a commit holds only staged or already tracked files."
+        - text: "An error, because the file is new"
+          why: "The commit succeeds with whatever was tracked; the new file is left out, so check `git status` before relying on it."
+      answer: 0
+    - kind: show
+      id: apply-new
+      body: "Then the cluster is made to match the new version:"
+      run: "kubectl apply -f config/; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get deployment web"
+      notice: "`configured`: the Deployment changed, and `get` shows `3/3`. The cluster changed only because `apply` ran, not because of the commit."
+    - kind: order
+      id: order-change
+      prompt: "Put the steps of a declarative change in order."
+      items:
+        - "Edit the manifest in the repository"
+        - "Review the change with `git diff`"
+        - "Commit it with a message saying why"
+        - "Apply the files to the cluster"
+        - "Check for drift later with `kubectl diff`"
+      why: "The file changes first and is recorded with its reason; only then does the cluster change to match it. `kubectl diff` later confirms nothing has drifted since."
+    - kind: ask
+      id: limits
+      prompt: "This works while people remember to apply after every commit. What is still missing?"
+      choices:
+        - text: "Something that applies and checks continuously, without being asked"
+          why: "At the moment, drift is only found when someone runs `kubectl diff`, and changes reach the cluster only when someone applies them. [GitOps with Argo CD](/lesson/gx.argocd), later in the course, hands that job to a program."
+        - text: "A way to see what changed between versions"
+          why: "Git already gives that: `git log` and `git diff` show every change and its reason."
+        - text: "A way to describe the application as files"
+          why: "The manifests in `config` already describe it, and `kubectl apply` makes the cluster match them."
+      answer: 0
+    - kind: reflect
+      id: explain-drift
+      prompt: "In two or three sentences, explain to a colleague what drift is, and why `kubectl scale` during an incident causes it."
+      model: |
+        Drift is the gap between the desired state written in the files and what is actually running. A
+        `kubectl scale` during an incident changes the live Deployment but not the file, so the two disagree,
+        and nothing records who did it or why. `kubectl diff` shows the gap, and applying the files (or
+        changing the files instead) closes it.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can describe an application as manifests, apply a whole directory, see drift with `kubectl diff`,
+        correct it, and record every change to the desired state in Git with a reason. You have also reviewed an
+        uncommitted change with `git diff`.
+
+        Next, [Kustomize and Helm](/lesson/o2.kustomize-helm) keeps one set of manifests for several environments.
+        Later in the course, [GitOps with Argo CD](/lesson/gx.argocd) hands the remaining work to a program that
+        watches Git and the cluster all the time and applies the difference itself. That idea has a name: **GitOps**.
+
+        To practise the diagnosis on your own, the incident [Someone changed production by
+        hand](/lab/inc.gitops-drift) gives you a declared state and a cluster that no longer matches it.
+  sections:
+    - id: apply-details
+      title: "How apply decides what to change"
+      depth: true
+      body: |
+        By default, `kubectl apply` works on the client: it stores the configuration it applied in the
+        annotation `kubectl.kubernetes.io/last-applied-configuration`, and on the next run compares three
+        versions (the last applied file, the new file and the live object). A field you remove from the file
+        is removed from the object; fields set by other tools are left alone. A removed file does not remove
+        its object.
+
+        With `kubectl apply --server-side`, the API server does the merge and records which tool owns each
+        field (`metadata.managedFields`). An apply that changes a value owned by another manager
+        normally conflicts instead of silently overwriting; applying the same value can share ownership, and
+        `--force-conflicts` takes ownership explicitly. Server-side apply is stable since Kubernetes 1.22.
+
+        `kubectl apply --prune` can delete objects that disappeared from the files, but its reference page
+        still marks it alpha and warns against using it without knowing the current state. Deleting with
+        `kubectl delete -f` is explicit and safer.
+  review:
+    - q: "What is drift?"
+      a: "The difference between the desired state (the files) and the live objects in the cluster."
+    - q: "What does `kubectl diff -f config/` do, and what does exit status 1 mean?"
+      a: "It shows what applying the files would change, without changing anything. Exit status 1: the cluster differs from the files; 0: it matches."
+    - q: "Why keep manifests in Git?"
+      a: "Every change gets an author, a date, a reason and an exact difference, and any earlier version can be restored."
+    - q: "Why is `kubectl apply` safe to run again?"
+      a: "It only changes what differs from the files; when nothing differs, it changes nothing."
+  commands:
+    - cmd: "cat config/deployment.yaml"
+      meaning: "the Deployment manifest"
+    - cmd: "kubectl apply -f config/deployment.yaml"
+      meaning: "create one object from one file"
+    - cmd: "kubectl apply -f config/"
+      meaning: "apply the whole directory: the Deployment is unchanged, the Service is created"
+    - cmd: "kubectl rollout status deployment/web --timeout=180s"
+      meaning: "wait until the pods are ready (not shown in the lesson)"
+    - cmd: "kubectl diff -f config/; echo \"exit status: $?\""
+      meaning: "no drift: no output, exit status 0"
+    - cmd: "kubectl scale deployment web --replicas=5"
+      meaning: "a manual change"
+    - cmd: "kubectl diff -f config/; echo \"exit status: $?\""
+      meaning: "drift: replicas 5 live, 2 in the file; exit status 1"
+    - cmd: "kubectl apply -f config/; sleep 5; kubectl get deployment web"
+      meaning: "the files win: back to 2"
+    - cmd: "git -C config init -b main"
+      meaning: "turn the directory into a Git repository"
+    - cmd: "git -C config config user.name Learner && git -C config config user.email learner@example.com"
+      meaning: "set the author of this repository (not shown in the lesson)"
+    - cmd: "git -C config add . && git -C config status --short"
+      meaning: "stage both manifests"
+    - cmd: "git -C config commit -m 'web: two replicas' && git -C config log --oneline"
+      meaning: "the first commit"
+    - cmd: "sed -i 's/replicas: 2/replicas: 3/' config/deployment.yaml"
+      meaning: "an edit to the manifest (not shown in the lesson)"
+    - cmd: "git -C config diff"
+      meaning: "an uncommitted change, reviewed before it is committed"
+    - cmd: "git -C config commit -a -m 'web: three replicas for the sales event' && git -C config log --oneline"
+      meaning: "commit with a reason"
+    - cmd: "kubectl apply -f config/; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get deployment web"
+      meaning: "apply the new version and check the result"
+  files:
+    config/deployment.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+              - name: web
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+                ports:
+                  - containerPort: 8080
+    config/service.yaml: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+      spec:
+        selector:
+          app: web
+        ports:
+          - port: 8080
+            targetPort: 8080
+  references:
+    - {title: "Kubernetes documentation: Declarative management of objects using configuration files", url: "https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/"}
+    - {title: "kubectl reference: kubectl diff", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_diff/"}
+    - {title: "kubectl reference: kubectl apply", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_apply/"}
+    - {title: "Kubernetes documentation: Server-side apply", url: "https://kubernetes.io/docs/reference/using-api/server-side-apply/"}
+    - {title: "Pro Git: Recording changes to the repository", url: "https://git-scm.com/book/en/v2/Git-Basics-Recording-Changes-to-the-Repository"}
+
+- id: gx.argocd
+  title: "GitOps with Argo CD"
+  subtitle: "A program that keeps the cluster matching Git: Applications, sync, health and self-heal"
+  module: p6-gitops
+  mode: LOCAL_SIMULATION
+  minutes: 25
+  level: 2
+  supports: "Concepts from the OpenGitOps principles v1.0.0 and the Argo CD 3.x documentation (Red Hat OpenShift GitOps 1.21 ships Argo CD 3.4, and 1.22 Argo CD 3.5). Argo CD is not installed on the practice cluster: the manifests and statuses shown are examples, and the model below simulates Argo CD's decisions."
+  concepts: [gitops.argocd, gitops.drift]
+  prerequisites: [gx.declarative]
+  objective: |
+    Explain the four GitOps principles and the difference between push and pull deployment, read an Argo CD
+    Application, tell sync status from health status, and predict what automated sync, self-heal and prune do
+    when Git or the cluster changes.
+  flow:
+    - kind: ask
+      id: recall-diff
+      recalls: gx.declarative
+      prompt: "A look back. `kubectl diff -f config/` exits with status 1. What does that mean?"
+      choices:
+        - text: "The cluster differs from the files"
+          why: "Exit status 1 means differences were found: applying the files would change something. 0 means they match."
+        - text: "The command failed"
+          why: "For `kubectl diff`, 1 is a normal answer, \"there are differences\". A real failure gives a status above 1."
+        - text: "The files have changed since the last commit"
+          why: "`kubectl diff` compares the files with the cluster, not with Git. `git diff` answers that other question."
+      answer: 0
+    - kind: teach
+      id: the-loop
+      title: "Handing the loop to a program"
+      body: |
+        In [Why clusters drift](/lesson/gx.declarative), keeping the cluster right depended on people: someone
+        had to apply after every commit, and someone had to run `kubectl diff` to notice drift. Kubernetes
+        already solves this kind of problem inside the cluster: a controller compares desired and actual state,
+        again and again.
+
+        **GitOps** applies the same idea one level up. The desired state of the cluster lives in Git, and a
+        program running in the cluster keeps comparing the cluster with Git, and correcting the difference.
+        People change the cluster by changing Git.
+    - kind: teach
+      id: principles
+      body: |
+        The OpenGitOps project, part of the CNCF, states four principles:
+
+        1. **Declarative**: the desired state is expressed declaratively, as manifests rather than commands.
+        2. **Versioned and immutable**: it is stored with a complete version history, and each version is fixed once recorded.
+        3. **Pulled automatically**: software agents pull the desired state from that store.
+        4. **Continuously reconciled**: the agents keep observing the actual state and applying the desired state.
+
+        Git provides this when it is set up for it: a **commit** identifies one fixed snapshot, while a branch
+        name such as `main` is a label that moves to newer commits. Teams protect the published branch and keep
+        its history so that every deployed version stays traceable.
+
+        You already did the first two by hand. The last two are what a GitOps tool adds.
+    - kind: teach
+      id: push-pull
+      title: "Push or pull"
+      body: |
+        Before GitOps, a common setup was a CI pipeline (a program that runs automatically after each change to
+        the code, to build and deliver it) ending in `kubectl apply`. That is **push**: something outside the
+        cluster holds credentials for it and pushes changes in, once, when the pipeline runs. If someone
+        changes the cluster afterwards, nothing notices.
+
+        With **pull**, an agent fetches the desired state from Git. In our example the agent runs inside the
+        destination cluster, so a pipeline only updates Git and needs no deployment credentials. Because the
+        agent compares continuously, drift is noticed whenever it happens, not only at deployment time. (A
+        central Argo CD installation can also manage other clusters; that setup holds their access details
+        centrally.)
+    - kind: ask
+      id: which-pull
+      prompt: "Which setup follows the \"pulled automatically\" principle?"
+      choices:
+        - text: "An agent in the cluster fetches the repository"
+          why: "The agent pulls the desired state from Git and applies it from inside the cluster."
+        - text: "A pipeline runs `kubectl apply` after each merge"
+          why: "That is push: the pipeline, outside the cluster, sends the change in once. It works, but it does not watch for drift afterwards."
+        - text: "An engineer applies the files from a laptop"
+          why: "That is a manual push. It depends on someone remembering, which is what GitOps removes."
+      answer: 0
+    - kind: teach
+      id: argocd
+      title: "Argo CD"
+      body: |
+        **Argo CD** is a widely used GitOps tool for Kubernetes, and the engine behind Red Hat OpenShift
+        GitOps. It runs in the cluster as a few components; three matter here:
+
+        - the **repository server** fetches the Git repository and produces plain manifests from it (rendering
+          Helm charts or Kustomize directories when needed);
+        - the **application controller** compares those manifests with the live objects and applies the
+          difference when asked to sync;
+        - the **API server** serves the web interface and the `argocd` command-line tool.
+
+        You tell Argo CD what to manage with an object of its own, an **Application**.
+    - kind: show
+      id: application
+      body: "An Application for the `config` repository from [Why clusters drift](/lesson/gx.declarative), assuming it has been pushed to a hosted Git server. The repository root holds `deployment.yaml` and `service.yaml` directly. This is an example to read: Argo CD is not installed on the practice cluster, and the URL is a placeholder."
+      code: |
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: web
+          namespace: argocd
+        spec:
+          project: default
+          source:
+            repoURL: https://git.example.com/team/web-config.git
+            targetRevision: main
+            path: .
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: web
+          syncPolicy:
+            automated:
+              prune: false
+              selfHeal: false
+      caption: "application.yaml (example)"
+      origin: example
+      highlight: ["repoURL", "path:", "namespace: web", "automated"]
+      notice: |
+        Read it as a sentence: take the root directory (`path: .`) of branch `main` of this repository
+        (`source`; the branch must exist on the server), and keep namespace `web` of this cluster matching it
+        (`destination`; `kubernetes.default.svc` is the cluster Argo CD runs in). This example assumes an
+        administrator has already created namespace `web` and given this Argo CD access to it. `project` groups Applications and limits what they may deploy. The
+        Application lives in Argo CD's own namespace, `argocd` here. `syncPolicy` comes later in this lesson.
+    - kind: ask
+      id: change-path
+      prompt: "The team moves the manifests to the directory `deploy/prod`. Which field of the Application changes?"
+      choices:
+        - text: "`spec.source.path`"
+          why: "`path` says where in the repository the manifests are. `repoURL` and `targetRevision` stay the same."
+        - text: "`spec.destination.namespace`"
+          why: "That is where the objects go in the cluster. Moving files inside the repository does not change it."
+        - text: "`spec.source.repoURL`"
+          why: "The repository is the same; only the directory inside it moved."
+      answer: 0
+    - kind: teach
+      id: two-statuses
+      title: "Two questions: synced, and healthy"
+      body: |
+        Argo CD reports two separate statuses for each Application, and confusing them is the most common
+        mistake when reading it:
+
+        - **Sync status** answers "does the cluster match Git?": `Synced`, or `OutOfSync` when any managed
+          object differs from what Git describes.
+        - **Health status** reports what Argo CD's built-in checks can tell from the objects' status:
+          `Healthy`, `Progressing` (not yet, but getting there), `Degraded` (failing), and a few others. For a
+          Deployment, Argo CD checks that the updated replicas have rolled out.
+
+        They are independent. A perfectly synced application can be unhealthy, and a healthy one can differ
+        from Git. `Healthy` does not replace testing the application: a Deployment can finish rolling out
+        while the application still answers wrongly.
+    - kind: ask
+      id: synced-degraded
+      prompt: "An Application shows these statuses. What do they tell you?"
+      evidence: |
+        NAME   SYNC STATUS   HEALTH STATUS
+        web    Synced        Degraded
+      choices:
+        - text: "Git was applied, but the application fails"
+          why: "Synced: the compared configuration matches Git. Degraded: a health check reports failure, for example pods that crash. Read the health message, events and logs before choosing the repair."
+        - text: "Argo CD could not apply Git"
+          why: "That would leave it OutOfSync. Synced means the live objects match the manifests."
+        - text: "Someone changed the cluster by hand"
+          why: "A manual change to a compared field normally shows as OutOfSync, and Synced says the compared fields match Git. The unhealthy part needs investigating, not assuming."
+      answer: 0
+    - kind: teach
+      id: sync-policy
+      title: "When Argo CD acts by itself"
+      body: |
+        By default, Argo CD only *reports*: it shows `OutOfSync`, and someone presses Sync. `syncPolicy.automated`
+        makes it sync by itself, with two further options, both **off by default**:
+
+        - **automated**: when Git changes, sync to the new version without waiting for a person.
+        - **selfHeal**: when the *cluster* changes and drifts from Git, try another sync after a short delay, set on the Argo CD controller (it grows if repeated attempts keep finding drift), which puts Git's version back if it succeeds.
+        - **prune**: when an object is *removed from Git*, delete it from the cluster too. Without it, the
+          object stays and is reported as needing to be pruned.
+
+        Argo CD checks Git about every three minutes by default, or immediately when the Git server sends it a
+        webhook.
+    - kind: ask
+      id: guess-heal
+      guess: true
+      prompt: "Automated sync is on, self-heal off, and Git's current commit has already synced. Git says 3 replicas. Someone runs `kubectl scale deployment web --replicas=5`. A few minutes later?"
+      choices:
+        - text: "3 replicas: Argo CD put Git back"
+          why: "Putting the cluster back after a manual change is self-heal's job, and it is off. Try it in the model."
+        - text: "5 replicas, shown as OutOfSync"
+          why: "Automated sync does not repeat a successful sync of the same commit, and nothing in Git changed. The drift is reported, not corrected. Check it in the model."
+        - text: "5 replicas, shown as Synced"
+          why: "Argo CD still compares, and the replica count differs from Git, so the Application is OutOfSync. Check it in the model."
+      answer: 1
+    - kind: explore
+      id: drift-model
+      sim: drift
+      body: |
+        This model simulates Argo CD's decisions. Its Git starts with **3** replicas, as in the question
+        above, and the model's `oc scale` is the same operation as `kubectl scale`: `oc` is
+        OpenShift's client, and the model's "project" is a namespace. Reproduce the case: scale the live
+        Deployment, run a reconciliation, and look at the sync status. Then turn on self-heal and reconcile
+        again. Finally, remove an object from Git with prune off, then on. Focus on the `web` Deployment; the
+        other objects and controls in the model are optional extras.
+    - kind: teach
+      id: emergencies
+      title: "The 3 a.m. fix, with GitOps"
+      body: |
+        With self-heal on, the incident fix from [Why clusters drift](/lesson/gx.declarative),
+        `kubectl scale … --replicas=5`, is undone: the next sync attempt, a few seconds later by default,
+        restores Git's replica count if it succeeds, though pods may take longer to become ready. The cluster
+        follows Git.
+
+        So the fix goes through Git: a commit that sets 5 replicas, ideally reviewed, and Argo CD applies it.
+        When minutes matter, teams usually allow an explicit exception: turn off automated sync for that one
+        Application, fix the cluster by hand, then commit the fix and turn automation back on. The exception
+        is deliberate and visible, not a forgotten command.
+    - kind: order
+      id: order-gitops
+      prompt: "Put a change in a GitOps workflow in order. A pull request is a proposal to merge a branch into the branch Argo CD tracks, so that others can review it first."
+      items:
+        - "Change the manifest on a branch and open a pull request"
+        - "A colleague reviews the change and merges it"
+        - "Argo CD notices the new commit (polling or webhook)"
+        - "Argo CD syncs: the cluster now matches Git"
+        - "Argo CD reports health: is the new version working?"
+      why: "People change Git, through review: only the merge puts the change on the tracked branch. The agent detects the new version, applies it, and then reports whether the result works. Sync and health are separate final checks."
+    - kind: reflect
+      id: explain-gitops
+      prompt: "Explain to a colleague what changes in their daily work when a cluster is managed with GitOps."
+      model: |
+        They stop changing the cluster directly and change Git instead: every change is a commit, reviewed and
+        recorded with its reason. An agent in the cluster, such as Argo CD, keeps the cluster matching Git and
+        shows when it does not. Manual changes are either reported as drift or, with self-heal, undone, so an
+        emergency change has to be made deliberately and then recorded in Git.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can explain GitOps and its four principles, tell push from pull, read an Argo CD Application, keep
+        sync status and health status apart, and predict what automated sync, self-heal and prune do.
+
+        Next: what happens when a sync fails, how to roll back, and what to do with Secrets, which must never
+        sit in Git as they are. Then OpenShift GitOps, Red Hat's packaging of Argo CD.
+  sections:
+    - id: details
+      title: "More detail on Argo CD"
+      depth: true
+      body: |
+        - An automated sync only runs when the Application is `OutOfSync`, and Argo CD does not repeat a sync
+          that already succeeded for the same commit; that is why a manual change stays without self-heal.
+        - With prune on, a safety check refuses a sync that would delete every object of the Application;
+          `allowEmpty: true` permits it.
+        - The polling interval is the `timeout.reconciliation` setting: 120 seconds plus up to 60 seconds of
+          jitter by default.
+        - Argo CD marks the objects it manages (by default with an annotation, `argocd.argoproj.io/tracking-id`)
+          so that it can tell them apart from objects created by other means.
+        - Deleting an Application deletes the objects it manages only when the Application carries the
+          finalizer `resources-finalizer.argocd.argoproj.io`.
+        - The `default` AppProject allows every repository and destination. Real setups create projects that
+          restrict both.
+  review:
+    - q: "What are the four OpenGitOps principles?"
+      a: "Declarative; versioned and immutable; pulled automatically; continuously reconciled."
+    - q: "What is the difference between sync status and health status in Argo CD?"
+      a: "Sync: does the cluster match Git (Synced or OutOfSync)? Health: is it working (Healthy, Progressing, Degraded…)? They are independent."
+    - q: "What does self-heal add to automated sync?"
+      a: "It reverts changes made directly in the cluster. Automated sync alone only applies new versions from Git."
+    - q: "What does prune do, and is it on by default?"
+      a: "It deletes from the cluster the objects that were removed from Git. It is off by default."
+  references:
+    - {title: "OpenGitOps: principles v1.0.0", url: "https://opengitops.dev/"}
+    - {title: "OpenGitOps: glossary", url: "https://github.com/open-gitops/documents/blob/main/GLOSSARY.md"}
+    - {title: "Argo CD: architecture", url: "https://argo-cd.readthedocs.io/en/stable/operator-manual/architecture/"}
+    - {title: "Argo CD: Application specification", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/application-specification/"}
+    - {title: "Argo CD: automated sync policy", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/"}
+    - {title: "Argo CD: resource health", url: "https://argo-cd.readthedocs.io/en/stable/operator-manual/health/"}
+    - {title: "Argo CD: projects", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/projects/"}
+
+- id: gx.argocd-ops
+  title: "When a sync fails, rolling back, and Secrets"
+  subtitle: "Reading sync errors, going back through Git, and keeping Secrets out of the repository"
+  module: p6-gitops
+  mode: REAL_LAB
+  minutes: 25
+  level: 2
+  supports: "Kubernetes 1.34 and Git 2, recorded on OpenShift Local as the ordinary user developer in a temporary namespace, and once by the cluster administrator (kubeadmin), who changed nothing, with the Kubernetes client bundled with oc, invoked as kubectl; Argo CD 3.x documentation for its behaviour. Argo CD itself is not installed on the practice cluster: its commands and statuses here are described, not recorded."
+  concepts: [gitops.argocd, sec.secrets]
+  prerequisites: [gx.argocd]
+  record_on: cluster-admin
+  objective: |
+    Read the error the API returned when a sync fails, say who has to act for each of three example errors,
+    roll back through Git and know the limits of Argo CD's own rollback, and explain why a Secret must not be
+    committed as it is.
+  flow:
+    - kind: ask
+      id: recall-statuses
+      recalls: gx.argocd
+      prompt: "A look back. An Application is `OutOfSync` and `Healthy`. What does that mean?"
+      choices:
+        - text: "It works, but differs from Git"
+          why: "Healthy: Argo CD's health checks on the objects pass. OutOfSync: at least one of them differs from what Git describes."
+        - text: "It is broken and Argo CD is fixing it"
+          why: "Healthy means it works. OutOfSync only says something differs from Git; whether Argo CD corrects it depends on the sync policy."
+        - text: "Git cannot be reached"
+          why: "That shows as an error on the Application (a comparison error), not as a normal OutOfSync status."
+      answer: 0
+    - kind: teach
+      id: same-errors
+      title: "A sync is an apply"
+      body: |
+        When Argo CD syncs, it sends the manifests to the Kubernetes API, much as `kubectl apply` does. When
+        the API refuses an object, the sync fails for that object, and the Application's sync result shows
+        the API's message next to it (in the web interface, or with `argocd app get <name>`).
+
+        A sync can fail at three stages: getting and rendering the desired state from Git (repository access,
+        Helm or Kustomize errors), applying it to the API, or objects that apply but then stay unhealthy. This
+        part is about the second stage, where the errors are the ones `kubectl` would give you. Here are three
+        API errors you may meet during a sync, produced on the practice cluster with `kubectl apply`, which sends the
+        same requests (Argo CD itself is not installed there). Each is expected to fail.
+    - kind: show
+      id: unknown-kind
+      body: "**1. A kind the cluster does not know.** The manifest uses a kind defined by a custom resource definition that is not installed:"
+      run: "kubectl apply -f broken/widget.yaml"
+      notice: |
+        "no matches for kind" means the API has no such kind, usually because the definition (CRD) or the
+        operator that brings it is not installed yet, or because the manifest names a version the CRD does
+        not serve. When the CRD and the object that uses it are in the same Application, Argo CD handles the
+        usual case by itself: it orders resources by kind, and tolerates a kind that the same sync is about to
+        create. Explicit ordering (**sync waves**, a number on each object) is for real dependencies that this
+        does not cover.
+    - kind: show
+      id: missing-ns
+      body: "**2. A namespace that does not exist.** First as this lesson's ordinary user, developer, who has rights only in their own project. Expect a refusal:"
+      run: "kubectl apply -f broken/configmap.yaml"
+      notice: |
+        The namespace does not exist, yet the answer is `Forbidden`, not "not found": the API checks permissions
+        first, and developer has no rights in that namespace. So this error only proves missing access; the same
+        message appears for a namespace that exists.
+    - kind: show
+      id: missing-ns-admin
+      body: "Argo CD's controller usually may write in every namespace it deploys to. The cluster administrator, kubeadmin, who may write in any namespace, applies the same file:"
+      run: "kubectl apply -f broken/configmap.yaml"
+      notice: |
+        `namespaces "no-such-namespace" not found`: the real error, the one Argo CD's controller reports when the
+        destination namespace is missing. Only an identity allowed to write there gets this far; compare the
+        `Forbidden` above, which proved only that developer may not.
+
+        If creating the namespace is authorised, it can be managed in Git as a Namespace object, or Argo CD
+        can create the destination namespace with the sync option `CreateNamespace=true`. That option does not
+        grant the right to create namespaces: a team instance limited to its own namespaces cannot create
+        cluster-scoped objects.
+    - kind: show
+      id: forbidden
+      body: "**3. Not allowed.** This user tries to create a ClusterRole, a cluster-scoped object: a set of permission rules that is not inside any namespace:"
+      run: "kubectl apply -f broken/clusterrole.yaml"
+      notice: |
+        `Forbidden`: the identity that applies the manifest lacks the permission. With Argo CD there are two
+        gates. First, the Kubernetes permissions of Argo CD's own **service account**, the identity a program
+        uses for its API requests; permission rules decide which actions it may take and where. Second, the
+        Application's **AppProject**, which lists the repositories, namespaces and kinds it may deploy. Either
+        can refuse. ([RBAC and effective permissions](/lesson/f.rbac) teaches those permission rules.)
+    - kind: ask
+      id: which-fix
+      prompt: "A sync fails with `no matches for kind \"Database\" in version \"db.example.com/v1\"`. What do you check first?"
+      choices:
+        - text: "Whether a CRD serving that kind and version exists"
+          why: "The API does not know this kind and version. Check that the CRD exists and serves `db.example.com/v1`: the operator may be missing, or the manifest may ask for a version the CRD does not serve."
+        - text: "Whether the target namespace exists in the cluster"
+          why: "A missing namespace gives a \"not found\" error about the namespace to an identity that may write there, and a \"forbidden\" error to one that may not. This message is about the kind itself."
+        - text: "Whether the AppProject allows this source repository"
+          why: "A project refusal names the project and what it does not permit. Here the API does not recognise the kind at all."
+      answer: 0
+    - kind: teach
+      id: rollback
+      title: "Going back"
+      body: |
+        A new version is synced, and it is broken. There are two ways back, and they are not equal.
+
+        **Through Git**: `git revert` creates a new commit that undoes the bad one. You review it, then **push**
+        it to the branch the Application tracks (Argo CD reads the remote repository, not your workstation).
+        With automated sync on, Argo CD then applies it like any other change; otherwise, request a sync. Git
+        still describes exactly what runs, and the history shows the mistake and its correction.
+
+        **Through Argo CD**: `argocd app rollback` re-applies an earlier synced version from Argo CD's own
+        history. It is fast, but Git still describes the broken version, so the Application is `OutOfSync` from
+        then on. Argo CD does not permit a rollback while automated sync is enabled, so it has to be disabled
+        deliberately for this recovery. Treat it as a temporary measure: repair the tracked Git state, then
+        re-enable automation.
+    - kind: show
+      id: revert
+      body: "Here is the Git way, on a small local repository with a good commit followed by a bad one. The recording does not push; pushing needs a remote, which the practice cluster does not provide. `HEAD` is the current, newest commit."
+      run: "cd repo && echo '== before: the bad commit' && git show --format='%h %s' HEAD -- deployment.yaml && git revert --no-edit HEAD >/dev/null && echo '== after: the history' && git log --oneline && echo '== the revert commit' && git show --format='%h %s' HEAD -- deployment.yaml"
+      notice: |
+        Under "before", the newest commit changes the image line from the good version to a broken one (`-`
+        removed, `+` added). `git revert` then adds a third commit; the history shows nothing was erased.
+        Under "the revert commit", the same line changes back: `-` the broken image, `+` the good one. Once
+        pushed to the tracked branch, an Argo CD Application would apply it as a normal change.
+    - kind: ask
+      id: why-revert
+      prompt: "Why is a pushed `git revert` usually preferred to `argocd app rollback`?"
+      choices:
+        - text: "Git keeps describing what actually runs"
+          why: "Once the revert is pushed and synced, Git and the cluster agree again, and the history records both the mistake and the fix. After an Argo CD rollback, Git still says the broken version."
+        - text: "It is faster in an emergency"
+          why: "An Argo CD rollback is usually faster: it needs no commit. The reason to prefer Git is that the desired state stays true."
+        - text: "Argo CD has no history of its own"
+          why: "It keeps a history of synced versions, which `argocd app history` lists and `argocd app rollback` uses."
+      answer: 0
+    - kind: teach
+      id: secrets
+      title: "Secrets do not go into Git as they are"
+      body: |
+        Everything an application needs belongs in Git, with one exception: secret values such as passwords
+        and keys. A Kubernetes **Secret** looks like any other manifest, so it is tempting to commit it. Look at
+        what one contains:
+    - kind: show
+      id: secret-yaml
+      run: "kubectl create secret generic db --from-literal=password=s3cr3t --dry-run=client -o yaml"
+      highlight: ["password:"]
+      notice: |
+        `--dry-run=client -o yaml` printed the Secret without creating it. The value under `data` does not
+        look like `s3cr3t`. Is it protected?
+    - kind: ask
+      id: guess-base64
+      guess: true
+      prompt: "Can this workstation recover the password from `czNjcjN0` without contacting the cluster?"
+      choices:
+        - text: "No: decrypting needs a key the cluster holds"
+          why: "That would be true of encryption, but this value is not encrypted: there is no key. The next step decodes it on this machine."
+        - text: "Yes: it is encoded, and decoding needs no key"
+          why: "base64 only rewrites bytes as text, so anyone holding the value can reverse it. The next step shows it."
+        - text: "No: it is a one-way hash"
+          why: "A hash cannot be reversed, but a Secret's `data` has to be readable by the application, so it is stored reversibly. The next step recovers the original."
+      answer: 1
+    - kind: show
+      id: decode
+      run: "echo czNjcjN0 | base64 -d; echo"
+      notice: |
+        `base64` is an encoding, a way to write any bytes as plain text, and `base64 -d` reverses it without
+        any key. A Secret committed to Git gives the password to everyone who can read the repository, and to
+        its whole history, forever.
+    - kind: teach
+      id: secret-options
+      body: |
+        The Argo CD documentation recommends that secret values reach the cluster without Argo CD handling
+        them. Two common ways:
+
+        - **External Secrets Operator**: Git holds only a reference ("the value stored under `db/password` in
+          our vault"); an operator in the cluster fetches the value and creates the Secret.
+        - **Sealed Secrets**: Git holds an encrypted version that only a controller inside the cluster can
+          decrypt into a Secret.
+
+        The documentation cautions against plugins that insert secret values while Argo CD renders the
+        manifests: Argo CD then holds the values, and caches the rendered manifests, values included.
+    - kind: ask
+      id: secret-transfer
+      prompt: "A colleague commits a Secret with `data.password` and says it is safe because it is not readable. What do you answer?"
+      choices:
+        - text: "It is base64, decodable by anyone with the repo"
+          why: "Encoding is not protection. Remove it, change the password (it is in the history), and use an external secret store or Sealed Secrets."
+        - text: "It is fine as long as the repository is private"
+          why: "Everyone with read access, every clone and every backup now holds the password, and Git keeps it in the history after deletion."
+        - text: "It is fine because the cluster encrypts it"
+          why: "Whatever the cluster does, the value is readable in Git itself. And Secrets are not encrypted at rest unless an administrator enables it."
+      answer: 0
+    - kind: reflect
+      id: explain-rollback
+      prompt: "During an incident, someone used `argocd app rollback`. Explain what state the Application is in now, and what should happen next."
+      model: |
+        The cluster runs an earlier version from Argo CD's history, but Git still describes the broken one, so
+        the Application is OutOfSync, and automated sync had to be off for the rollback to happen. The next
+        step is to fix Git: revert the bad commit (or commit a fix) and push it to the tracked branch, then turn automated sync back on, so that
+        Git and the cluster agree again.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read the API's error for a failed sync and say who has to act for three example errors, roll
+        back through Git and explain why that beats rolling back in Argo CD, and explain why Secrets need an
+        external store or encryption instead of a plain commit. Fixing a real sync failure also takes practice
+        with Argo CD's own operation result, which this course shows only as description.
+
+        Next: Red Hat OpenShift GitOps, how it packages Argo CD for OpenShift, and how teams organise
+        repositories for several environments.
+  sections:
+    - id: more-ops
+      title: "Hooks, ignored differences and retries"
+      depth: true
+      body: |
+        - **Hooks**: objects annotated `argocd.argoproj.io/hook: PreSync`, `Sync`, `PostSync` or `SyncFail`
+          run at that point of a sync, for example a database migration Job before the new version. A failed
+          PreSync hook fails the sync.
+        - **Sync waves**: `argocd.argoproj.io/sync-wave: "-1"` applies an object before wave 0 (the default).
+          Argo CD waits for each wave to be healthy before the next.
+        - **ignoreDifferences**: fields changed by something else on purpose (a replica count set by an
+          autoscaler, a value injected by an admission webhook) can be excluded from comparison, so the
+          Application does not stay OutOfSync forever.
+        - **Retries**: an automated sync operation retries failures 5 times by default, with a backoff that
+          starts at 5 seconds, doubles and is capped at 3 minutes (Argo CD 3.5 controller); `syncPolicy.retry`
+          changes that policy. After the operation ultimately fails, Argo CD does not keep
+          starting new operations for the same commit and parameters.
+        - Kubernetes Secrets are stored unencrypted in etcd unless an administrator enables encryption at rest,
+          and anyone allowed to create pods in a namespace can read the Secrets there.
+  review:
+    - q: "A sync fails with \"no matches for kind\". What is usually missing?"
+      a: "A CRD serving that kind and version: the operator may be missing, the manifest may name the wrong version, or the CRD comes later than its object (Argo CD usually handles that within one sync; sync waves order real dependencies)."
+    - q: "Why prefer `git revert` to `argocd app rollback`?"
+      a: "Once pushed to the tracked branch, Git keeps describing what runs, and the history records the fix. An Argo CD rollback leaves Git describing the broken version, and is not permitted while automated sync is on."
+    - q: "Is a Secret's `data` encrypted?"
+      a: "No. It is base64-encoded; `base64 -d` reads it. Never commit it as it is."
+    - q: "Name two ways to manage secrets with GitOps."
+      a: "External Secrets Operator (Git holds a reference to an external store) and Sealed Secrets (Git holds an encrypted value only the cluster can decrypt)."
+  commands:
+    - cmd: "kubectl apply -f broken/widget.yaml"
+      expect: fail
+      meaning: "an unknown kind: no matching CRD"
+    - cmd: "kubectl apply -f broken/configmap.yaml"
+      expect: fail
+      meaning: "developer has no rights in that namespace: refused before anything is looked up"
+    - cmd: "kubectl apply -f broken/configmap.yaml"
+      as: admin
+      expect: fail
+      meaning: "the administrator meets the real error: the namespace does not exist"
+    - cmd: "kubectl apply -f broken/clusterrole.yaml"
+      expect: fail
+      meaning: "an ordinary user may not create cluster-wide objects"
+    - cmd: "cd repo && git init -q && git -c user.name=Learner -c user.email=learner@example.com add . && git -c user.name=Learner -c user.email=learner@example.com commit -qm 'web: image 1.4' && sed -i 's/1.4/1.5-broken/' deployment.yaml && git -c user.name=Learner -c user.email=learner@example.com commit -qam 'web: image 1.5' && git config user.name Learner && git config user.email learner@example.com"
+      meaning: "a repository with a good commit and a bad one (not shown in the lesson)"
+    - cmd: "cd repo && echo '== before: the bad commit' && git show --format='%h %s' HEAD -- deployment.yaml && git revert --no-edit HEAD >/dev/null && echo '== after: the history' && git log --oneline && echo '== the revert commit' && git show --format='%h %s' HEAD -- deployment.yaml"
+      meaning: "a new commit undoes the bad one"
+    - cmd: "kubectl create secret generic db --from-literal=password=s3cr3t --dry-run=client -o yaml"
+      meaning: "a Secret manifest: the value is base64"
+    - cmd: "echo czNjcjN0 | base64 -d; echo"
+      meaning: "base64 decodes without a key"
+  files:
+    broken/widget.yaml: |
+      apiVersion: example.com/v1
+      kind: Widget
+      metadata:
+        name: demo
+    broken/configmap.yaml: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: settings
+        namespace: no-such-namespace
+      data:
+        mode: production
+    broken/clusterrole.yaml: |
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: academy-demo-reader
+      rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+          verbs: ["get", "list"]
+    repo/deployment.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+              - name: web
+                image: registry.example.com/team/web:1.4
+  references:
+    - {title: "Argo CD: sync waves and hooks", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/"}
+    - {title: "Argo CD: sync options (CreateNamespace)", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/"}
+    - {title: "Argo CD: projects", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/projects/"}
+    - {title: "Argo CD: argocd app rollback", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_rollback/"}
+    - {title: "Argo CD: automated sync policy (rollback with automated sync)", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/"}
+    - {title: "Argo CD 3.5 source: default retry for automated sync (controller/appcontroller.go)", url: "https://github.com/argoproj/argo-cd/blob/v3.5.5/controller/appcontroller.go"}
+    - {title: "Argo CD: secret management", url: "https://argo-cd.readthedocs.io/en/stable/operator-manual/secret-management/"}
+    - {title: "Argo CD: diffing customisation (ignoreDifferences)", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/"}
+    - {title: "Kubernetes documentation: Secrets", url: "https://kubernetes.io/docs/concepts/configuration/secret/"}
+    - {title: "Git documentation: git revert", url: "https://git-scm.com/docs/git-revert"}
+
+- id: gx.openshift-gitops
+  title: "GitOps operator and several environments"
+  subtitle: "Argo CD as an operator, overlays per environment, and charts rendered for Git"
+  module: p6-gitops
+  mode: REAL_LAB
+  minutes: 25
+  level: 2
+  supports: "Red Hat OpenShift GitOps 1.21 documentation (Argo CD 3.4; 1.22 ships Argo CD 3.5); Kubernetes 1.34 with the Kustomize built into the client bundled with oc (invoked as kubectl) and Helm 3.17, recorded on a RHEL 9 workstation and OpenShift Local as an ordinary user. OpenShift GitOps is not installed on the practice cluster (installing it needs cluster-admin): its objects here are examples."
+  concepts: [gitops.argocd, deploy.packaging]
+  prerequisites: [gx.argocd-ops, k.kubectl-to-oc, c.olm]
+  record_on: cluster
+  objective: |
+    Explain what OpenShift GitOps adds to upstream Argo CD and who may use its default instance, organise one
+    application for several environments with Kustomize overlays, and say what Argo CD does with a Helm chart.
+  flow:
+    - kind: ask
+      id: recall-prune
+      recalls: gx.argocd
+      prompt: "A look back. A Deployment is deleted from Git. Automated sync is on, prune is off. What happens in the cluster?"
+      choices:
+        - text: "It keeps running, and the Application is OutOfSync"
+          why: "A change that only removes objects needs pruning. With automated pruning off, automated sync is skipped for it, so the live Deployment stays and the Application stays OutOfSync until someone decides."
+        - text: "Argo CD deletes it at the next sync"
+          why: "That is what `prune: true` adds. It is off by default."
+        - text: "The sync fails until it is restored in Git"
+          why: "Removing an object from Git is a normal change, not an error. With pruning off, automated sync is skipped for it and the old object stays, flagged for someone to remove."
+      answer: 0
+    - kind: teach
+      id: what-it-is
+      title: "The GitOps operator is Argo CD, packaged"
+      body: |
+        **Red Hat OpenShift GitOps** is an operator: install it from the cluster's catalogue, and it installs,
+        configures and upgrades Argo CD for you. It is based on the upstream Argo CD project, with Red Hat
+        support and OpenShift integration, such as logging in with OpenShift accounts. This lesson was written
+        from the 1.21 documentation (Argo CD 3.4); version 1.22 ships Argo CD 3.5. A release can lag behind the newest upstream Argo CD, so check the compatibility table in the
+        release notes before relying on a recent upstream feature.
+
+        Everything from the previous two lessons applies unchanged: Applications, projects, sync and health,
+        self-heal and prune. Two things are OpenShift-specific.
+    - kind: teach
+      id: instances
+      body: |
+        **A default instance.** The operator creates an Argo CD instance in the namespace `openshift-gitops`.
+        It is cluster-scoped: its service account (the identity it uses for API requests) holds extra
+        permissions on cluster-wide resources, objects that belong to no namespace, because it is meant for
+        managing the cluster's own configuration. Whoever can create Applications in it can deploy with
+        those permissions, so access to it belongs to cluster administrators.
+
+        **Instances for teams.** Additional Argo CD instances can be created with an `ArgoCD` object
+        (`argoproj.io/v1beta1`). By default an instance manages only its own namespace. To let it deploy into
+        another namespace, that namespace is labelled `argocd.argoproj.io/managed-by=<instance namespace>`.
+        Installing the operator needs cluster-admin. Who may create an instance depends on your setup: Red Hat's
+        instance procedure is written for a cluster administrator, while its multitenancy guidance lets users who
+        may create `ArgoCD` objects in their namespace run their own. Check which applies on your cluster.
+    - kind: show
+      id: argocd-cr
+      body: "A team instance and a namespace it may manage. Examples to read, not recordings:"
+      code: |
+        apiVersion: argoproj.io/v1beta1
+        kind: ArgoCD
+        metadata:
+          name: team-a
+          namespace: team-a-gitops
+        ---
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: team-a-prod
+          labels:
+            argocd.argoproj.io/managed-by: team-a-gitops
+      caption: "argocd-team-a.yaml (example)"
+      highlight: ["kind: ArgoCD", "managed-by"]
+      notice: "The instance lives in `team-a-gitops`; the label on `team-a-prod` allows it to deploy there. Application objects for this instance are created in `team-a-gitops`, not in `openshift-gitops`."
+    - kind: ask
+      id: who-default
+      prompt: "A development team asks for access to the default instance in `openshift-gitops` to deploy their app. What is the usual answer?"
+      choices:
+        - text: "An administrator sets up a team instance"
+          why: "The default instance has cluster-wide permissions. A team instance, created by an administrator, is limited to its own namespaces. A restricted AppProject can narrow what Applications may deploy, but Kubernetes access to the `openshift-gitops` namespace can bypass Argo CD's own access rules, so that namespace stays with administrators."
+        - text: "Add them to the default instance"
+          why: "Anyone who can create Applications there can deploy with its cluster-wide permissions, which is far more than a team needs."
+        - text: "Let them run `oc apply` instead"
+          why: "That gives up GitOps for the team. A team instance gives them GitOps with permissions limited to their namespaces."
+      answer: 0
+    - kind: teach
+      id: environments
+      title: "One application, several environments"
+      body: |
+        Most applications run in several environments, such as development, staging and production, which
+        differ in a few details: replicas, resource limits, a host name. Copying the whole set of manifests
+        per environment works until the copies drift apart.
+
+        **Kustomize**, built into `kubectl` and `oc`, avoids the copies. A **base** directory holds the
+        manifests common to all environments; each **overlay** directory refers to the base and lists only
+        its differences. The directories of this example:
+    - kind: show
+      id: tree
+      run: "find base overlays -type f | sort"
+      notice: "One base, two overlays. Each directory with a `kustomization.yaml` can be rendered."
+    - kind: show
+      id: base-deployment
+      run: "cat base/deployment.yaml"
+      highlight: ["replicas: 1"]
+      notice: "The base Deployment says 1 replica and has no namespace. Overlays will change both."
+    - kind: show
+      id: overlay
+      run: "cat overlays/prod/kustomization.yaml"
+      notice: "`resources` lists what to start from: `../../base` is relative to this file, so `overlays/prod/` up two levels is the base. `namespace` puts everything in `web-prod`. `replicas` selects the Deployment named `web` and sets its count to 4, instead of the base's 1. If the base changes, every overlay inherits the change except the fields it overrides."
+    - kind: ask
+      id: base-changes
+      prompt: "The base Deployment is changed to 2 replicas. How many does the prod overlay render, and the dev overlay?"
+      choices:
+        - text: "Prod 4, dev 2"
+          why: "Prod sets its own count, which overrides the base. Dev sets none, so it inherits the base's 2."
+        - text: "Both 2"
+          why: "The prod overlay's `replicas` entry still applies on top of the base, so prod stays at 4."
+        - text: "Prod 6, dev 2"
+          why: "Overlays replace a value; they do not add to it."
+      answer: 0
+    - kind: show
+      id: render
+      body: "`kubectl kustomize` shows the manifests an overlay produces, without applying anything:"
+      run: "kubectl kustomize overlays/prod"
+      highlight: ["replicas: 4", "namespace: web-prod"]
+      notice: |
+        The base's Deployment, with the production namespace and 4 replicas. Argo CD does the same rendering
+        when an Application's `path` points at a directory containing a `kustomization.yaml`.
+    - kind: try
+      id: try-render-dev
+      body: "The development Application will point at the other overlay in the listing above. Before anyone creates it, render what it would apply, without touching the cluster. Then compare it with production: which fields did the development overlay change?"
+      accept: ["kubectl kustomize overlays/dev", "kubectl kustomize overlays/dev/", "kubectl kustomize ./overlays/dev", "kubectl kustomize ./overlays/dev/", "oc kustomize overlays/dev", "oc kustomize overlays/dev/", "oc kustomize ./overlays/dev", "oc kustomize ./overlays/dev/"]
+      hints:
+        - match: "^(kubectl|oc) apply"
+          say: "`apply` would send the result to the cluster. The task is to see the rendered manifests: `kubectl kustomize`."
+        - match: "^(kubectl|oc) kustomize (\\./)?base"
+          say: "That renders the common base. The development environment is its overlay."
+        - match: "overlays/prod"
+          say: "That is production. Development is the other overlay in the listing."
+      hint: "Kustomize renders the directory that holds an overlay's `kustomization.yaml`; the listing shows the development one."
+      run: "kubectl kustomize overlays/dev"
+      then: "Namespace `web-dev`, and the base's single replica: the dev overlay changes only the namespace."
+    - kind: show
+      id: env-applications
+      body: "So each environment is one Application pointing at its overlay. Two examples to read, not recordings (placeholder repository):"
+      code: |
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: web-dev
+          namespace: openshift-gitops
+        spec:
+          project: default
+          source:
+            repoURL: https://git.example.com/team/web-config.git
+            targetRevision: main
+            path: overlays/dev
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: web-dev
+        ---
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: web-prod
+          namespace: openshift-gitops
+        spec:
+          project: default
+          source:
+            repoURL: https://git.example.com/team/web-config.git
+            targetRevision: main
+            path: overlays/prod
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: web-prod
+      caption: "applications.yaml (example)"
+      highlight: ["name: web-", "path: overlays", "namespace: web-"]
+      notice: |
+        Distinct names, one overlay each, and a destination namespace matching the `namespace` the overlay
+        writes. The overlay's namespace is what ends up in the rendered manifests; the Application's
+        destination only fills in a namespace the manifests lack, so keep the two equal. The namespaces
+        `web-dev` and `web-prod` must exist already, created by an administrator, who also grants this
+        instance access to them (the default instance is shown here only to keep the example short).
+    - kind: teach
+      id: promotion
+      body: |
+        **Promoting** a change from one environment to the next is then a commit: change the value in the
+        dev overlay, check it, then make the same change in the prod overlay. Each step is reviewed and
+        recorded. To make a promotion reproducible, name an explicit image version, never `:latest` as the
+        example base does for brevity: promoting means committing the same version to the next overlay. Teams also use separate branches per environment, but a branch per environment makes it
+        hard to see how environments differ; the Argo CD documentation itself does not prescribe a layout.
+
+        When there are many environments or clusters, an **ApplicationSet** generates the Applications from a
+        template, one per item of a list, per registered cluster, or per directory found in Git.
+    - kind: ask
+      id: where-change
+      prompt: "Production must run 6 replicas; the other environments stay as they are. Where do you change it?"
+      choices:
+        - text: "In the prod overlay"
+          why: "The overlay holds what differs for production. The base and the other overlays are untouched."
+        - text: "In the base"
+          why: "The base is shared, so every environment without its own replica setting would change too."
+        - text: "With `oc scale` in the prod namespace"
+          why: "Argo CD would report the drift, and with self-heal undo it. The change belongs in Git, in the prod overlay."
+      answer: 0
+    - kind: teach
+      id: helm
+      title: "Helm charts, the Argo CD way"
+      body: |
+        A **Helm chart** is a package of templated manifests, filled in from **values**. Argo CD does not
+        install charts with Helm; it only renders the chart into plain manifests with `helm template`, then
+        applies them like any others. The chart's default values:
+    - kind: show
+      id: helm-values
+      run: "cat chart/values.yaml"
+      notice: "Defaults: 1 replica, and an image tag `1.3`. In the template, `{{ .Values.replicas }}` is replaced by the first value and `{{ .Values.image.tag }}` by the tag; the dot in `image.tag` walks into the nested `image` block."
+    - kind: show
+      id: helm-template
+      run: "helm template web ./chart --set replicas=3 --set image.tag=1.4"
+      highlight: ["replicas: 3", "1.4"]
+      notice: |
+        `web` is the release name (it fills `.Release.Name`), `./chart` is the chart's directory, and each
+        `--set` overrides one default. The output is plain manifests with the values filled in: 3 replicas and
+        tag `1.4`. This is what Argo CD compares with the cluster and applies.
+    - kind: ask
+      id: helm-created
+      prompt: "Did running `helm template` create anything in the cluster?"
+      choices:
+        - text: "No: it only printed manifests"
+          why: "`helm template` renders locally and talks to no cluster. Nothing was applied, so nothing was created."
+        - text: "Yes, a Deployment named web"
+          why: "The Deployment is in the output as text only. Something would still have to apply it, which is Argo CD's job here."
+        - text: "Yes, a Helm release named web"
+          why: "A release is recorded in the cluster by `helm install`, which Argo CD does not run."
+      answer: 0
+    - kind: teach
+      id: helm-consequence
+      body: |
+        Since no release is installed, `helm list` shows nothing for an Argo CD application, and `helm
+        rollback` does not apply. History and rollback are Git's and Argo CD's.
+        [Kustomize and Helm](/lesson/o2.kustomize-helm) compares Helm's own lifecycle with Kustomize in more
+        depth.
+    - kind: reflect
+      id: explain-env
+      prompt: "Explain how a team can run the same application in dev and prod with Argo CD, without copying all its manifests."
+      model: |
+        Keep the shared manifests in a Kustomize base and one small overlay per environment with only the
+        differences, such as namespace and replicas. Create one Argo CD Application per environment, each with
+        `path` pointing at its overlay. A change is promoted by committing it to the dev overlay first, then to
+        the prod overlay, each through review.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can explain what OpenShift GitOps adds to Argo CD and why its default instance is for
+        administrators, organise environments with Kustomize overlays, and say what Argo CD does with a Helm
+        chart.
+
+        Next, [Events, logs, metrics, traces](/lesson/h.observability) starts the observability module: once Git
+        drives the changes, you still need evidence of what the cluster and the applications did. To review
+        Kustomize overlays and Helm releases outside Argo CD, [Kustomize and Helm](/lesson/o2.kustomize-helm) in
+        Platform administration covers both, and [Someone changed production by hand](/lab/inc.gitops-drift) is a drift incident
+        to diagnose on your own.
+  sections:
+    - id: install-notes
+      title: "Installing and configuring the GitOps operator"
+      depth: true
+      body: |
+        - The operator is installed from the console's software catalogue (OperatorHub) or with a Subscription
+          in the namespace `openshift-gitops-operator`, by a cluster administrator.
+        - The default instance can be turned off with `DISABLE_DEFAULT_ARGOCD_INSTANCE: "true"` in the
+          operator Subscription's environment.
+        - Remove any community Argo CD operator before installing OpenShift GitOps.
+        - Application objects belong in the namespace of the Argo CD instance that should handle them:
+          `openshift-gitops` for the default instance, not `argocd` as in upstream examples.
+        - Pin remote Kustomize bases and charts to a tag or commit rather than a moving branch, and leave
+          `replicas` out of Git when an autoscaler manages them (Argo CD best practices).
+  review:
+    - q: "What is Red Hat OpenShift GitOps?"
+      a: "An operator that installs and manages Argo CD on OpenShift, with Red Hat support and OpenShift integration."
+    - q: "Why is the default instance in `openshift-gitops` reserved for administrators?"
+      a: "It has extra cluster-wide permissions; anyone who can create Applications there can deploy with them."
+    - q: "How does Kustomize avoid copying manifests per environment?"
+      a: "A base holds the shared manifests; each overlay refers to it and lists only its differences."
+    - q: "Does Argo CD run `helm install`?"
+      a: "No. It renders charts with `helm template` and applies the result, so no Helm release exists and `helm rollback` does not apply."
+  commands:
+    - cmd: "find base overlays -type f | sort"
+      meaning: "the directory layout"
+    - cmd: "cat base/deployment.yaml"
+      meaning: "the shared base"
+    - cmd: "cat overlays/prod/kustomization.yaml"
+      meaning: "the production overlay"
+    - cmd: "kubectl kustomize overlays/prod"
+      meaning: "the rendered production manifests"
+    - cmd: "kubectl kustomize overlays/dev"
+      meaning: "the rendered development manifests"
+    - cmd: "cat chart/values.yaml"
+      meaning: "the chart's default values"
+    - cmd: "helm template web ./chart --set replicas=3 --set image.tag=1.4"
+      meaning: "a chart rendered to plain manifests, as Argo CD does"
+  files:
+    base/kustomization.yaml: |
+      resources:
+        - deployment.yaml
+    base/deployment.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+              - name: web
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+    overlays/dev/kustomization.yaml: |
+      resources:
+        - ../../base
+      namespace: web-dev
+    overlays/prod/kustomization.yaml: |
+      resources:
+        - ../../base
+      namespace: web-prod
+      replicas:
+        - name: web
+          count: 4
+    chart/Chart.yaml: |
+      apiVersion: v2
+      name: web
+      version: 0.1.0
+    chart/values.yaml: |
+      replicas: 1
+      image:
+        repository: registry.example.com/team/web
+        tag: "1.3"
+    chart/templates/deployment.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: {{ .Release.Name }}
+      spec:
+        replicas: {{ .Values.replicas }}
+        selector:
+          matchLabels:
+            app: {{ .Release.Name }}
+        template:
+          metadata:
+            labels:
+              app: {{ .Release.Name }}
+          spec:
+            containers:
+              - name: web
+                image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  references:
+    - {title: "Red Hat OpenShift GitOps 1.21: About OpenShift GitOps", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.21/html/understanding_openshift_gitops/about-redhat-openshift-gitops"}
+    - {title: "Red Hat OpenShift GitOps 1.21: Release notes (Argo CD versions)", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.21/html/release_notes/gitops-release-notes"}
+    - {title: "Red Hat OpenShift GitOps 1.22: Release notes (compatibility and support matrix)", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.22/html/release_notes/gitops-release-notes"}
+    - {title: "Red Hat OpenShift GitOps 1.21: Setting up an Argo CD instance", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.21/html/argo_cd_instance/setting-up-argocd-instance"}
+    - {title: "Red Hat OpenShift GitOps 1.21: Installing OpenShift GitOps", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.21/html/installing_gitops/installing-openshift-gitops"}
+    - {title: "Kubernetes documentation: Declarative management using Kustomize", url: "https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/"}
+    - {title: "Argo CD: Kustomize", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/kustomize/"}
+    - {title: "Argo CD: Helm", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/helm/"}
+    - {title: "Argo CD: ApplicationSet", url: "https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/"}
+    - {title: "Helm documentation: helm template", url: "https://helm.sh/docs/helm/helm_template/"}

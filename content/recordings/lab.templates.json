@@ -1,0 +1,206 @@
+{
+ "lab": "lab.templates",
+ "kind": "lab",
+ "lab_hash": "a228611878c0d9cc",
+ "recorded_at": "2026-10-14T14:50:55+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "load",
+   "cmd": "oc create -f lab/web-template.yaml -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "template.template.openshift.io/web created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "load",
+   "cmd": "oc get templates -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   DESCRIPTION                                                       PARAMETERS    OBJECTS\nweb    A static web page served by httpd, with a generated access key.   4 (1 blank)   5\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "load",
+   "cmd": "oc process --parameters web -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                DESCRIPTION                                        GENERATOR           VALUE\nNAME                Name of every object the template creates                              \nGREETING            Text of the page                                                       hello\nREPLICAS            Number of pods                                                         1\nACCESS_KEY          A random key, generated if you do not supply one   expression          [a-z0-9]{16}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "load",
+   "cmd": "oc get deployments -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-tpl namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "render",
+   "cmd": "oc process web -p NAME=shop -p GREETING=hello-from-a-template -n academy-tpl -o yaml",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\nitems:\n- apiVersion: v1\n  data:\n    index.html: hello-from-a-template\n  kind: ConfigMap\n  metadata:\n    labels:\n      template: web\n    name: shop-content\n- apiVersion: v1\n  kind: Secret\n  metadata:\n    labels:\n      template: web\n    name: shop-key\n  stringData:\n    key: <generated-1>\n- apiVersion: apps/v1\n  kind: Deployment\n  metadata:\n    labels:\n      app: shop\n      template: web\n    name: shop\n  spec:\n    replicas: 1\n    selector:\n      matchLabels:\n        app: shop\n    template:\n      metadata:\n        labels:\n          app: shop\n      spec:\n        containers:\n        - image: registry.access.redhat.com/ubi9/httpd-24:latest\n          name: httpd\n          ports:\n          - containerPort: 8080\n          readinessProbe:\n            httpGet:\n              path: /\n              port: 8080\n            periodSeconds: 5\n          resources:\n            limits:\n              memory: 128Mi\n            requests:\n              cpu: 10m\n              memory: 32Mi\n          volumeMounts:\n          - mountPath: /var/www/html\n            name: content\n        terminationGracePeriodSeconds: 2\n        volumes:\n        - configMap:\n            name: shop-content\n          name: content\n- apiVersion: v1\n  kind: Service\n  metadata:\n    labels:\n      template: web\n    name: shop\n  spec:\n    ports:\n    - port: 8080\n      targetPort: 8080\n    selector:\n      app: shop\n- apiVersion: route.openshift.io/v1\n  kind: Route\n  metadata:\n    labels:\n      template: web\n    name: shop\n  spec:\n    port:\n      targetPort: 8080\n    to:\n      kind: Service\n      name: shop\nkind: List\nmetadata: {}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "render",
+   "cmd": "oc process web -n academy-tpl",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unable to process template\n  Required value: template.parameters[0]: parameter NAME is required and must be specified\n",
+   "ok": true
+  },
+  {
+   "step": "instantiate",
+   "cmd": "oc new-app --template=web -p NAME=shop -p GREETING=hello-from-a-template -p REPLICAS=2 -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "--> Deploying template \"academy-tpl/web\" to project academy-tpl\n\n     web\n     ---------\n     A static web page served by httpd, with a generated access key.\n\n     * With parameters:\n        * NAME=shop\n        * GREETING=hello-from-a-template\n        * REPLICAS=2\n        * ACCESS_KEY=<generated-2> # generated\n\n--> Creating resources ...\n    configmap \"shop-content\" created\n    secret \"shop-key\" created\n    deployment.apps \"shop\" created\n    service \"shop\" created\n    route.route.openshift.io \"shop\" created\n--> Success\n    Access your application via route 'shop-academy-tpl.apps-crc.testing' \n    Run 'oc status' to view your app.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "instantiate",
+   "cmd": "oc rollout status deploy/shop -n academy-tpl --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"shop\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"shop\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"shop\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "instantiate",
+   "cmd": "oc get deploy,svc,route,configmap,secret -l template=web -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/shop   2/2     2            2           65s\n\nNAME           TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nservice/shop   ClusterIP   10.217.4.104   <none>        8080/TCP   65s\n\nNAME                            HOST/PORT                           PATH   SERVICES   PORT   TERMINATION   WILDCARD\nroute.route.openshift.io/shop   shop-academy-tpl.apps-crc.testing          shop       8080                 None\n\nNAME                     DATA   AGE\nconfigmap/shop-content   1      65s\n\nNAME              TYPE     DATA   AGE\nsecret/shop-key   Opaque   1      65s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "regenerate",
+   "cmd": "oc extract secret/shop-key --to=- -n academy-tpl",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<generated-2>\n",
+   "stderr": "# key\n",
+   "ok": true
+  },
+  {
+   "step": "regenerate",
+   "cmd": "oc process web -p NAME=shop -n academy-tpl -o jsonpath={.items[1].stringData.key}",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<generated-3>",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "template",
+    "title": "the template web is loaded in the project",
+    "expect": "exists",
+    "status": "fail",
+    "observed": "Error from server (NotFound): templates.template.openshift.io \"web\" not found"
+   },
+   {
+    "id": "ready",
+    "title": "shop runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "route",
+    "title": "Route shop serves the greeting",
+    "expect": "HTTP 200 hello-from-a-template",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"shop\" not found"
+   }
+  ],
+  "at": 1791989470.6331813
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "template",
+    "title": "the template web is loaded in the project",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "template/web exists"
+   },
+   {
+    "id": "ready",
+    "title": "shop runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "route",
+    "title": "Route shop serves the greeting",
+    "expect": "HTTP 200 hello-from-a-template",
+    "status": "pass",
+    "observed": "http://shop-academy-tpl.apps-crc.testing/ → HTTP 200 · hello-from-a-template"
+   }
+  ],
+  "at": 1791989566.7678494
+ },
+ "seconds": 111,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-tpl: gone"
+  ]
+ },
+ "ok": true,
+ "problems": [],
+ "redactions": [
+  {
+   "replaced": "values generated by the template's parameter generator (random characters)",
+   "with": "<generated-N>, one number per distinct value",
+   "why": "they were stored in Secrets of a temporary lab project on a training cluster that no longer exists; they are not reused anywhere, and are not published as values",
+   "date": "2026-10-17"
+  }
+ ]
+}

@@ -1,0 +1,120 @@
+{
+ "lab": "lesson.l.image-pullers",
+ "kind": "lesson",
+ "lab_hash": "e5b6bbfe4e2e4a5a",
+ "recorded_at": "2026-10-15T22:25:34+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-l-image-pullers",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get rolebindings -o wide",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                               AGE   USERS       GROUPS                                                  SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  10s   developer                                                           \nsystem:deployers        ClusterRole/system:deployer        8s                                                                        academy-lesson-l-image-pullers/deployer\nsystem:image-builders   ClusterRole/system:image-builder   8s                                                                        academy-lesson-l-image-pullers/builder\nsystem:image-pullers    ClusterRole/system:image-puller    8s                system:serviceaccounts:academy-lesson-l-image-pullers   \n",
+   "stderr": "",
+   "combined": "NAME                    ROLE                               AGE   USERS       GROUPS                                                  SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  10s   developer                                                           \nsystem:deployers        ClusterRole/system:deployer        8s                                                                        academy-lesson-l-image-pullers/deployer\nsystem:image-builders   ClusterRole/system:image-builder   8s                                                                        academy-lesson-l-image-pullers/builder\nsystem:image-pullers    ClusterRole/system:image-puller    8s                system:serviceaccounts:academy-lesson-l-image-pullers   \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe clusterrole system:image-puller",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         system:image-puller\nLabels:       <none>\nAnnotations:  openshift.io/description: Grants the right to pull images from within a project.\n              rbac.authorization.kubernetes.io/autoupdate: true\nPolicyRule:\n  Resources                               Non-Resource URLs  Resource Names  Verbs\n  ---------                               -----------------  --------------  -----\n  imagestreams/layers                     []                 []              [get]\n  imagestreams.image.openshift.io/layers  []                 []              [get]\n",
+   "stderr": "",
+   "combined": "Name:         system:image-puller\nLabels:       <none>\nAnnotations:  openshift.io/description: Grants the right to pull images from within a project.\n              rbac.authorization.kubernetes.io/autoupdate: true\nPolicyRule:\n  Resources                               Non-Resource URLs  Resource Names  Verbs\n  ---------                               -----------------  --------------  -----\n  imagestreams/layers                     []                 []              [get]\n  imagestreams.image.openshift.io/layers  []                 []              [get]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc tag registry.access.redhat.com/ubi9/ubi-minimal:latest minimal:latest --reference-policy=local; for i in $(seq 1 30); do oc get istag minimal:latest 2>/dev/null && break; sleep 2; done",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Tag minimal:latest set to registry.access.redhat.com/ubi9/ubi-minimal:latest.\nNAME             IMAGE REFERENCE                                                                                                                                                   UPDATED\nminimal:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-l-image-pullers/minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db   2 seconds ago\n",
+   "stderr": "",
+   "combined": "Tag minimal:latest set to registry.access.redhat.com/ubi9/ubi-minimal:latest.\nNAME             IMAGE REFERENCE                                                                                                                                                   UPDATED\nminimal:latest   image-registry.openshift-image-registry.svc:5000/academy-lesson-l-image-pullers/minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db   2 seconds ago\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment consumer --image=image-registry.openshift-image-registry.svc:5000/academy-lesson-l-image-pullers/minimal:latest -- sleep infinity; oc rollout status deployment/consumer --timeout=180s; oc get pods -l app=consumer",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/consumer created\nWaiting for deployment \"consumer\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"consumer\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"consumer\" successfully rolled out\nNAME                        READY   STATUS    RESTARTS   AGE\nconsumer-74fc9fb79c-wwrsq   1/1     Running   0          8s\n",
+   "stderr": "",
+   "combined": "deployment.apps/consumer created\nWaiting for deployment \"consumer\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"consumer\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"consumer\" successfully rolled out\nNAME                        READY   STATUS    RESTARTS   AGE\nconsumer-74fc9fb79c-wwrsq   1/1     Running   0          8s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create serviceaccount viewer; oc create serviceaccount editor; oc policy add-role-to-user view -z viewer; oc policy add-role-to-user edit -z editor; for sa in default builder viewer editor; do for v in get update; do echo -n \"$sa: $v layers -> \"; oc auth can-i $v imagestreams --subresource=layers --as=system:serviceaccount:academy-lesson-l-image-pullers:$sa; done; done",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/viewer created\nserviceaccount/editor created\nclusterrole.rbac.authorization.k8s.io/view added: \"viewer\"\nclusterrole.rbac.authorization.k8s.io/edit added: \"editor\"\ndefault: get layers -> yes\ndefault: update layers -> no\nbuilder: get layers -> yes\nbuilder: update layers -> yes\nviewer: get layers -> yes\nviewer: update layers -> no\neditor: get layers -> yes\neditor: update layers -> yes\n",
+   "stderr": "",
+   "combined": "serviceaccount/viewer created\nserviceaccount/editor created\nclusterrole.rbac.authorization.k8s.io/view added: \"viewer\"\nclusterrole.rbac.authorization.k8s.io/edit added: \"editor\"\ndefault: get layers -> yes\ndefault: update layers -> no\nbuilder: get layers -> yes\nbuilder: update layers -> yes\nviewer: get layers -> yes\nviewer: update layers -> no\neditor: get layers -> yes\neditor: update layers -> yes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterrole registry-viewer -o jsonpath='{.metadata.labels}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"rbac.authorization.k8s.io/aggregate-to-view\":\"true\"}",
+   "stderr": "",
+   "combined": "{\"rbac.authorization.k8s.io/aggregate-to-view\":\"true\"}",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy who-can get imagestreams --subresource=layers | grep -E 'academy-lesson|^Groups|^Resource'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Namespace: academy-lesson-l-image-pullers\nResource:  imagestreams.image.openshift.io/layers\n        system:serviceaccount:academy-lesson-l-image-pullers:builder\n        system:serviceaccount:academy-lesson-l-image-pullers:editor\n        system:serviceaccount:academy-lesson-l-image-pullers:viewer\nGroups: system:cluster-admins\n        system:serviceaccounts:academy-lesson-l-image-pullers\n",
+   "stderr": "",
+   "combined": "Namespace: academy-lesson-l-image-pullers\nResource:  imagestreams.image.openshift.io/layers\n        system:serviceaccount:academy-lesson-l-image-pullers:builder\n        system:serviceaccount:academy-lesson-l-image-pullers:editor\n        system:serviceaccount:academy-lesson-l-image-pullers:viewer\nGroups: system:cluster-admins\n        system:serviceaccounts:academy-lesson-l-image-pullers\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy add-role-to-user system:image-puller system:serviceaccount:shop:default; oc get rolebindings -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:image-puller added: \"system:serviceaccount:shop:default\"\nNAME                    ROLE                   SUBJECT_NS                       SUBJECT\nadmin                   admin                  <none>                           developer\nedit                    edit                   academy-lesson-l-image-pullers   editor\nsystem:deployers        system:deployer        academy-lesson-l-image-pullers   deployer\nsystem:image-builders   system:image-builder   academy-lesson-l-image-pullers   builder\nsystem:image-puller     system:image-puller    shop                             default\nsystem:image-pullers    system:image-puller    <none>                           system:serviceaccounts:academy-lesson-l-image-pullers\nview                    view                   academy-lesson-l-image-pullers   viewer\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:image-puller added: \"system:serviceaccount:shop:default\"\nNAME                    ROLE                   SUBJECT_NS                       SUBJECT\nadmin                   admin                  <none>                           developer\nedit                    edit                   academy-lesson-l-image-pullers   editor\nsystem:deployers        system:deployer        academy-lesson-l-image-pullers   deployer\nsystem:image-builders   system:image-builder   academy-lesson-l-image-pullers   builder\nsystem:image-puller     system:image-puller    shop                             default\nsystem:image-pullers    system:image-puller    <none>                           system:serviceaccounts:academy-lesson-l-image-pullers\nview                    view                   academy-lesson-l-image-pullers   viewer\n",
+   "ok": true
+  }
+ ],
+ "seconds": 59,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,122 @@
+{
+ "v": 2,
+ "lessons": {
+  "b.reconciliation": {
+   "seen": 1792369715033,
+   "pos": "check:recall-chain"
+  },
+  "f0.objects-api": {
+   "seen": 1792369716063,
+   "pos": "check:recall-deployment"
+  },
+  "d.services-dns": {
+   "seen": 1792369717073,
+   "done": 1792369718229,
+   "pos": "summary"
+  }
+ },
+ "predictions": {
+  "q4bbc722ea3": {
+   "first": {
+    "ok": false,
+    "at": 1792369715326,
+    "pick": 2
+   },
+   "latest": {
+    "ok": false,
+    "at": 1792369715326,
+    "pick": 2
+   },
+   "n": 1
+  },
+  "try:b.reconciliation:try-scale": {
+   "first": {
+    "ok": false,
+    "at": 1792369715570,
+    "pick": -2
+   },
+   "latest": {
+    "ok": false,
+    "at": 1792369715704,
+    "pick": -1
+   },
+   "n": 2
+  },
+  "order:f0.objects-api:order-owners": {
+   "first": {
+    "ok": false,
+    "at": 1792369716385,
+    "pick": 1
+   },
+   "latest": {
+    "ok": false,
+    "at": 1792369716674,
+    "pick": -1,
+    "shown": true
+   },
+   "n": 2
+  }
+ },
+ "guesses": {
+  "guess:q9bf21a3d0f": {
+   "at": 1792369715413,
+   "pick": 1
+  }
+ },
+ "explains": {},
+ "labs": {
+  "inc.dns-typo": {
+   "started": 1792369718863,
+   "steps": {},
+   "hints": 1,
+   "incident": {
+    "stage": 2,
+    "hints": 1,
+    "draft": "The client asks for payments-web, but the Service is called web.",
+    "replays": [
+     "0",
+     "2"
+    ],
+    "nextHintAt": 1792369735087
+   }
+  },
+  "inc.broken-rollout": {
+   "started": 1792369721430,
+   "steps": {},
+   "revealed": 1792369721430,
+   "diagnosis": "The new image tag does not exist, so the new pods never become ready.",
+   "selfCheck": {
+    "root": true,
+    "evidence": false,
+    "fix": false,
+    "at": 1792369721845
+   },
+   "incident": {
+    "stage": 3,
+    "draft": "The new image tag does not exist, so the new pods never become ready."
+   }
+  },
+  "ch.bounded-cleanup": {
+   "started": 1792369722188,
+   "steps": {},
+   "hints": 1,
+   "revealed": 1792369722321
+  }
+ },
+ "cards": {},
+ "confidence": {},
+ "diagnostics": {},
+ "days": [
+  "2026-10-19"
+ ],
+ "cmds": {
+  "oc logs deploy/checkout --tail=4 -n academy-inc-dns": 1,
+  "oc exec deploy/checkout -n academy-inc-dns -- cat /etc/resolv.conf": 1
+ },
+ "xp": 43,
+ "last": {
+  "href": "/challenges/automate-a-cleanup-safely",
+  "title": "Automate a cleanup safely",
+  "at": 1792369722049
+ }
+}

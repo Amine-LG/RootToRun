@@ -1,0 +1,346 @@
+{
+ "lab": "lesson.p.ldap-group-sync",
+ "kind": "lesson",
+ "lab_hash": "2cd13c0cf5877ada",
+ "recorded_at": "2026-10-20T14:50:51+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-p-ldap-group-sync",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc project -q > ns.txt && oc create configmap glauth --from-file=config.cfg=glauth.cfg && oc create deployment ldap --image=docker.io/glauth/glauth:v2.3.2 --port=3893 && oc set volume deploy/ldap --add --name=cfg --configmap-name=glauth --mount-path=/app/config >/dev/null && oc create service nodeport ldap --tcp=3893:3893 --node-port=30389 && oc rollout status deploy/ldap --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/glauth created\ndeployment.apps/ldap created\nservice/ldap created\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"ldap\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "configmap/glauth created\ndeployment.apps/ldap created\nservice/ldap created\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"ldap\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#' -e \"s#PASSWORD_FILE#$PWD/reader-password#\" sync.template > sync.yaml && sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#' -e \"s#PASSWORD_FILE#$PWD/reader-password#\" sync-mapped.template > sync-mapped.yaml && grep -E '^(url|bindDN):' sync.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "url: ldap://127.0.0.1:30389\nbindDN: cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\n",
+   "stderr": "",
+   "combined": "url: ldap://127.0.0.1:30389\nbindDN: cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sed 's#^  file: .*#  file: reader-password#' sync.yaml > sync-relative.yaml && oc adm groups sync --sync-config=sync-relative.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: validation of LDAP sync config failed: [bindPassword.file: Invalid value: \"sync-relative.yaml/reader-password\": could not read file: stat sync-relative.yaml/reader-password: not a directory, bindDN: Invalid value: \"cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\": bindDN and bindPassword must both be specified, or both be empty, bindPassword: Invalid value: \"(masked)\": bindDN and bindPassword must both be specified, or both be empty]\n",
+   "combined": "error: validation of LDAP sync config failed: [bindPassword.file: Invalid value: \"sync-relative.yaml/reader-password\": could not read file: stat sync-relative.yaml/reader-password: not a directory, bindDN: Invalid value: \"cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\": bindDN and bindPassword must both be specified, or both be empty, bindPassword: Invalid value: \"(masked)\": bindDN and bindPassword must both be specified, or both be empty]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups sync --sync-config=sync.yaml | grep -E '^ +(name|openshift.io/ldap.uid):|^  users:|^  - '",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "      openshift.io/ldap.uid: ou=svcaccts,ou=users,dc=example,dc=com\n    name: svcaccts\n  users:\n  - reader\n      openshift.io/ldap.uid: ou=payments,ou=users,dc=example,dc=com\n    name: payments\n  users:\n  - ann\n  - ben\n      openshift.io/ldap.uid: ou=auditors,ou=users,dc=example,dc=com\n    name: auditors\n  users:\n  - ann\n",
+   "stderr": "",
+   "combined": "      openshift.io/ldap.uid: ou=svcaccts,ou=users,dc=example,dc=com\n    name: svcaccts\n  users:\n  - reader\n      openshift.io/ldap.uid: ou=payments,ou=users,dc=example,dc=com\n    name: payments\n  users:\n  - ann\n  - ben\n      openshift.io/ldap.uid: ou=auditors,ou=users,dc=example,dc=com\n    name: auditors\n  users:\n  - ann\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups new auditors && oc get group auditors -o jsonpath='{.metadata.labels}{\" \"}{.metadata.annotations}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io/auditors created\n \n",
+   "stderr": "",
+   "combined": "group.user.openshift.io/auditors created\n \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups sync --sync-config=sync.yaml --whitelist=whitelist.txt --confirm; oc get groups",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "any",
+   "run": null,
+   "code": 0,
+   "stdout": "group/payments\nNAME       USERS\nauditors   \npayments   ann, ben\n",
+   "stderr": "Error building OpenShift group for LDAP group \"ou=auditors,ou=users,dc=example,dc=com\": group \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got .\ngroup \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got \nerror: group \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got \n",
+   "combined": "group/payments\nError building OpenShift group for LDAP group \"ou=auditors,ou=users,dc=example,dc=com\": group \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got .\ngroup \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got \nerror: group \"auditors\": openshift.io/ldap.host label did not match sync host: wanted 127.0.0.1, got \nNAME       USERS\nauditors   \npayments   ann, ben\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist.txt --confirm && oc get groups",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group/payments\ngroup/ldap-auditors\nNAME            USERS\nauditors        \nldap-auditors   ann\npayments        ann, ben\n",
+   "stderr": "",
+   "combined": "group/payments\ngroup/ldap-auditors\nNAME            USERS\nauditors        \nldap-auditors   ann\npayments        ann, ben\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy add-role-to-group view payments && oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"payments\"\nGroups: payments\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/view added: \"payments\"\nGroups: payments\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create configmap glauth --from-file=config.cfg=glauth-v2.cfg --dry-run=client -o yaml | oc replace -f - && oc rollout restart deploy/ldap && oc rollout status deploy/ldap --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/glauth replaced\ndeployment.apps/ldap restarted\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"ldap\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "configmap/glauth replaced\ndeployment.apps/ldap restarted\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"ldap\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"ldap\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist-payments.txt --confirm && oc get group payments ldap-auditors",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group/payments\nNAME            USERS\npayments        ann\nldap-auditors   ann\n",
+   "stderr": "",
+   "combined": "group/payments\nNAME            USERS\npayments        ann\nldap-auditors   ann\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "printf 'ou=auditors,ou=users,dc=example,dc=com\\n' > auditors.txt && oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=auditors.txt",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "apiVersion: v1\nitems: []\nkind: List\nmetadata: {}\n",
+   "stderr": "Error determining LDAP group membership for \"ou=auditors,ou=users,dc=example,dc=com\": search for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results.\nsearch for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results\nerror: search for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results\n",
+   "combined": "Error determining LDAP group membership for \"ou=auditors,ou=users,dc=example,dc=com\": search for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results.\napiVersion: v1\nitems: []\nkind: List\nmetadata: {}\nsearch for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results\nerror: search for entry with base dn=\"ou=auditors,ou=users,dc=example,dc=com\" and filter \"(objectClass=*)\" did not return any results\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get group ldap-auditors -o jsonpath='{.metadata.annotations.openshift\\.io/ldap\\.uid}{\"\\n\"}' && printf 'ldap-auditors\\n' > prune.txt && oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ou=auditors,ou=users,dc=example,dc=com\ngroup/ldap-auditors\n",
+   "stderr": "",
+   "combined": "ou=auditors,ou=users,dc=example,dc=com\ngroup/ldap-auditors\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt --confirm && oc get groups",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group/ldap-auditors\nNAME       USERS\nauditors   \npayments   ann\n",
+   "stderr": "",
+   "combined": "group/ldap-auditors\nNAME       USERS\nauditors   \npayments   ann\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sed \"s/NAMESPACE/$(cat ns.txt)/\" sync-rbac.yaml | oc apply -f -",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/academy-ldap-group-syncer created\nclusterrolebinding.rbac.authorization.k8s.io/academy-ldap-group-syncer created\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/academy-ldap-group-syncer created\nclusterrolebinding.rbac.authorization.k8s.io/academy-ldap-group-syncer created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sed -e \"s#LDAP_URL#ldap://ldap.$(oc project -q).svc:3893#\" -e 's#PASSWORD_FILE#/etc/ldap-sync/reader-password#' sync-mapped.template > sync-incluster.yaml && oc create serviceaccount ldap-sync && oc create secret generic ldap-sync --from-file=sync.yaml=sync-incluster.yaml --from-file=whitelist.txt=whitelist-payments.txt --from-file=reader-password=reader-password && oc apply -f cronjob.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/ldap-sync created\nsecret/ldap-sync created\ncronjob.batch/ldap-sync created\n",
+   "stderr": "",
+   "combined": "serviceaccount/ldap-sync created\nsecret/ldap-sync created\ncronjob.batch/ldap-sync created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create job ldap-sync-now --from=cronjob/ldap-sync && oc wait job/ldap-sync-now --for=condition=Failed --timeout=180s && oc logs job/ldap-sync-now | tail -1",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/ldap-sync-now created\njob.batch/ldap-sync-now condition met\nerror: group \"payments\": openshift.io/ldap.host label did not match sync host: wanted ldap.academy-lesson-p-ldap-group-sync.svc, got 127.0.0.1\n",
+   "stderr": "",
+   "combined": "job.batch/ldap-sync-now created\njob.batch/ldap-sync-now condition met\nerror: group \"payments\": openshift.io/ldap.host label did not match sync host: wanted ldap.academy-lesson-p-ldap-group-sync.svc, got 127.0.0.1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete group payments",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io \"payments\" deleted\n",
+   "stderr": "",
+   "combined": "group.user.openshift.io \"payments\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create job ldap-sync-again --from=cronjob/ldap-sync && oc wait job/ldap-sync-again --for=condition=Complete --timeout=180s && oc logs job/ldap-sync-again",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/ldap-sync-again created\njob.batch/ldap-sync-again condition met\ngroup/payments\n",
+   "stderr": "",
+   "combined": "job.batch/ldap-sync-again created\njob.batch/ldap-sync-again condition met\ngroup/payments\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get group payments --show-labels",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME       USERS   LABELS\npayments   ann     openshift.io/ldap.host=ldap.academy-lesson-p-ldap-group-sync.svc\n",
+   "stderr": "",
+   "combined": "NAME       USERS   LABELS\npayments   ann     openshift.io/ldap.host=ldap.academy-lesson-p-ldap-group-sync.svc\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Groups: payments\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\n",
+   "stderr": "",
+   "combined": "Groups: payments\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete group payments auditors --ignore-not-found && oc delete clusterrolebinding academy-ldap-group-syncer && oc delete clusterrole academy-ldap-group-syncer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io \"payments\" deleted\ngroup.user.openshift.io \"auditors\" deleted\nclusterrolebinding.rbac.authorization.k8s.io \"academy-ldap-group-syncer\" deleted\nclusterrole.rbac.authorization.k8s.io \"academy-ldap-group-syncer\" deleted\n",
+   "stderr": "",
+   "combined": "group.user.openshift.io \"payments\" deleted\ngroup.user.openshift.io \"auditors\" deleted\nclusterrolebinding.rbac.authorization.k8s.io \"academy-ldap-group-syncer\" deleted\nclusterrole.rbac.authorization.k8s.io \"academy-ldap-group-syncer\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 42,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-AUTH-05",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete group payments auditors ldap-auditors --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete clusterrolebinding academy-ldap-group-syncer --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete clusterrole academy-ldap-group-syncer --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "sleep 5\nfw=$(curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all) || exit 1\nfor l in $(printf '%s' \"$fw\" | jq -r '.[] | select(.protocol == \"tcp\") | .local | select(test(\"^127[.]0[.]0[.]1:3[0-9]{4}$\"))'); do\n  curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" -X POST http://localhost/network/services/forwarder/unexpose -d \"{\\\"local\\\":\\\"$l\\\",\\\"protocol\\\":\\\"tcp\\\"}\" || exit 1\n  echo \"removed workstation forward $l\"\ndone",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "test -z \"$(oc get groups -o name)\"",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get groups -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterroles -o name | grep -c academy- || true",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebindings -o name",
+    "same": true
+   },
+   {
+    "cmd": "curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all | jq -S '[.[].local] | sort'",
+    "same": true
+   }
+  ]
+ }
+}

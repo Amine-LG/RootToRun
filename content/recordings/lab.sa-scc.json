@@ -1,0 +1,279 @@
+{
+ "lab": "lab.sa-scc",
+ "kind": "lab",
+ "lab_hash": "aaefcf1c153a9d4c",
+ "recorded_at": "2026-10-13T22:04:06+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "rejected",
+   "cmd": "oc get deploy,rs,pods -n academy-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/needs-root   0/1     0            0           3s\n\nNAME                                    DESIRED   CURRENT   READY   AGE\nreplicaset.apps/needs-root-67bbb6688b   1         0         0       3s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rejected",
+   "cmd": "oc get events -n academy-scc --field-selector reason=FailedCreate",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON         OBJECT                             MESSAGE\n1s          Warning   FailedCreate   replicaset/needs-root-67bbb6688b   Error creating: pods \"needs-root-67bbb6688b-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1003180000, 1003189999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "review",
+   "cmd": "oc adm policy scc-subject-review -f - -n academy-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE    ALLOWED BY   \nPod/probe   <none>       \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc adm policy add-scc-to-user anyuid -z rooty -n academy-scc",
+   "as": "admin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid added: \"rooty\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc get rolebinding system:openshift:scc:anyuid -n academy-scc -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          ROLE                                      AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:anyuid   ClusterRole/system:openshift:scc:anyuid   0s                     academy-scc/rooty\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:rooty -n academy-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "Warning: resource 'securitycontextconstraints' is not namespace scoped in group 'security.openshift.io'\n\n",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:default -n academy-scc",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "Warning: resource 'securitycontextconstraints' is not namespace scoped in group 'security.openshift.io'\n\n",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc rollout restart deploy/needs-root -n academy-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/needs-root restarted\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "grant",
+   "cmd": "oc rollout status deploy/needs-root -n academy-scc --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment spec update to be observed...\nWaiting for deployment \"needs-root\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"needs-root\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"needs-root\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"needs-root\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"needs-root\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "as-root",
+   "cmd": "oc get pods -l app=needs-root -n academy-scc -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          SCC\nneeds-root-54fd789d54-k5rzk   anyuid\nneeds-root-67bbb6688b-5tbc9   anyuid\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "as-root",
+   "cmd": "oc exec deploy/needs-root -n academy-scc -- id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=0(root) gid=0(root) groups=0(root)\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "remove",
+   "cmd": "oc patch deploy/needs-root -n academy-scc --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/securityContext/runAsUser\"}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/needs-root patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "remove",
+   "cmd": "oc adm policy remove-scc-from-user anyuid -z rooty -n academy-scc",
+   "as": "admin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid removed: \"rooty\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "remove",
+   "cmd": "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:rooty -n academy-scc",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "Warning: resource 'securitycontextconstraints' is not namespace scoped in group 'security.openshift.io'\n\n",
+   "ok": true
+  },
+  {
+   "step": "remove",
+   "cmd": "oc rollout restart deploy/needs-root -n academy-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/needs-root restarted\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "remove",
+   "cmd": "oc rollout status deploy/needs-root -n academy-scc --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment spec update to be observed...\nWaiting for deployment spec update to be observed...\nWaiting for deployment \"needs-root\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"needs-root\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"needs-root\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"needs-root\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"needs-root\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "after",
+   "cmd": "oc get pods -l app=needs-root -n academy-scc -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          SCC\nneeds-root-54fd789d54-k5rzk   anyuid\nneeds-root-66d48b5967-hczg5   restricted-v2\nneeds-root-86648c7f99-vk885   anyuid\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "after",
+   "cmd": "oc get scc anyuid restricted-v2 -o custom-columns=NAME:.metadata.name,PRIORITY:.priority",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            PRIORITY\nanyuid          10\nrestricted-v2   <nil>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "after",
+   "cmd": "oc exec deploy/needs-root -n academy-scc -- id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1003180000(1003180000) gid=0(root) groups=0(root),1003180000\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "ready",
+    "title": "needs-root is running",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "ready 0/1, updated 0, total 0, observedGeneration current: True"
+   },
+   {
+    "id": "restricted",
+    "title": "It now runs under restricted-v2",
+    "expect": "openshift.io/scc=restricted-v2",
+    "status": "fail",
+    "observed": "0 of 0 match · no pods"
+   },
+   {
+    "id": "no-root",
+    "title": "The template no longer asks for root",
+    "expect": "no runAsUser",
+    "status": "fail",
+    "observed": "spec.template.spec.securityContext.runAsUser = 0"
+   }
+  ],
+  "at": 1791929057.325679
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready",
+    "title": "needs-root is running",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "restricted",
+    "title": "It now runs under restricted-v2",
+    "expect": "openshift.io/scc=restricted-v2",
+    "status": "pass",
+    "observed": "1 of 1 match · needs-root-66d48b5967-hczg5: Running [ready, restarts 0]"
+   },
+   {
+    "id": "no-root",
+    "title": "The template no longer asks for root",
+    "expect": "no runAsUser",
+    "status": "pass",
+    "observed": "spec.template.spec.securityContext.runAsUser = None"
+   }
+  ],
+  "at": 1791929087.370476
+ },
+ "seconds": 41,
+ "ok": true,
+ "problems": []
+}

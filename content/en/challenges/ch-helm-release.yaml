@@ -1,0 +1,183 @@
+id: ch.helm-release
+kind: challenge
+title: "Ship it as a Helm release"
+subtitle: "Install a packaged application through a conflict, with its configuration in the release, not in hand edits"
+summary: "A chart is ready, but a hand-made object stands in its way and the team wants the production settings recorded in the release. Install it so Helm, the cluster and the users all agree."
+module: r2-admin-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node) with Helm 3.17. The grader reads Helm's own release records (Secrets in the project) and the live objects."
+concepts: [deploy.packaging, deploy.declarative, gitops.drift, net.routes]
+prerequisites: [o2.kustomize-helm, n.templates]
+namespace: academy-ch-helm
+objective: |
+  Install a chart as a release, resolve an ownership conflict with an existing object without losing track of what
+  owns what, and keep the configuration in the release (values) so that the next upgrade or rollback reproduces it.
+background: |
+  **Where everything comes from.** The app writes the chart under `lab/chart` before you start (its files are the
+  reference solution's input; save them with the same paths to work without the app) and creates the hand-made
+  ConfigMap `shop-web`. Helm runs on your machine (see the setup guide) and keeps the release history in Secrets in
+  the project. The app creates the project `academy-ch-helm` as your learner identity when you start the challenge and
+  applies the starting objects; everything else is yours to create. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press Grade, as the app's
+  own identities; Clean up deletes the project.
+symptom: |
+  The chart `lab/chart` deploys a small web page: a ConfigMap with the page, a Deployment, a Service and a Route, all
+  named `<release>-web`. Its values are `replicas` and `message` (`helm show values lab/chart`). Someone already
+  created a ConfigMap called `shop-web` by hand while testing. The team wants the release `shop`, with **3
+  replicas** and the message **shop-v2**, and they want those settings to survive the next `helm upgrade`.
+files:
+  chart/Chart.yaml: |
+    apiVersion: v2
+    name: web
+    description: A static page served by httpd
+    version: 0.2.0
+    appVersion: "2.4"
+  chart/values.yaml: |
+    replicas: 1
+    message: hello
+  chart/templates/configmap.yaml: |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: {{ .Release.Name }}-web
+    data:
+      index.html: {{ .Values.message | quote }}
+  chart/templates/deployment.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: {{ .Release.Name }}-web
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}}
+    spec:
+      replicas: {{ .Values.replicas }}
+      selector:
+        matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}}
+      template:
+        metadata:
+          labels: {app.kubernetes.io/instance: {{ .Release.Name }}}
+          annotations:
+            checksum/page: {{ .Values.message | sha256sum | trunc 16 }}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: page, mountPath: /var/www/html}]
+          volumes:
+          - name: page
+            configMap: {name: {{ .Release.Name }}-web}
+  chart/templates/service.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: {{ .Release.Name }}-web
+    spec:
+      selector: {app.kubernetes.io/instance: {{ .Release.Name }}}
+      ports: [{port: 8080, targetPort: 8080}]
+  chart/templates/route.yaml: |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: {{ .Release.Name }}-web
+    spec:
+      to: {kind: Service, name: {{ .Release.Name }}-web}
+      port: {targetPort: 8080}
+requirements:
+  - "A Helm release **`shop`** is **deployed** in the project."
+  - "The release itself carries the settings: **`replicas: 3`** and **`message: shop-v2`** (a later `helm upgrade --reuse-values` or rollback must reproduce them)."
+  - "The Deployment `shop-web` runs **3 Ready replicas**, and the Route `shop-web` answers **shop-v2**."
+  - "Do not leave a hand-made copy of the page behind: the ConfigMap `shop-web` must be the one the release manages."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: shop-web, labels: {owner: someone-testing}}
+    data: {index.html: "hand-made test page"}
+hints:
+  - "Try the install with the values you want and read the error carefully: which object, and which metadata does Helm expect on it?"
+  - "Two honest ways out: remove the hand-made object (it only held a test page), or let Helm adopt it by giving it the labels and annotations Helm checks. Changing the release name is not one of them: the team asked for `shop`."
+  - "Values given with `--set` are stored in the release. Values changed with `oc scale` or `oc edit` are not, and the next upgrade puts the chart's values back."
+  - "`helm get values shop -n academy-ch-helm` shows what the release will reproduce."
+fix:
+  - {cmd: "helm install shop lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm", meaning: "refused: ConfigMap shop-web exists and is not owned by a Helm release", expect: fail}
+  - {cmd: "oc delete configmap shop-web -n academy-ch-helm", meaning: "the hand-made test page had nothing worth keeping"}
+  - {cmd: "helm install shop lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm", meaning: "release shop, revision 1, deployed, with the settings stored in it"}
+  - {cmd: "oc rollout status deploy/shop-web -n academy-ch-helm --timeout=180s", meaning: "three Ready pods", timeout: 200}
+  - {cmd: "helm get values shop -n academy-ch-helm", meaning: "replicas: 3, message: shop-v2: what an upgrade with --reuse-values or a rollback reproduces"}
+checks:
+  - {id: release, title: "release shop is deployed with replicas 3 and message shop-v2", type: helm_release, release: shop, values: {replicas: 3, message: shop-v2}, expect_text: "revision 1 deployed: replicas = 3, message = 'shop-v2'"}
+  - {id: ready, title: "shop-web runs 3 Ready replicas", type: deployment_ready, name: shop-web, replicas: 3, expect_text: "3/3 ready"}
+  - {id: page, title: "the Route shop-web answers shop-v2", type: route_http, route: shop-web, path: /, expect_status: 200, contains: "shop-v2", expect_text: "HTTP 200 shop-v2"}
+  - {id: owned, title: "ConfigMap shop-web belongs to the release", type: field, kind: configmap, name: shop-web, path: "metadata.annotations.meta\\.helm\\.sh/release-name", op: eq, value: shop, expect_text: "shop"}
+  - {id: page-from-release, title: "the page in ConfigMap shop-web is the release's", type: field, kind: configmap, name: shop-web, path: "data.index\\.html", op: eq, value: shop-v2, expect_text: "shop-v2"}
+trials:
+  - id: hand-edits
+    title: "Installed with the chart's defaults, then fixed by hand (oc scale, oc patch): live state right, release wrong"
+    kind: wrong
+    expect: partial
+    expect_checks: {release: fail, ready: pass, owned: pass}
+    commands:
+      - {cmd: "oc delete configmap shop-web -n academy-ch-helm"}
+      - {cmd: "helm install shop lab/chart -n academy-ch-helm"}
+      - {cmd: "oc scale deploy/shop-web --replicas=3 -n academy-ch-helm"}
+      - cmd: "oc patch configmap shop-web -n academy-ch-helm --type=merge -p '{\"data\":{\"index.html\":\"shop-v2\"}}'"
+  - id: replicas-only
+    title: "Release installed with replicas=3 but the default message"
+    kind: partial
+    expect: partial
+    expect_checks: {release: fail, ready: pass, page: fail, page-from-release: fail}
+    commands:
+      - {cmd: "oc delete configmap shop-web -n academy-ch-helm"}
+      - {cmd: "helm install shop lab/chart --set replicas=3 -n academy-ch-helm"}
+  - id: adopt
+    title: "A correct alternative: let Helm adopt the existing ConfigMap, then install, then upgrade with the message"
+    kind: alternative
+    expect: verified
+    commands:
+      - {cmd: "oc label configmap shop-web app.kubernetes.io/managed-by=Helm -n academy-ch-helm"}
+      - {cmd: "oc annotate configmap shop-web meta.helm.sh/release-name=shop meta.helm.sh/release-namespace=academy-ch-helm -n academy-ch-helm"}
+      - {cmd: "helm install shop lab/chart --set replicas=3 -n academy-ch-helm"}
+      - {cmd: "helm upgrade shop lab/chart --reuse-values --set message=shop-v2 -n academy-ch-helm"}
+  - id: other-name
+    title: "Release installed under another name to dodge the conflict"
+    kind: wrong
+    expect: failed
+    commands:
+      - {cmd: "helm install shop2 lab/chart --set replicas=3 --set message=shop-v2 -n academy-ch-helm"}
+root_cause: |
+  Helm refuses to install over an object it does not own. Before creating anything, it checks every rendered
+  object: if one already exists without the label `app.kubernetes.io/managed-by: Helm` and the annotations
+  `meta.helm.sh/release-name` and `meta.helm.sh/release-namespace` naming this release, the install fails with
+  `invalid ownership metadata` and creates nothing. The fix is a decision about ownership: delete the stray object,
+  or adopt it on purpose by adding that metadata.
+  Then, where the settings live matters. `--set` values are stored in the release (a Secret
+  `sh.helm.release.v1.shop.v<N>` in the project) and replayed by `helm upgrade --reuse-values` and `helm rollback`.
+  `oc scale` and `oc patch` change only the live objects: Helm's record still says one replica and "hello", and the
+  next upgrade without those flags puts them back.
+alternatives: |
+  Deleting the test ConfigMap or adopting it both pass. Installing with defaults and then running
+  `helm upgrade shop lab/chart --set replicas=3 --set message=shop-v2` also passes: the newest revision carries the
+  values. A values file works as well when you can create one. Helm 3.17 and later also offer `--take-ownership`,
+  which skips the ownership check; it is equivalent to adopting, so use it only after deciding the object belongs to
+  this release (the in-app terminal does not offer it). A different release name passes nothing: the objects
+  would be called `shop2-web`, and the requirement names the release.
+sre: |
+  When Helm reports `invalid ownership metadata`, record who created the conflicting object and why before
+  removing or adopting it: an object created by another release or by an operator must not be adopted. Keep
+  production values in version control and pass them with `-f`, so `helm get values` and Git agree.
+questions:
+  - q: "Why does `oc scale` not count as configuring the release?"
+    a: "`oc scale` changes only the live Deployment. An upgrade renders the chart with the chosen values; a rollback restores the selected revision's stored manifest and values as a new revision, without rendering again. Neither records a hand scale as release configuration."
+  - q: "Which metadata does Helm require on an existing object before it will take it over?"
+    a: "The label app.kubernetes.io/managed-by=Helm and the annotations meta.helm.sh/release-name and meta.helm.sh/release-namespace matching the release."
+  - q: "Where does Helm 3 keep the history of a release by default?"
+    a: "In Secrets of type helm.sh/release.v1 in the release's namespace, one per revision (sh.helm.release.v1.<name>.v<N>)."
+references:
+  - {title: "Helm: helm install", url: "https://helm.sh/docs/helm/helm_install/"}
+  - {title: "Helm: helm upgrade (--reuse-values)", url: "https://helm.sh/docs/helm/helm_upgrade/"}
+  - {title: "Helm 3 adopting existing resources (release notes 3.2.0)", url: "https://github.com/helm/helm/releases/tag/v3.2.0"}
+  - {title: "OpenShift 4.21: Working with Helm charts", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/working-with-helm-charts"}

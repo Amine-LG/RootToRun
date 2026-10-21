@@ -1,0 +1,192 @@
+{
+ "lab": "lesson.b.health-probes",
+ "kind": "lesson",
+ "lab_hash": "ddbc6b163a70cc4d",
+ "recorded_at": "2026-10-16T16:08:09+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-b-health-probes",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f web-deployment.yaml && oc expose deployment web --port=8080 && sleep 12 && oc get pods -l app=web && oc get pods -l app=web -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,STARTED:.status.containerStatuses[0].started,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\nservice/web exposed\nNAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   0/1     Running   0          12s\nweb-77746978cd-s8szw   0/1     Running   0          12s\nNAME                   PHASE     STARTED   READY   RESTARTS\nweb-77746978cd-lm8mg   Running   false     false   0\nweb-77746978cd-s8szw   Running   false     false   0\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\nservice/web exposed\nNAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   0/1     Running   0          12s\nweb-77746978cd-s8szw   0/1     Running   0          12s\nNAME                   PHASE     STARTED   READY   RESTARTS\nweb-77746978cd-lm8mg   Running   false     false   0\nweb-77746978cd-s8szw   Running   false     false   0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deployment/web --timeout=120s && oc get pods -l app=web -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,STARTED:.status.containerStatuses[0].started,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount && oc describe endpointslices -l kubernetes.io/service-name=web | grep -e Addresses -e Ready",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\nNAME                   PHASE     STARTED   READY   RESTARTS\nweb-77746978cd-lm8mg   Running   true      true    0\nweb-77746978cd-s8szw   Running   true      true    0\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    true\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\nNAME                   PHASE     STARTED   READY   RESTARTS\nweb-77746978cd-lm8mg   Running   true      true    0\nweb-77746978cd-s8szw   Running   true      true    0\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    true\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "POD=$(oc get pods -l app=web -o name | head -n 1) && oc exec $POD -- rm /tmp/ready && sleep 20 && oc get pods -l app=web && oc describe endpointslices -l kubernetes.io/service-name=web | grep -e Addresses -e Ready",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   0/1     Running   0          52s\nweb-77746978cd-s8szw   1/1     Running   0          52s\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    false\n",
+   "stderr": "",
+   "combined": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   0/1     Running   0          52s\nweb-77746978cd-s8szw   1/1     Running   0          52s\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    false\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=Unhealthy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON      OBJECT                     MESSAGE\n27s         Warning   Unhealthy   pod/web-77746978cd-lm8mg   Startup probe failed:\n2s          Warning   Unhealthy   pod/web-77746978cd-lm8mg   Readiness probe failed:\n27s         Warning   Unhealthy   pod/web-77746978cd-s8szw   Startup probe failed:\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON      OBJECT                     MESSAGE\n27s         Warning   Unhealthy   pod/web-77746978cd-lm8mg   Startup probe failed:\n2s          Warning   Unhealthy   pod/web-77746978cd-lm8mg   Readiness probe failed:\n27s         Warning   Unhealthy   pod/web-77746978cd-s8szw   Startup probe failed:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "POD=$(oc get pods -l app=web -o name | head -n 1) && { oc exec $POD -- test -f /tmp/ready || echo \"the readiness check exits with $?\"; } && oc exec $POD -- touch /tmp/ready && sleep 10 && oc get pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "the readiness check exits with 1\nNAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   1/1     Running   0          64s\nweb-77746978cd-s8szw   1/1     Running   0          64s\n",
+   "stderr": "command terminated with exit code 1\n",
+   "combined": "command terminated with exit code 1\nthe readiness check exits with 1\nNAME                   READY   STATUS    RESTARTS   AGE\nweb-77746978cd-lm8mg   1/1     Running   0          64s\nweb-77746978cd-s8szw   1/1     Running   0          64s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "POD=$(oc get pods -l app=web -o name | tail -n 1) && oc exec $POD -- rm /tmp/alive && sleep 55 && oc get pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS      AGE\nweb-77746978cd-lm8mg   1/1     Running   0             2m\nweb-77746978cd-s8szw   1/1     Running   1 (44s ago)   2m\n",
+   "stderr": "",
+   "combined": "NAME                   READY   STATUS    RESTARTS      AGE\nweb-77746978cd-lm8mg   1/1     Running   0             2m\nweb-77746978cd-s8szw   1/1     Running   1 (44s ago)   2m\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:             web-77746978cd-lm8mg\nNamespace:        academy-lesson-b-health-probes\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Fri, 16 Oct 2026 16:02:53 +0000\nLabels:           app=web\n                  pod-template-hash=77746978cd\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.92/23\"],\"mac_address\":\"0a:58:0a:d9:00:5c\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.92\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:5c\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.92\nIPs:\n  IP:           10.217.0.92\nControlled By:  ReplicaSet/web-77746978cd\nContainers:\n  web:\n    Container ID:  cri-o://3862ec2a0e4da0594a8782e332fd8230c9ad786357dc754a37524f350cbc6bd1\n    Image:         registry.access.redhat.com/ubi9/httpd-24:latest\n    Image ID:      registry.access.redhat.com/ubi9/httpd-24@sha256:b48d56ee57fa35ea7412f086fec5135e6db0ef50edddc40dfb0c46dc967fbd0d\n    Port:          8080/TCP (http)\n    Host Port:     0/TCP (http)\n    Command:\n      /bin/sh\n      -c\n      trap 'exit 0' TERM\n      sleep \"$START_SECONDS\" & wait $!\n      touch /tmp/started /tmp/ready /tmp/alive\n      exec run-httpd\n      \n    State:          Running\n      Started:      Fri, 16 Oct 2026 16:02:59 +0000\n    Ready:          True\n    Restart Count:  0\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:      20m\n      memory:   32Mi\n    Liveness:   exec [test -f /tmp/alive] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Readiness:  exec [test -f /tmp/ready] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Startup:    exec [test -f /tmp/started] delay=0s timeout=1s period=5s #success=1 #failure=12\n    Environment:\n      START_SECONDS:  20\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-szh2f (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-szh2f:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age                 From               Message\n  ----     ------          ----                ----               -------\n  Normal   Scheduled       2m                  default-scheduler  Successfully assigned academy-lesson-b-health-probes/web-77746978cd-lm8mg to crc\n  Normal   AddedInterface  2m                  multus             Add eth0 [10.217.0.92/23] from ovn-kubernetes\n  Normal   Pulling         2m                  kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n  Normal   Pulled          115s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 4.624s (4.624s including waiting). Image size: 309803777 bytes.\n  Normal   Created         115s                kubelet            Created container: web\n  Normal   Started         115s                kubelet            Started container web\n  Warning  Unhealthy       95s (x4 over 110s)  kubelet            Startup probe failed:\n  Warning  Unhealthy       70s (x5 over 85s)   kubelet            Readiness probe failed:\n\n\nName:             web-77746978cd-s8szw\nNamespace:        academy-lesson-b-health-probes\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Fri, 16 Oct 2026 16:02:53 +0000\nLabels:           app=web\n                  pod-template-hash=77746978cd\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.91/23\"],\"mac_address\":\"0a:58:0a:d9:00:5b\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.91\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:5b\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.91\nIPs:\n  IP:           10.217.0.91\nControlled By:  ReplicaSet/web-77746978cd\nContainers:\n  web:\n    Container ID:  cri-o://ebb02fdefae312ad1bd3402b49dcfd30e40a0e27ce44b220d2ea0622724e7733\n    Image:         registry.access.redhat.com/ubi9/httpd-24:latest\n    Image ID:      registry.access.redhat.com/ubi9/httpd-24@sha256:b48d56ee57fa35ea7412f086fec5135e6db0ef50edddc40dfb0c46dc967fbd0d\n    Port:          8080/TCP (http)\n    Host Port:     0/TCP (http)\n    Command:\n      /bin/sh\n      -c\n      trap 'exit 0' TERM\n      sleep \"$START_SECONDS\" & wait $!\n      touch /tmp/started /tmp/ready /tmp/alive\n      exec run-httpd\n      \n    State:          Running\n      Started:      Fri, 16 Oct 2026 16:04:13 +0000\n    Last State:     Terminated\n      Reason:       Completed\n      Exit Code:    0\n      Started:      Fri, 16 Oct 2026 16:02:59 +0000\n      Finished:     Fri, 16 Oct 2026 16:04:09 +0000\n    Ready:          True\n    Restart Count:  1\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:      20m\n      memory:   32Mi\n    Liveness:   exec [test -f /tmp/alive] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Readiness:  exec [test -f /tmp/ready] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Startup:    exec [test -f /tmp/started] delay=0s timeout=1s period=5s #success=1 #failure=12\n    Environment:\n      START_SECONDS:  20\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-4d6ct (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-4d6ct:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age                 From               Message\n  ----     ------          ----                ----               -------\n  Normal   Scheduled       2m                  default-scheduler  Successfully assigned academy-lesson-b-health-probes/web-77746978cd-s8szw to crc\n  Normal   AddedInterface  2m                  multus             Add eth0 [10.217.0.91/23] from ovn-kubernetes\n  Normal   Pulled          115s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 4.196s (4.196s including waiting). Image size: 309803777 bytes.\n  Normal   Pulling         45s (x2 over 2m)    kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n  Warning  Unhealthy       45s (x3 over 55s)   kubelet            Liveness probe failed:\n  Normal   Killing         45s                 kubelet            Container web failed liveness probe, will be restarted\n  Warning  Unhealthy       45s                 kubelet            Readiness probe errored and resulted in unknown state: rpc error: code = Unknown desc = command error: cannot register an exec PID: container is stopping, stdout: , stderr: , exit code -1\n  Normal   Created         41s (x2 over 115s)  kubelet            Created container: web\n  Normal   Started         41s (x2 over 115s)  kubelet            Started container web\n  Normal   Pulled          41s                 kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 3.776s (3.776s including waiting). Image size: 309803777 bytes.\n  Warning  Unhealthy       40s                 kubelet            Readiness probe errored and resulted in unknown state: rpc error: code = NotFound desc = container is not created or running: checking if PID of 1443a12988bb5fe4cf101554406813e9b4ac5143c80d07a0e8df94e32f911dcb is running failed: container process not found\n  Warning  Unhealthy       25s (x7 over 110s)  kubelet            Startup probe failed:\n",
+   "stderr": "",
+   "combined": "Name:             web-77746978cd-lm8mg\nNamespace:        academy-lesson-b-health-probes\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Fri, 16 Oct 2026 16:02:53 +0000\nLabels:           app=web\n                  pod-template-hash=77746978cd\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.92/23\"],\"mac_address\":\"0a:58:0a:d9:00:5c\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.92\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:5c\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.92\nIPs:\n  IP:           10.217.0.92\nControlled By:  ReplicaSet/web-77746978cd\nContainers:\n  web:\n    Container ID:  cri-o://3862ec2a0e4da0594a8782e332fd8230c9ad786357dc754a37524f350cbc6bd1\n    Image:         registry.access.redhat.com/ubi9/httpd-24:latest\n    Image ID:      registry.access.redhat.com/ubi9/httpd-24@sha256:b48d56ee57fa35ea7412f086fec5135e6db0ef50edddc40dfb0c46dc967fbd0d\n    Port:          8080/TCP (http)\n    Host Port:     0/TCP (http)\n    Command:\n      /bin/sh\n      -c\n      trap 'exit 0' TERM\n      sleep \"$START_SECONDS\" & wait $!\n      touch /tmp/started /tmp/ready /tmp/alive\n      exec run-httpd\n      \n    State:          Running\n      Started:      Fri, 16 Oct 2026 16:02:59 +0000\n    Ready:          True\n    Restart Count:  0\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:      20m\n      memory:   32Mi\n    Liveness:   exec [test -f /tmp/alive] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Readiness:  exec [test -f /tmp/ready] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Startup:    exec [test -f /tmp/started] delay=0s timeout=1s period=5s #success=1 #failure=12\n    Environment:\n      START_SECONDS:  20\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-szh2f (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-szh2f:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age                 From               Message\n  ----     ------          ----                ----               -------\n  Normal   Scheduled       2m                  default-scheduler  Successfully assigned academy-lesson-b-health-probes/web-77746978cd-lm8mg to crc\n  Normal   AddedInterface  2m                  multus             Add eth0 [10.217.0.92/23] from ovn-kubernetes\n  Normal   Pulling         2m                  kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n  Normal   Pulled          115s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 4.624s (4.624s including waiting). Image size: 309803777 bytes.\n  Normal   Created         115s                kubelet            Created container: web\n  Normal   Started         115s                kubelet            Started container web\n  Warning  Unhealthy       95s (x4 over 110s)  kubelet            Startup probe failed:\n  Warning  Unhealthy       70s (x5 over 85s)   kubelet            Readiness probe failed:\n\n\nName:             web-77746978cd-s8szw\nNamespace:        academy-lesson-b-health-probes\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Fri, 16 Oct 2026 16:02:53 +0000\nLabels:           app=web\n                  pod-template-hash=77746978cd\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.91/23\"],\"mac_address\":\"0a:58:0a:d9:00:5b\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.91\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:5b\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.91\nIPs:\n  IP:           10.217.0.91\nControlled By:  ReplicaSet/web-77746978cd\nContainers:\n  web:\n    Container ID:  cri-o://ebb02fdefae312ad1bd3402b49dcfd30e40a0e27ce44b220d2ea0622724e7733\n    Image:         registry.access.redhat.com/ubi9/httpd-24:latest\n    Image ID:      registry.access.redhat.com/ubi9/httpd-24@sha256:b48d56ee57fa35ea7412f086fec5135e6db0ef50edddc40dfb0c46dc967fbd0d\n    Port:          8080/TCP (http)\n    Host Port:     0/TCP (http)\n    Command:\n      /bin/sh\n      -c\n      trap 'exit 0' TERM\n      sleep \"$START_SECONDS\" & wait $!\n      touch /tmp/started /tmp/ready /tmp/alive\n      exec run-httpd\n      \n    State:          Running\n      Started:      Fri, 16 Oct 2026 16:04:13 +0000\n    Last State:     Terminated\n      Reason:       Completed\n      Exit Code:    0\n      Started:      Fri, 16 Oct 2026 16:02:59 +0000\n      Finished:     Fri, 16 Oct 2026 16:04:09 +0000\n    Ready:          True\n    Restart Count:  1\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:      20m\n      memory:   32Mi\n    Liveness:   exec [test -f /tmp/alive] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Readiness:  exec [test -f /tmp/ready] delay=0s timeout=1s period=5s #success=1 #failure=3\n    Startup:    exec [test -f /tmp/started] delay=0s timeout=1s period=5s #success=1 #failure=12\n    Environment:\n      START_SECONDS:  20\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-4d6ct (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-4d6ct:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age                 From               Message\n  ----     ------          ----                ----               -------\n  Normal   Scheduled       2m                  default-scheduler  Successfully assigned academy-lesson-b-health-probes/web-77746978cd-s8szw to crc\n  Normal   AddedInterface  2m                  multus             Add eth0 [10.217.0.91/23] from ovn-kubernetes\n  Normal   Pulled          115s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 4.196s (4.196s including waiting). Image size: 309803777 bytes.\n  Normal   Pulling         45s (x2 over 2m)    kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n  Warning  Unhealthy       45s (x3 over 55s)   kubelet            Liveness probe failed:\n  Normal   Killing         45s                 kubelet            Container web failed liveness probe, will be restarted\n  Warning  Unhealthy       45s                 kubelet            Readiness probe errored and resulted in unknown state: rpc error: code = Unknown desc = command error: cannot register an exec PID: container is stopping, stdout: , stderr: , exit code -1\n  Normal   Created         41s (x2 over 115s)  kubelet            Created container: web\n  Normal   Started         41s (x2 over 115s)  kubelet            Started container web\n  Normal   Pulled          41s                 kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 3.776s (3.776s including waiting). Image size: 309803777 bytes.\n  Warning  Unhealthy       40s                 kubelet            Readiness probe errored and resulted in unknown state: rpc error: code = NotFound desc = container is not created or running: checking if PID of 1443a12988bb5fe4cf101554406813e9b4ac5143c80d07a0e8df94e32f911dcb is running failed: container process not found\n  Warning  Unhealthy       25s (x7 over 110s)  kubelet            Startup probe failed:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "diff -u web-deployment.yaml slow-deployment.yaml",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "--- web-deployment.yaml\t2026-10-16 16:02:53.301221096 +0000\n+++ slow-deployment.yaml\t2026-10-16 16:02:53.301221096 +0000\n@@ -1,18 +1,18 @@\n apiVersion: apps/v1\n kind: Deployment\n metadata:\n-  name: web\n+  name: slow\n   labels:\n-    app: web\n+    app: slow\n spec:\n-  replicas: 2\n+  replicas: 1\n   selector:\n     matchLabels:\n-      app: web\n+      app: slow\n   template:\n     metadata:\n       labels:\n-        app: web\n+        app: slow\n     spec:\n       containers:\n       - name: web\n@@ -29,7 +29,7 @@\n           exec run-httpd\n         env:\n         - name: START_SECONDS\n-          value: \"20\"\n+          value: \"40\"\n         ports:\n         - name: http\n           containerPort: 8080\n@@ -39,11 +39,6 @@\n             memory: 32Mi\n           limits:\n             memory: 128Mi\n-        startupProbe:              # has it finished starting? the other probes wait for it\n-          exec:\n-            command: [\"test\", \"-f\", \"/tmp/started\"]\n-          periodSeconds: 5\n-          failureThreshold: 12     # 12 x 5 s: up to 60 s to start\n         readinessProbe:            # may it receive traffic now?\n           exec:\n             command: [\"test\", \"-f\", \"/tmp/ready\"]\n",
+   "stderr": "",
+   "combined": "--- web-deployment.yaml\t2026-10-16 16:02:53.301221096 +0000\n+++ slow-deployment.yaml\t2026-10-16 16:02:53.301221096 +0000\n@@ -1,18 +1,18 @@\n apiVersion: apps/v1\n kind: Deployment\n metadata:\n-  name: web\n+  name: slow\n   labels:\n-    app: web\n+    app: slow\n spec:\n-  replicas: 2\n+  replicas: 1\n   selector:\n     matchLabels:\n-      app: web\n+      app: slow\n   template:\n     metadata:\n       labels:\n-        app: web\n+        app: slow\n     spec:\n       containers:\n       - name: web\n@@ -29,7 +29,7 @@\n           exec run-httpd\n         env:\n         - name: START_SECONDS\n-          value: \"20\"\n+          value: \"40\"\n         ports:\n         - name: http\n           containerPort: 8080\n@@ -39,11 +39,6 @@\n             memory: 32Mi\n           limits:\n             memory: 128Mi\n-        startupProbe:              # has it finished starting? the other probes wait for it\n-          exec:\n-            command: [\"test\", \"-f\", \"/tmp/started\"]\n-          periodSeconds: 5\n-          failureThreshold: 12     # 12 x 5 s: up to 60 s to start\n         readinessProbe:            # may it receive traffic now?\n           exec:\n             command: [\"test\", \"-f\", \"/tmp/ready\"]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f slow-deployment.yaml && sleep 75 && oc get pods -l app=slow && oc get events --field-selector reason=Killing -o custom-columns=OBJECT:.involvedObject.name,MESSAGE:.message | grep -e OBJECT -e slow",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/slow created\nNAME                    READY   STATUS             RESTARTS     AGE\nslow-684c8564cb-wjjzw   0/1     CrashLoopBackOff   3 (5s ago)   75s\nOBJECT                  MESSAGE\nslow-684c8564cb-wjjzw   Container web failed liveness probe, will be restarted\n",
+   "stderr": "",
+   "combined": "deployment.apps/slow created\nNAME                    READY   STATUS             RESTARTS     AGE\nslow-684c8564cb-wjjzw   0/1     CrashLoopBackOff   3 (5s ago)   75s\nOBJECT                  MESSAGE\nslow-684c8564cb-wjjzw   Container web failed liveness probe, will be restarted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set probe deployment/slow --startup --period-seconds=5 --failure-threshold=12 -- test -f /tmp/started",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/slow probes updated\n",
+   "stderr": "",
+   "combined": "deployment.apps/slow probes updated\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deployment/slow --timeout=150s && oc get pods -l app=slow",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"slow\" successfully rolled out\nNAME                    READY   STATUS        RESTARTS      AGE\nslow-59f5c84df5-8cczx   1/1     Running       0             46s\nslow-684c8564cb-wjjzw   0/1     Terminating   5 (11s ago)   2m1s\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"slow\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"slow\" successfully rolled out\nNAME                    READY   STATUS        RESTARTS      AGE\nslow-59f5c84df5-8cczx   1/1     Running       0             46s\nslow-684c8564cb-wjjzw   0/1     Terminating   5 (11s ago)   2m1s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set probe deployment/web --readiness --period-seconds=5 -- test -f /tmp/ready-v2 && oc rollout status deployment/web --timeout=60s",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "deployment.apps/web probes updated\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "combined": "deployment.apps/web probes updated\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nerror: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=web && oc get deployment web && oc describe endpointslices -l kubernetes.io/service-name=web | grep -e Addresses -e Ready",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS        AGE\nweb-66794b66f5-kgmzh   0/1     Running   0               60s\nweb-77746978cd-lm8mg   1/1     Running   0               5m2s\nweb-77746978cd-s8szw   1/1     Running   1 (3m46s ago)   5m2s\nNAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     1            2           5m2s\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    true\n  - Addresses:  10.217.0.95\n      Ready:    false\n",
+   "stderr": "",
+   "combined": "NAME                   READY   STATUS    RESTARTS        AGE\nweb-66794b66f5-kgmzh   0/1     Running   0               60s\nweb-77746978cd-lm8mg   1/1     Running   0               5m2s\nweb-77746978cd-s8szw   1/1     Running   1 (3m46s ago)   5m2s\nNAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     1            2           5m2s\n  - Addresses:  10.217.0.91\n      Ready:    true\n  - Addresses:  10.217.0.92\n      Ready:    true\n  - Addresses:  10.217.0.95\n      Ready:    false\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout undo deployment/web && oc rollout status deployment/web --timeout=120s && oc get pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web rolled back\ndeployment \"web\" successfully rolled out\nNAME                   READY   STATUS        RESTARTS        AGE\nweb-66794b66f5-kgmzh   0/1     Terminating   0               61s\nweb-77746978cd-lm8mg   1/1     Running       0               5m3s\nweb-77746978cd-s8szw   1/1     Running       1 (3m47s ago)   5m3s\n",
+   "stderr": "",
+   "combined": "deployment.apps/web rolled back\ndeployment \"web\" successfully rolled out\nNAME                   READY   STATUS        RESTARTS        AGE\nweb-66794b66f5-kgmzh   0/1     Terminating   0               61s\nweb-77746978cd-lm8mg   1/1     Running       0               5m3s\nweb-77746978cd-s8szw   1/1     Running       1 (3m47s ago)   5m3s\n",
+   "ok": true
+  }
+ ],
+ "seconds": 319,
+ "ok": true,
+ "problems": []
+}

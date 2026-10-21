@@ -1,0 +1,152 @@
+id: lab.quotas-limits
+title: "Live inside a quota"
+subtitle: "ResourceQuota and LimitRange in practice"
+summary: "An administrator sets guardrails; you deploy into them: default resources, a container that is too big, and a scale-up that hits the quota."
+module: b5-governance
+mode: REAL_LAB
+minutes: 35
+level: 2
+supports: "Recorded on OpenShift 4.21.8. Project admins cannot create ResourceQuota or LimitRange objects (a cluster administrator does); the app applies them as an elevated setup after you confirm."
+concepts: [k8s.quota, k8s.requests-limits, ocp.projects]
+prerequisites: [o2.quotas-limits]
+namespace: academy-quota
+elevated_why: "Project admins cannot create ResourceQuotas or LimitRanges. The app needs the admin identity to apply the two guardrail objects into academy-quota only; everything else runs as developer."
+elevated_setup:
+  - |
+    apiVersion: v1
+    kind: ResourceQuota
+    metadata: {name: compute}
+    spec:
+      hard:
+        pods: "3"
+        requests.cpu: 500m
+        requests.memory: 512Mi
+        limits.memory: 1Gi
+  - |
+    apiVersion: v1
+    kind: LimitRange
+    metadata: {name: defaults}
+    spec:
+      limits:
+      - type: Container
+        default: {memory: 128Mi}
+        defaultRequest: {cpu: 50m, memory: 64Mi}
+        max: {memory: 512Mi}
+objective: |
+  See guardrails from the developer's side: defaults that appear in your pods, limits that reject a container, and a
+  quota that stops a scale-up, and read each rejection where it is reported.
+background: |
+  The project has a **ResourceQuota** `compute` (3 pods, 500m CPU requests, 512Mi memory requests, 1Gi memory limits)
+  and a **LimitRange** `defaults` (each container gets 50m/64Mi requests and a 128Mi limit unless it sets its own; no
+  container may have a memory limit above 512Mi). Rejections happen at **admission**, when the ReplicaSet tries to create
+  pods, so they appear as **FailedCreate** events on the ReplicaSet, not on pods. ResourceQuota and LimitRange are
+  plain Kubernetes; the project request template at the end is OpenShift-specific.
+
+  **Where everything comes from.** The app creates the project `academy-quota` as the learner identity. After you
+  confirm, it applies the ResourceQuota `compute` and the LimitRange `defaults` into that project with the
+  administrator identity (both manifests are shown under setup below), because a project admin may not create them. Your Deployments use
+  `registry.access.redhat.com/ubi9/ubi-minimal`, which needs no login. Clean up deletes the project, quota and
+  LimitRange included.
+steps:
+  - id: inspect
+    title: "Read the guardrails"
+    do: "Describe the quota and the LimitRange, and confirm you cannot change them."
+    commands:
+      - {cmd: "oc describe quota compute -n academy-quota", meaning: "Used / Hard"}
+      - {cmd: "oc describe limitrange defaults -n academy-quota", meaning: "defaults, default requests, max"}
+      - {cmd: "oc auth can-i create resourcequotas -n academy-quota", meaning: "no: only administrators", expect: fail}
+    observe: "Quota usage is 0 for everything. The LimitRange shows memory Default Request 64Mi, Default Limit 128Mi, Max 512Mi, and cpu Default Request 50m with no CPU limit. `can-i` answers `no`."
+    why: "The people who use a budget are not the people who set it. Your `admin` role in this project may read quotas and LimitRanges but not create, change or delete them (Kubernetes gives these two kinds only read access in the default roles), so a team cannot lift its own guardrails."
+  - id: defaults
+    title: "Defaults appear in your pods"
+    do: "Deploy without any resources, then read what the pod actually got."
+    commands:
+      - {cmd: "oc create deployment app --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-quota -- sleep infinity", meaning: "no resources specified"}
+      - {cmd: "oc rollout status deploy/app -n academy-quota --timeout=120s", meaning: "wait", timeout: 150}
+      - {cmd: "oc get pods -l app=app -n academy-quota -o jsonpath='{.items[0].spec.containers[0].resources}'", meaning: "injected by the LimitRange"}
+    predict:
+      prompt: "The Deployment sets no resources. What does the pod have?"
+      choices: ["Nothing (BestEffort)", "requests 50m/64Mi and limit 128Mi, injected at admission", "The pod is rejected"]
+      answer: 1
+      explain: "The LimitRanger admission plugin fills in defaults. The Deployment's template stays empty; only the pod gets them."
+      feedback:
+        - "BestEffort is what you get in a project without a LimitRange. Here admission adds the LimitRange defaults before the pod is stored."
+        - "Right: admission writes the LimitRange's default requests (50m CPU, 64Mi memory) and default limit (128Mi memory) into the pod."
+        - "It would be rejected without the LimitRange: a quota on requests.cpu, requests.memory and limits.memory rejects pods that do not set them. The defaults are what make the pod acceptable to the quota."
+    observe: "`{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"50m\",\"memory\":\"64Mi\"}}`: exactly the LimitRange defaults. No CPU limit, because the LimitRange sets no default CPU limit and the quota does not require one."
+    why: "A quota on compute resources forces every pod to declare them; a LimitRange with defaults keeps simple deployments working. The Deployment itself still has empty resources: `oc get deploy app -o yaml` would show `resources: {}`."
+    wait_for: [app-one]
+  - id: too-big
+    title: "A container that is too big"
+    do: "Create a second Deployment asking for a 1Gi memory limit, above the LimitRange maximum."
+    commands:
+      - {cmd: "oc create deployment big --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-quota -- sleep infinity", meaning: "starts with defaults"}
+      - {cmd: "oc set resources deploy/big --limits=memory=1Gi -n academy-quota", meaning: "too big for the LimitRange"}
+    observe: "`deployment.apps/big resource requirements updated`: the API accepts the change, because the LimitRange checks pods, not the Deployment. The Deployment starts a new ReplicaSet for its new pod template."
+    why: "A guardrail is checked when a pod is created, not when its owner is edited, so a mistake in a template shows up later, on the ReplicaSet that tries to create the pod."
+    wait_for: [big-rejected]
+  - id: too-big-read
+    title: "Find the rejection"
+    do: "There is no new pod to describe. Read the ReplicaSet events instead."
+    commands:
+      - {cmd: "oc get events -n academy-quota --field-selector reason=FailedCreate", meaning: "admission rejections"}
+    observe: "Several FailedCreate events on `replicaset/big-...`: `pods \"big-...\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi`. The ReplicaSet keeps retrying with back-off. The old big pod (created with the defaults) keeps running, because the rollout can never get a new pod."
+    why: "A LimitRange maximum bounds one container. More quota would not help: lower the limit, or ask the platform team to review the bound."
+  - id: scale
+    title: "Hit the quota"
+    do: "Delete big, then scale app to 5 replicas."
+    commands:
+      - {cmd: "oc delete deployment big -n academy-quota", meaning: "free the slot"}
+      - {cmd: "oc scale deploy/app --replicas=5 -n academy-quota", meaning: "more than the quota allows"}
+    observe: "`deployment.apps \"big\" deleted from academy-quota namespace`, then `deployment.apps/app scaled`: the API accepts the replica count. The quota is checked for each pod the ReplicaSet then tries to create."
+    why: "A `pods` quota counts Pod objects, not the `replicas` field, so scaling succeeds and the refusals appear afterwards as FailedCreate events."
+    wait_for: [quota-hit]
+  - id: scale-read
+    title: "Read the quota"
+    do: "Count pods and read the quota usage and the rejection."
+    commands:
+      - {cmd: "oc get pods -l app=app -n academy-quota", meaning: "fewer than 5 pods (2 at the moment of the recording)"}
+      - {cmd: "oc describe quota compute -n academy-quota", meaning: "pods 3/3: the quota is full"}
+      - {cmd: "oc get deploy app -n academy-quota", meaning: "READY below 5 (1/5 in the recording): the Deployment keeps wanting 5"}
+    observe: "The quota says `pods 3/3` (and 384Mi limits, 150m CPU, 192Mi memory requests: three pods with the defaults), yet only two app pods exist at first: the third slot is most likely still held by big's old pod, which is shutting down after the deletion (`sleep` ignores the termination signal, so it waits for the grace period). Once it is gone app gets its third pod, and every further attempt fails with a FailedCreate event: `exceeded quota: compute, requested: pods=1, used: pods=3, limited: pods=3`. The Deployment never reaches 5."
+    why: "Quota counts every pod that has not finished, including ones that are terminating, and it is checked at admission for each pod the ReplicaSet tries to create. Nothing is queued: the controller retries with back-off until the quota or the desired count changes."
+  - id: fix
+    title: "Fix it honestly"
+    do: "Scale back to what the project is allowed to run."
+    commands:
+      - {cmd: "oc scale deploy/app --replicas=3 -n academy-quota", meaning: "desired state matches the quota"}
+      - {cmd: "oc get deploy app -n academy-quota", meaning: "on its way to 3/3 (1/3 at the instant of the recording; the lab check waits for 3/3)"}
+    observe: "Right after scaling, READY can still be below 3 while the last pod starts; it settles at 3/3 and the FailedCreate events stop."
+    why: "Run what the budget allows, or ask the platform team for a reviewed increase. Removing a broken Deployment, as you did with big, is cleanup; removing working ones to make room only hides the real need from the people who size the budget."
+    wait_for: [app-three]
+  - id: template
+    title: "Make it the default for every new project"
+    do: "Print the project request template an administrator would customise, so that each new project starts with a quota and LimitRange like these."
+    commands:
+      - {cmd: "oc adm create-bootstrap-project-template -o yaml", as: admin, meaning: "prints the default template; nothing is created"}
+    observe: "The command needs no cluster permission: oc prints its own built-in default template and creates nothing. It is recorded with the administrator identity only because the app's Workbench does not offer this `oc adm` subcommand to the learner; in your own terminal any user can run it. A `Template` named `project-request` whose objects are a Project and a RoleBinding (the requester becomes admin). An administrator adds a ResourceQuota, a LimitRange and NetworkPolicies to `objects`, creates it in `openshift-config`, and points `project.config.openshift.io/cluster` at it with `spec.projectRequestTemplate.name`."
+    why: "Guardrails that every project gets automatically are the ones nobody forgets."
+hints:
+  - "Admission rejections have no pod: read `oc get events --field-selector reason=FailedCreate`."
+  - "`oc describe quota` shows Used against Hard for each resource."
+  - "Compare a container's limit with the LimitRange `Max` column."
+checks:
+  - {id: app-one, title: "app runs with LimitRange defaults", type: pods, selector: app=app, ready: true, min: 1, final: false, expect_text: "1 pod"}
+  - {id: big-rejected, title: "big's new pod was rejected by the LimitRange", type: event, reason: FailedCreate, message_contains: "maximum memory usage per Container is 512Mi", expect_text: "FailedCreate: maximum memory usage per Container is 512Mi"}
+  - {id: quota-hit, title: "The quota stopped the scale-up", type: event, reason: FailedCreate, message_contains: "exceeded quota: compute", expect_text: "FailedCreate: exceeded quota: compute"}
+  - {id: big-gone, title: "big was removed", type: absent, kind: deployment, name: big, expect_text: "absent"}
+  - {id: app-three, title: "app runs 3/3 within the quota", type: deployment_ready, name: app, replicas: 3, expect_text: "3/3"}
+questions:
+  - q: "Why are quota rejections visible on the ReplicaSet and not on a pod?"
+    a: "Admission refuses to create the pod at all; the ReplicaSet controller's create call fails and it records a FailedCreate event."
+  - q: "What does a LimitRange do to a container that sets no resources?"
+    a: "Admission fills in its default requests and limits, which also keeps the namespace usable when a quota requires them."
+enterprise: |
+  Quotas and LimitRanges are usually created for every project by the project request template, sized per team or
+  per environment tier, and changed through a request process. They protect shared clusters from one team's mistake.
+references:
+  - {title: "Kubernetes: Resource quotas", url: "https://kubernetes.io/docs/concepts/policy/resource-quotas/"}
+  - {title: "Kubernetes: Limit ranges", url: "https://kubernetes.io/docs/concepts/policy/limit-range/"}
+  - {title: "OpenShift 4.21: Configuring project creation", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects#configuring-project-creation"}
+variations:
+  - "With `app` at 3/3, change its template (for example add an environment variable) and predict whether the rolling update can create its extra pod. Check: you can explain the result from `oc describe quota compute` and the new ReplicaSet's events, then make the rollout finish without asking for more quota."

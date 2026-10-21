@@ -1,0 +1,167 @@
+id: lab.container-anatomy
+title: "Anatomy of a container"
+subtitle: "UID, capabilities, PID 1 and cgroups"
+summary: "Look inside a running pod and connect what the kernel enforces to the pod spec and the SCC."
+module: f1-containers
+mode: REAL_LAB
+minutes: 30
+level: 1
+supports: "Verified on CRC / OpenShift 4.21.8, RHCOS 9 with cgroup v2, restricted-v2 SCC."
+concepts: [linux.process, linux.cgroups, linux.namespaces, container.security, k8s.qos]
+prerequisites: [a.container-is-a-process]
+namespace: academy-anatomy
+objective: |
+  From inside a real pod, find the UID and groups the process runs with, its capabilities, its PID 1, and
+  the cgroup limits the kernel enforces, then change a limit in the spec and watch it land in the kernel.
+background: |
+  OpenShift admits a pod with an SCC (restricted-v2 for normal users), which sets the UID from the project's
+  range, drops all capabilities and forbids privilege escalation. CRI-O then starts the process in new
+  namespaces and a cgroup whose files mirror the pod's limits: `memory.max` (bytes) and `cpu.max`
+  (`quota period` in microseconds). Everything in this lab is read with plain Linux tools inside the pod.
+
+  **Before this lab.** It reads a container through Kubernetes: you need to know what a pod and a Deployment are
+  ([From containers to Kubernetes](/lesson/a.what-kubernetes-does)) and how `oc` reaches the cluster ([From kubectl to
+  oc](/lesson/k.kubectl-to-oc)). **Where everything comes from.** The app creates the project `academy-anatomy` as the
+  learner identity and applies the Deployment `box`, which runs `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed) with the requests and limits shown below. The
+  project's UID range is chosen by OpenShift when the project is created, which is why your UID differs from the
+  recording. Clean up deletes the project.
+commands:
+  - {cmd: "oc exec deploy/box -n academy-anatomy -- id", meaning: "UID, GID and supplementary groups of the container process"}
+  - {cmd: "oc exec deploy/box -n academy-anatomy -- grep Cap /proc/1/status", meaning: "capability sets of PID 1 (hex bitmasks)"}
+  - {cmd: "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max", meaning: "the limits the kernel enforces right now"}
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: box
+      labels: {app: box}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: box}}
+      template:
+        metadata:
+          labels: {app: box}
+        spec:
+          terminationGracePeriodSeconds: 5
+          containers:
+          - name: box
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources:
+              requests: {cpu: 50m, memory: 32Mi}
+              limits: {cpu: 500m, memory: 128Mi}
+steps:
+  - id: whoami
+    title: "Who is this process?"
+    do: "Run `id` inside the container."
+    commands:
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- id", meaning: "the identity of PID 1's user"}
+    predict:
+      prompt: "Which user does the container run as? The image does not set one."
+      choices: ["root (uid=0)", "a high UID from the project's range, with group 0", "uid=1000, a fixed user"]
+      answer: 1
+      explain: "restricted-v2 uses MustRunAsRange: the UID comes from the namespace annotation openshift.io/sa.scc.uid-range. The primary group is 0 (root group), which is OpenShift's contract for arbitrary UIDs: images make writable paths group-owned by 0. The extra group is the fsGroup the SCC assigned from the project's range."
+      feedback:
+        - "No: restricted-v2 does not allow UID 0; only a more permissive SCC such as anyuid does. Plain Kubernetes would use the image's user (root when none is set); OpenShift's default SCC overrides it."
+        - "Right: the SCC assigns the first UID of the project's range (openshift.io/sa.scc.uid-range) and the process runs with primary group 0, so files owned by group 0 and group-writable remain usable."
+        - "No: no fixed UID is used. Each project gets its own range, so two projects never share a UID; an image that hard-codes 1000 and needs it will hit permission errors."
+    observe: "`uid=1004310000(1004310000) gid=0(root) groups=0(root),1004310000` in the recording; the number depends on your project."
+    why: "Compare with `oc get project academy-anatomy -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}'`: the UID is the first of that range."
+  - id: scc
+    title: "Which SCC admitted it, and which QoS class did it get?"
+    do: "Read the pod's annotation and QoS class."
+    commands:
+      - {cmd: "oc get pods -l app=box -n academy-anatomy -o 'custom-columns=POD:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc,QOS:.status.qosClass'", meaning: "admission result (the openshift.io/scc annotation) and QoS class, one row per pod"}
+    predict:
+      prompt: "requests cpu 50m / memory 32Mi, limits cpu 500m / memory 128Mi. QoS class?"
+      choices: ["Guaranteed", "Burstable", "BestEffort"]
+      answer: 1
+      explain: "Requests are set but differ from limits."
+      feedback:
+        - "No: Guaranteed needs every container to have CPU and memory limits equal to its requests. Here 50m differs from 500m and 32Mi from 128Mi."
+        - "Right: CPU and memory requests or limits are set, but requests and limits are not equal for both resources, so the pod is Burstable."
+        - "No: BestEffort means no CPU or memory requests or limits in any container. This pod sets CPU and memory, which makes it Burstable."
+    observe: "SCC `restricted-v2` and QoS `Burstable`. The whole `-o` argument is in single quotes so the backslash in `openshift\\.io/scc` reaches oc: unquoted, the shell (and the app's command runner, which splits commands the same way) removes it, oc then looks for a nested field `openshift` that does not exist, and the column prints `<none>`."
+    why: "The SCC is chosen at admission and frozen into the `openshift.io/scc` annotation; QoS is computed from requests and limits when the pod is created. A `<none>` in a custom column means 'no value at that path', which can be a typo or a quoting problem rather than a missing field: check with `-o yaml` before concluding."
+  - id: caps
+    title: "What may the process do? Capabilities"
+    do: "Print the capability sets of PID 1."
+    commands:
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- grep Cap /proc/1/status", meaning: "CapInh, CapPrm, CapEff, CapBnd, CapAmb"}
+    observe: "All five sets are `0000000000000000`: no effective capabilities, and even the bounding set (`CapBnd`) is empty, so nothing can be regained later."
+    why: "restricted-v2 requires dropping ALL capabilities and forbids privilege escalation. Binding a port below 1024 normally needs NET_BIND_SERVICE, the only capability restricted-v2 lets a pod add back; that is why OpenShift images listen on 8080 and 8443."
+  - id: pid1
+    title: "PID 1 and the PID namespace"
+    do: "See the container's view of processes."
+    commands:
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- cat /proc/1/cmdline", meaning: "the command of PID 1 (NUL-separated)"}
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- ls /proc", meaning: "numeric entries = PIDs visible in this namespace"}
+    observe: "PID 1 is the `sleep infinity` from the pod spec. Its cmdline reads `/usr/bin/coreutils --coreutils-prog-shebang=sleep /usr/bin/sleep infinity` because in ubi-minimal `sleep` is a small script that runs the multi-call `coreutils` binary. `ls /proc` shows only two numeric entries: `1` (the sleep) and the `ls` itself (`6` in the recording)."
+    why: "The container has its own PID namespace. The host sees the same sleep with a different, larger PID."
+  - id: cgroups
+    title: "Read the limits the kernel enforces"
+    do: "Read the container's cgroup files."
+    commands:
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max", meaning: "memory limit in bytes"}
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/cpu.max", meaning: "CPU quota and period in µs"}
+    predict:
+      prompt: "What does `memory.max` contain for `limits.memory: 128Mi`?"
+      choices: ["128", "134217728", "max"]
+      answer: 1
+      explain: "128 × 1024 × 1024 bytes. `max` means no limit."
+      feedback:
+        - "No: cgroup files carry no units. memory.max is always in bytes, so 128 would be a 128-byte limit."
+        - "Right: 128Mi is a binary unit, 128 × 1024 × 1024 = 134217728 bytes, and the kubelet writes it to memory.max through CRI-O."
+        - "No: `max` means unlimited, which is what you would see with no memory limit in the spec. This container has one."
+    observe: "`134217728` and `50000 100000` (50 ms of CPU every 100 ms = 500m)."
+    why: "The kubelet translated the pod spec into cgroup settings through CRI-O. Exceeding memory.max triggers the OOM killer; exceeding cpu.max only throttles."
+  - id: change
+    title: "Change the limit and watch it reach the kernel"
+    do: |
+      Raise the memory limit to 256Mi through the Deployment, wait for the rollout, then read `memory.max`
+      again.
+    commands:
+      - {cmd: "oc set resources deploy/box -n academy-anatomy --limits=memory=256Mi", meaning: "change the template"}
+      - {cmd: "oc rollout status deploy/box -n academy-anatomy --timeout=120s", meaning: "a new pod replaces the old one", timeout: 150}
+      - {cmd: "oc exec deploy/box -n academy-anatomy -- cat /sys/fs/cgroup/memory.max", meaning: "read it again"}
+    predict:
+      prompt: "Does the existing container's limit change in place?"
+      choices: ["Yes, instantly", "No: changing the Deployment template creates a new pod with the new cgroup", "Only after a node reboot"]
+      answer: 1
+      explain: "A template change is a rollout. (Current Kubernetes can also resize a running pod's resources in place through the pod's `resize` subresource, beta and on by default in v1.34; a Deployment template change still replaces pods.)"
+      feedback:
+        - "No: the Deployment does not touch running pods. It creates a new ReplicaSet whose pods get the new limit, and the old pod and its cgroup go away."
+        - "Right: the template changed, so the Deployment rolls out a new pod; the new container's cgroup gets the new memory.max."
+        - "No: nodes are not involved. cgroup limits are set per container when it starts (or by an explicit in-place resize), never at boot."
+    observe: "A new pod; `memory.max` now `268435456`."
+    why: "Desired state (template) → new ReplicaSet → new pod → new cgroup. The old cgroup disappeared with the old container."
+    checks: [limit-256, cgroup-256]
+    wait_for: [limit-256, ready]
+hints: []
+checks:
+  - {id: ready, title: "box is running", type: deployment_ready, name: box, expect_text: "1/1 ready"}
+  - {id: scc, title: "Admitted with restricted-v2", type: pods, selector: app=box, annotation: "openshift.io/scc=restricted-v2", expect_text: "openshift.io/scc=restricted-v2"}
+  - {id: limit-256, title: "Template memory limit is 256Mi", type: field, kind: deployment, name: box, path: "spec.template.spec.containers[0].resources.limits.memory", op: eq, value: 256Mi, expect_text: "256Mi"}
+  - {id: cgroup-256, title: "The kernel enforces 256Mi in the running container", type: exec, from: app=box, command: ["cat", "/sys/fs/cgroup/memory.max"], expect_output: "^268435456$", expect_text: "memory.max = 268435456"}
+variations:
+  - "Remove the whole resources block with `oc patch deploy/box -n academy-anatomy --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/resources\"}]'` and check that the QoS class becomes BestEffort and `memory.max` becomes `max`."
+  - "Make the pod Guaranteed (requests = limits for both CPU and memory) and confirm the QoS class."
+  - "Read `/sys/fs/cgroup/cpu.weight`: it is derived from the CPU *request*."
+troubleshooting:
+  - problem: "`oc exec deploy/box` says no pod is running."
+    hint: "The rollout may still be in progress; `oc get pods -n academy-anatomy` and wait for 1/1 READY."
+questions:
+  - q: "Why does OpenShift add group 0 to the random UID?"
+    a: "So images can make writable directories group-owned by root and group-writable; any assigned UID can then write there."
+  - q: "What is the difference between exceeding memory.max and cpu.max?"
+    a: "Memory: the OOM killer kills the process (OOMKilled). CPU: the process is throttled."
+enterprise: |
+  When a vendor image fails on OpenShift with "permission denied", this lab is the diagnosis: run `id`,
+  check which paths need to be writable, and fix the image (group 0, g=u) instead of granting `anyuid`.
+references:
+  - {title: "Kubernetes: Resource management (cgroups)", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"}
+  - {title: "OpenShift 4.21: SCCs", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies"}
+  - {title: "OpenShift 4.21: Images that support arbitrary user IDs", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/creating-images#use-uid_create-images"}
+  - {title: "Kubernetes: Pod Quality of Service classes", url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/"}

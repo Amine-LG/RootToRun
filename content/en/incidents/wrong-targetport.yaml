@@ -1,0 +1,104 @@
+id: inc.wrong-targetport
+kind: incident
+title: "Endpoints exist, connections are refused"
+summary: "The Service has a ready endpoint, yet every request through it fails."
+module: a5-network
+minutes: 15
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (OVN-Kubernetes)."
+concepts: [net.services, net.endpointslices, net.routes]
+prerequisites: [d.services-dns]
+namespace: academy-inc-port
+objective: |
+  Find out why every request fails although the pod is Ready and listed as an endpoint, and repair the cause.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`; the image is the unprivileged one the symptom mentions. The app creates the project
+  `academy-inc-port` as your learner identity when you start the incident, with everything listed here in the state
+  the symptom describes; how it got into that state is part of the investigation and is shown in the debrief. The
+  images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login. Clean up deletes the
+  project. In the browser you replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  After moving the portal to an unprivileged image, the Route answers 503. This time the Service *does* have an
+  endpoint, the pod is Ready, and the application works when tested from inside its own container.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: http}
+break:
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{name: http, port: 8080, targetPort: 80}]
+investigate:
+  - {cmd: "oc get pods,svc -n academy-inc-port", meaning: "pod Running 1/1, Service present on 8080/TCP: nothing looks wrong at this level"}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-port", meaning: "an endpoint exists (the pod IP), but its PORTS column says 80"}
+  - {cmd: "oc exec deploy/web -n academy-inc-port -- curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8080/healthz", meaning: "200: the application answers on 8080 inside the pod"}
+  - {cmd: "oc exec deploy/web -n academy-inc-port -- curl -sS -m 3 http://web:8080/", meaning: "through the Service: curl: (7) Failed to connect to web port 8080: Connection refused. The ClusterIP forwards to pod port 80, where nothing listens", expect: fail}
+  - {cmd: "oc get svc web -n academy-inc-port -o jsonpath='{.spec.ports[0].port} -> {.spec.ports[0].targetPort}{\"\\n\"}'", meaning: "8080 -> 80: the Service port 8080 forwards to targetPort 80"}
+hints:
+  - "The endpoint exists, so the selector is fine. What port does traffic arrive on at the pod?"
+  - "Compare the Service targetPort with the containerPort the application listens on (8080)."
+  - "Make the Service forward to the port the container really listens on, then check the endpoint's port and the Route."
+fix:
+  - {cmd: "oc patch svc web -n academy-inc-port --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/targetPort\",\"value\":8080}]'", meaning: "forward to the port the container really listens on"}
+  - {cmd: "oc exec deploy/web -n academy-inc-port -- curl -sS -m 3 http://web:8080/", meaning: "through the Service: <h1>payments portal</h1>"}
+fix_wait: [targetport, route-ok]
+checks:
+  - {id: targetport, title: "Service web forwards to port 8080", type: field, kind: service, name: web, path: "spec.ports[0].targetPort", op: eq, value: 8080, expect_text: "8080"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The Service forwarded to `targetPort: 80`, a leftover from the old image that ran httpd as root on port 80. The
+  unprivileged image listens on 8080 (by default, binding a port below 1024 needs root or the NET_BIND_SERVICE
+  capability, which the restricted-v2 SCC drops; the threshold is the network-namespace sysctl
+  `net.ipv4.ip_unprivileged_port_start`, which this incident did not record). Packets reached the pod IP on a port
+  where nothing listened: connection refused, so the router returned 503.
+alternatives: |
+  Name the container port (`ports: [{name: http, containerPort: 8080}]`) and use `targetPort: http` in the Service:
+  the Service then follows the container's port even if the number changes. The Route already does this one level
+  up: its `port.targetPort: http` names the Service port, which is why the Route needed no change. This incident's
+  `targetport` check reads the number in `targetPort`, so it would report a named target port as not repaired
+  although traffic flows; the Route check is the one that proves the repair.
+sre: |
+  Named ports remove a whole class of these errors. A synthetic check that calls the Service (not only the pod) catches
+  it before users do. In images, never assume privileged ports on OpenShift.
+questions:
+  - q: "Why did the endpoint exist although traffic failed?"
+    a: "An endpoint is listed when the selector matches a pod with an IP, and it is marked ready when the pod's readiness probe passes; that probe tested port 8080 directly, not the Service's targetPort."
+  - q: "Why does the unprivileged image use 8080 rather than 80?"
+    a: "By default, binding a port below 1024 needs root or the NET_BIND_SERVICE capability; the threshold comes from the network-namespace sysctl `net.ipv4.ip_unprivileged_port_start`, which a runtime or pod can lower. Pods run as an arbitrary non-root UID under restricted-v2, which drops all capabilities by default (NET_BIND_SERVICE may only be added explicitly), so images built for OpenShift listen on high ports such as 8080 rather than depend on that setting."
+references:
+  - {title: "Kubernetes: Service ports and targetPort", url: "https://kubernetes.io/docs/concepts/services-networking/service/#defining-a-service"}
+  - {title: "OpenShift 4.21: Routes", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes"}
+symptom_checks: [route-ok]  # monitoring-level evidence shown before the answer

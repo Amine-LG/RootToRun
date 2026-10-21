@@ -1,0 +1,100 @@
+id: inc.readiness-503
+kind: incident
+title: "Running but never Ready"
+summary: "The pod is Running with 0 restarts, yet READY stays 0/1 and the Route answers 503."
+module: a2-apps
+minutes: 15
+level: 1
+supports: "Recorded on OpenShift 4.21.8."
+concepts: [k8s.probes, net.endpointslices, k8s.pod-lifecycle]
+prerequisites: [b.health-probes]
+namespace: academy-inc-ready
+objective: |
+  Find why the readiness probe fails, correct the probe rather than restarting pods blindly, and confirm that the
+  Service gets a ready endpoint again.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`. The app creates the project `academy-inc-ready` as your learner identity when you start the
+  incident, with everything listed here in the state the symptom describes; how it got into that state is part of the
+  investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  A developer "standardised" health checks across services. The portal's pod now runs without any restart, but it is
+  never Ready and users get 503.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /health, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get pods -n academy-inc-ready", meaning: "Running, READY 0/1, RESTARTS 0: the process is alive, but the pod is not Ready"}
+  - {cmd: "oc get events -n academy-inc-ready --field-selector reason=Unhealthy", meaning: "Readiness probe failed: HTTP probe failed with statuscode: 404 (on another run an earlier \"connection refused\" may also appear while httpd starts up; it is not the cause)"}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-ready -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'", meaning: "10.217.1.127 ready=false: the pod is listed in the EndpointSlice but not ready, so it receives no traffic"}
+  - {cmd: "oc exec deploy/web -n academy-inc-ready -- curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8080/healthz", meaning: "200: /healthz, the path the application really serves, answers from inside the container"}
+hints:
+  - "Running with zero restarts but not Ready: nothing crashed and nothing is killing the container (there is no liveness probe here); only readiness fails. What does the readiness probe call?"
+  - "The Unhealthy event gives the HTTP status the probe received. Which path does the application serve?"
+  - "Point the readiness probe at the path the application really serves for health (try it with curl from inside the pod), then watch the Service's endpoints fill."
+fix:
+  - {cmd: "oc set probe deploy/web -n academy-inc-ready --readiness --get-url=http://:8080/healthz --period-seconds=5", meaning: "probe the path the app serves"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-ready --timeout=120s", meaning: "the new pod becomes Ready and replaces the old one", timeout: 140}
+fix_wait: [endpoints, route-ok]
+checks:
+  - {id: probe-path, title: "The readiness probe checks /healthz", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].readinessProbe.httpGet.path", op: eq, value: /healthz, expect_text: "/healthz"}
+  - {id: endpoints, title: "Service web has a ready endpoint", type: endpoints, service: web, op: gte, value: 1, expect_text: "≥ 1 ready endpoint"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The readiness probe asked for `/health`, which does not exist (404); the application serves `/healthz`. A failing
+  readiness probe never restarts a container: it only keeps the pod out of the Service's ready endpoints. With its only
+  pod unready, the Service had no ready endpoint and the router answered 503.
+alternatives: |
+  Fix the application to also serve `/health` if that is the new standard (this incident's `probe-path` check expects
+  the probe itself to be corrected, so it would report that repair as incomplete). Either way, verify probe paths with
+  `oc exec ... curl localhost:<port><path>` before rolling them out.
+sre: |
+  Readiness should answer "can I take traffic right now?" (dependencies, warm-up), liveness "am I stuck beyond
+  repair?". A readiness probe that never succeeds is an outage that looks healthy on a restart dashboard: alert on
+  Deployments whose available replicas are below desired.
+questions:
+  - q: "Why did the container never restart?"
+    a: "Only liveness (and startup) probe failures restart containers. A failing readiness probe only sets the pod's endpoint to `ready=false` in the EndpointSlice (the recording shows it still listed), so Services stop sending it traffic."
+references:
+  - {title: "Kubernetes: Configure liveness, readiness and startup probes", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"}
+  - {title: "Kubernetes: EndpointSlices (ready, serving, terminating)", url: "https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/"}
+symptom_checks: [endpoints, route-ok]  # monitoring-level evidence shown before the answer

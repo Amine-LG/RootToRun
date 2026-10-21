@@ -1,0 +1,356 @@
+{
+ "lab": "ch.recover-and-scale",
+ "kind": "challenge",
+ "lab_hash": "d97f67973549f55a",
+ "recorded_at": "2026-10-14T16:46:53+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/api image updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/api --readiness --get-url=http://:8080/status --period-seconds=5 -n academy-ch-recover",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/api probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch svc/api --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/targetPort\",\"value\":8080}]' -n academy-ch-recover",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/api patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc scale deploy/api --replicas=3 -n academy-ch-recover",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/api scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/api -n academy-ch-recover --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"api\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"api\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"api\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "ready",
+    "title": "api runs 3 Ready replicas",
+    "expect": "3/3 ready",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/3, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "endpoints",
+    "title": "The Service has 3 ready endpoints on port 8080",
+    "expect": "3 ready endpoints, port 8080",
+    "status": "fail",
+    "observed": "0 ready endpoint address(es), ports [8081]"
+   },
+   {
+    "id": "inside",
+    "title": "http://api:8080/status answers inside the project",
+    "expect": "api ok",
+    "status": "fail",
+    "observed": "command terminated with exit code 7"
+   },
+   {
+    "id": "outside",
+    "title": "Route api answers /status",
+    "expect": "HTTP 200 api ok",
+    "status": "fail",
+    "observed": "http://api-academy-ch-recover.apps-crc.testing/status → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791996424.7777512
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready",
+    "title": "api runs 3 Ready replicas",
+    "expect": "3/3 ready",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "endpoints",
+    "title": "The Service has 3 ready endpoints on port 8080",
+    "expect": "3 ready endpoints, port 8080",
+    "status": "pass",
+    "observed": "3 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "inside",
+    "title": "http://api:8080/status answers inside the project",
+    "expect": "api ok",
+    "status": "pass",
+    "observed": "api ok"
+   },
+   {
+    "id": "outside",
+    "title": "Route api answers /status",
+    "expect": "HTTP 200 api ok",
+    "status": "pass",
+    "observed": "http://api-academy-ch-recover.apps-crc.testing/status → HTTP 200 · api ok"
+   }
+  ],
+  "at": 1791996434.16886
+ },
+ "trials": [
+  {
+   "id": "scaled-only",
+   "title": "Scaled to 3 without repairing anything",
+   "kind": "wrong",
+   "expect": "failed",
+   "got": "failed",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "api runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "fail",
+     "observed": "spec.replicas 3, ready 0/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "endpoints",
+     "title": "The Service has 3 ready endpoints on port 8080",
+     "expect": "3 ready endpoints, port 8080",
+     "status": "fail",
+     "observed": "0 ready endpoint address(es), ports [8081]"
+    },
+    {
+     "id": "inside",
+     "title": "http://api:8080/status answers inside the project",
+     "expect": "api ok",
+     "status": "fail",
+     "observed": "command terminated with exit code 7"
+    },
+    {
+     "id": "outside",
+     "title": "Route api answers /status",
+     "expect": "HTTP 200 api ok",
+     "status": "fail",
+     "observed": "http://api-academy-ch-recover.apps-crc.testing/status → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:scaled-only",
+     "cmd": "oc scale deploy/api --replicas=3 -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api scaled\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "two-of-three",
+   "title": "Image and probe repaired, Service port left wrong",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "api runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "endpoints",
+     "title": "The Service has 3 ready endpoints on port 8080",
+     "expect": "3 ready endpoints, port 8080",
+     "status": "fail",
+     "observed": "3 ready endpoint address(es), ports [8081]"
+    },
+    {
+     "id": "inside",
+     "title": "http://api:8080/status answers inside the project",
+     "expect": "api ok",
+     "status": "fail",
+     "observed": "command terminated with exit code 7"
+    },
+    {
+     "id": "outside",
+     "title": "Route api answers /status",
+     "expect": "HTTP 200 api ok",
+     "status": "fail",
+     "observed": "http://api-academy-ch-recover.apps-crc.testing/status → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:two-of-three",
+     "cmd": "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api image updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:two-of-three",
+     "cmd": "oc set probe deploy/api --readiness --get-url=http://:8080/status -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:two-of-three",
+     "cmd": "oc scale deploy/api --replicas=3 -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api scaled\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "probe-removed",
+   "title": "A correct alternative: readiness probe removed instead of fixed, port fixed with oc edit-equivalent apply",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "api runs 3 Ready replicas",
+     "expect": "3/3 ready",
+     "status": "pass",
+     "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "endpoints",
+     "title": "The Service has 3 ready endpoints on port 8080",
+     "expect": "3 ready endpoints, port 8080",
+     "status": "pass",
+     "observed": "3 ready endpoint address(es), ports [8080]"
+    },
+    {
+     "id": "inside",
+     "title": "http://api:8080/status answers inside the project",
+     "expect": "api ok",
+     "status": "pass",
+     "observed": "api ok"
+    },
+    {
+     "id": "outside",
+     "title": "Route api answers /status",
+     "expect": "HTTP 200 api ok",
+     "status": "pass",
+     "observed": "http://api-academy-ch-recover.apps-crc.testing/status → HTTP 200 · api ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:probe-removed",
+     "cmd": "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api image updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:probe-removed",
+     "cmd": "oc set probe deploy/api --readiness --remove -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:probe-removed",
+     "cmd": "oc apply -f - -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/api configured\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:probe-removed",
+     "cmd": "oc scale deploy/api --replicas=3 -n academy-ch-recover",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/api scaled\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 142,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-recover: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

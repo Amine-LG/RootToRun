@@ -1,0 +1,102 @@
+id: inc.service-selector-503
+kind: incident
+title: "Route returns 503, pods are healthy"
+summary: "The portal answers 'Application is not available' although its pod is Running and Ready."
+module: a5-network
+minutes: 15
+level: 1
+supports: "Recorded on OpenShift 4.21.8 (OVN-Kubernetes, default IngressController)."
+concepts: [net.services, net.endpointslices, k8s.labels, net.routes]
+prerequisites: [d.services-dns]
+namespace: academy-inc-selector
+objective: |
+  Restore the portal and explain why a healthy pod was not receiving traffic.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`. The app creates the project `academy-inc-selector` as your learner identity when you start
+  the incident, with everything listed here in the state the symptom describes; how it got into that state is part of
+  the investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  Since a "cosmetic" relabelling during the last release, the payments portal Route answers HTTP 503 with the page
+  "Application is not available". The developer says the pod is Running and Ready, and they are right.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: payments-web}
+      ports: [{port: 8080, targetPort: 8080}]
+investigate:
+  - {cmd: "oc get route,svc,pods -n academy-inc-selector", meaning: "Route → Service → pods: every object exists (Route to service web, port 8080) and the pod is Running 1/1"}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-selector", meaning: "one EndpointSlice exists, but PORTS and ENDPOINTS are <unset>: no pod is selected"}
+  - {cmd: "oc describe svc web -n academy-inc-selector", meaning: "Selector: app=payments-web, and the Endpoints line is empty"}
+  - {cmd: "oc get pods --show-labels -n academy-inc-selector", meaning: "the pod is labelled app=web (plus pod-template-hash)"}
+  - {cmd: "oc get pods -l app=payments-web -n academy-inc-selector", meaning: "No resources found: the Service's selector matches nothing"}
+hints:
+  - "Follow the request: Route → Service → endpoints → pod. Where does the chain break?"
+  - "A Service with no endpoints means its selector matches no Ready pod. Compare the selector with the pod labels."
+  - "Make the Service select the labels the pods really carry (compare `oc get pods --show-labels` with the Service's selector), then check that endpoints appear."
+fix:
+  - {cmd: "oc set selector svc/web app=web -n academy-inc-selector", meaning: "the Service selects the pods again"}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-selector", meaning: "the same EndpointSlice now lists one endpoint (the pod IP), port 8080"}
+fix_wait: [endpoints, route-ok]
+checks:
+  - {id: endpoints, title: "Service web has a ready endpoint", type: endpoints, service: web, op: gte, value: 1, expect_text: "≥ 1 ready endpoint"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  A Service sends traffic only to Ready pods whose labels match its selector. The release renamed the selector to
+  `app=payments-web` but not the pod template label (`app=web`), so the Service had **zero endpoints**. The router
+  had nowhere to send requests and answered 503 itself: the application never saw them.
+alternatives: |
+  - Relabel the pods instead (change the Deployment's template labels). Changing `spec.selector` of a Deployment is
+    not allowed, so this means a new Deployment; fixing the Service is smaller.
+  - Recreate the Service with `oc expose deploy/web --port 8080`, which copies the Deployment's selector.
+sre: |
+  Alert on Services that have no ready endpoints (kube-state-metrics, part of OpenShift monitoring, exposes
+  `kube_endpoint_address` with a `ready` label; or probe the Route from outside), and keep labels in one place (Kustomize `labels`, Helm helpers) so selector and template cannot drift apart.
+  In review, any change to a selector deserves a second look.
+questions:
+  - q: "Which object shows instantly that this is a selector problem rather than an application problem?"
+    a: "The EndpointSlices (ENDPOINTS <unset>) or `oc describe svc` (an empty Endpoints line): no endpoints while a Ready pod exists."
+  - q: "Who answered the 503 seen by users?"
+    a: "The OpenShift router (HAProxy), because the Route's Service had no endpoints."
+references:
+  - {title: "Kubernetes: Debug Services", url: "https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/"}
+  - {title: "Kubernetes: EndpointSlices", url: "https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/"}
+  - {title: "OpenShift 4.21: Routes", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes"}
+symptom_checks: [endpoints, route-ok]  # monitoring-level evidence shown before the answer

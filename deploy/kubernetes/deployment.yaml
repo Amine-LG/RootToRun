@@ -1,0 +1,39 @@
+# The public site: static files served by nginx (Containerfile). No cluster access, no credentials, no Secret, no
+# ServiceAccount token; nothing writable except /tmp. Meets the restricted Pod Security profile and OpenShift's
+# restricted-v2 (any UID works).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-site
+  labels: {app.kubernetes.io/name: static-site}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: static-site}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: static-site}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: web
+          image: static-site
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 5, periodSeconds: 20}
+          resources:
+            requests: {cpu: 10m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}]

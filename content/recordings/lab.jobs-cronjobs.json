@@ -1,0 +1,288 @@
+{
+ "lab": "lab.jobs-cronjobs",
+ "kind": "lab",
+ "lab_hash": "0eacf008d3810035",
+ "recorded_at": "2026-10-13T21:05:17+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "once",
+   "cmd": "oc create job hello --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-jobs -- sh -c 'echo computing; sleep 2; echo done'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/hello created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "once",
+   "cmd": "oc wait --for=condition=Complete job/hello -n academy-jobs --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/hello condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "once",
+   "cmd": "oc get jobs -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    STATUS     COMPLETIONS   DURATION   AGE\nhello   Complete   1/1           12s        12s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "once",
+   "cmd": "oc logs job/hello -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "computing\ndone\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "retry",
+   "cmd": "oc apply -f - -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/flaky created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "retry-read",
+   "cmd": "oc get pods -l job-name=flaky -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME          READY   STATUS   RESTARTS   AGE\nflaky-4cxj8   0/1     Error    0          10s\nflaky-kgkts   0/1     Error    0          35s\nflaky-s9t67   0/1     Error    0          49s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "retry-read",
+   "cmd": "oc get job flaky -n academy-jobs -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "BackoffLimitExceeded",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fail-fast",
+   "cmd": "oc apply -f - -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/fail-fast created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fail-fast-read",
+   "cmd": "oc get job fail-fast -n academy-jobs -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "PodFailurePolicy",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fail-fast-read",
+   "cmd": "oc get pods -l job-name=fail-fast -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME              READY   STATUS   RESTARTS   AGE\nfail-fast-n55bk   0/1     Error    0          10s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc create cronjob ticker --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --schedule='*/1 * * * *' -n academy-jobs -- date",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/ticker created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc create job ticker-now --from=cronjob/ticker -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/ticker-now created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc wait --for=condition=Complete job/ticker-now -n academy-jobs --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/ticker-now condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc logs job/ticker-now -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Tue Oct 13 21:06:41 UTC 2026\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc patch cronjob ticker -n academy-jobs -p '{\"spec\":{\"suspend\":true}}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/ticker patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "cron",
+   "cmd": "oc get cronjob ticker -n academy-jobs",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     SCHEDULE      TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE\nticker   */1 * * * *   <none>     True      0        <none>          9s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "hello-done",
+    "title": "Job hello succeeded",
+    "expect": "succeeded 1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): jobs.batch \"hello\" not found"
+   },
+   {
+    "id": "flaky-failed",
+    "title": "flaky failed after its retries",
+    "expect": "BackoffLimitExceeded",
+    "status": "fail",
+    "observed": "Error from server (NotFound): jobs.batch \"flaky\" not found"
+   },
+   {
+    "id": "fast-failed",
+    "title": "fail-fast failed by policy",
+    "expect": "PodFailurePolicy",
+    "status": "fail",
+    "observed": "Error from server (NotFound): jobs.batch \"fail-fast\" not found"
+   },
+   {
+    "id": "fast-one-pod",
+    "title": "fail-fast ran a single pod",
+    "expect": "1 pod",
+    "status": "fail",
+    "observed": "0 matching pods"
+   },
+   {
+    "id": "manual-done",
+    "title": "ticker-now ran",
+    "expect": "succeeded 1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): jobs.batch \"ticker-now\" not found"
+   },
+   {
+    "id": "suspended",
+    "title": "The CronJob is suspended",
+    "expect": "suspend true",
+    "status": "fail",
+    "observed": "Error from server (NotFound): cronjobs.batch \"ticker\" not found"
+   }
+  ],
+  "at": 1791925523.0147674
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "hello-done",
+    "title": "Job hello succeeded",
+    "expect": "succeeded 1",
+    "status": "pass",
+    "observed": "status.succeeded = 1"
+   },
+   {
+    "id": "flaky-failed",
+    "title": "flaky failed after its retries",
+    "expect": "BackoffLimitExceeded",
+    "status": "pass",
+    "observed": "status.conditions[?type=Failed].reason = 'BackoffLimitExceeded'"
+   },
+   {
+    "id": "fast-failed",
+    "title": "fail-fast failed by policy",
+    "expect": "PodFailurePolicy",
+    "status": "pass",
+    "observed": "status.conditions[?type=Failed].reason = 'PodFailurePolicy'"
+   },
+   {
+    "id": "fast-one-pod",
+    "title": "fail-fast ran a single pod",
+    "expect": "1 pod",
+    "status": "pass",
+    "observed": "1 matching pods"
+   },
+   {
+    "id": "manual-done",
+    "title": "ticker-now ran",
+    "expect": "succeeded 1",
+    "status": "pass",
+    "observed": "status.succeeded = 1"
+   },
+   {
+    "id": "suspended",
+    "title": "The CronJob is suspended",
+    "expect": "suspend true",
+    "status": "pass",
+    "observed": "spec.suspend = True"
+   }
+  ],
+  "at": 1791925607.094828
+ },
+ "seconds": 90,
+ "ok": true,
+ "problems": []
+}

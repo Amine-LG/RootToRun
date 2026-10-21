@@ -1,0 +1,125 @@
+{
+ "lab": "lesson.lx.ssh-security",
+ "kind": "lesson",
+ "lab_hash": "4a792c7d942d9949",
+ "recorded_at": "2026-10-15T17:36:59+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "ssh-keygen -t ed25519 -N '' -C demo-key -f ./id_demo -q && ls -l id_demo id_demo.pub",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "-rw-------. 1 learner learner 399 Oct 15 17:36 id_demo\n-rw-r--r--. 1 learner learner  90 Oct 15 17:36 id_demo.pub\n",
+   "stderr": "",
+   "combined": "-rw-------. 1 learner learner 399 Oct 15 17:36 id_demo\n-rw-r--r--. 1 learner learner  90 Oct 15 17:36 id_demo.pub\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ssh-keygen -lf id_demo.pub",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "256 SHA256:ri0VjhokCf5tLqTBh5fQdzREMz9Rfwotls/HZFM8KBU demo-key (ED25519)\n",
+   "stderr": "",
+   "combined": "256 SHA256:ri0VjhokCf5tLqTBh5fQdzREMz9Rfwotls/HZFM8KBU demo-key (ED25519)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cut -d' ' -f1,3 id_demo.pub; ls -l id_demo id_demo.pub",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ssh-ed25519 demo-key\n-rw-------. 1 learner learner 399 Oct 15 17:36 id_demo\n-rw-r--r--. 1 learner learner  90 Oct 15 17:36 id_demo.pub\n",
+   "stderr": "",
+   "combined": "ssh-ed25519 demo-key\n-rw-------. 1 learner learner 399 Oct 15 17:36 id_demo\n-rw-r--r--. 1 learner learner  90 Oct 15 17:36 id_demo.pub\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "mkdir -p demo-home/.ssh && cat id_demo.pub >> demo-home/.ssh/authorized_keys && chmod 700 demo-home/.ssh && chmod 600 demo-home/.ssh/authorized_keys && ls -ld demo-home/.ssh demo-home/.ssh/authorized_keys",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "drwx------. 2 learner learner 29 Oct 15 17:36 demo-home/.ssh\n-rw-------. 1 learner learner 90 Oct 15 17:36 demo-home/.ssh/authorized_keys\n",
+   "stderr": "",
+   "combined": "drwx------. 2 learner learner 29 Oct 15 17:36 demo-home/.ssh\n-rw-------. 1 learner learner 90 Oct 15 17:36 demo-home/.ssh/authorized_keys\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod 644 id_demo && ssh-keygen -y -f ./id_demo",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 255,
+   "stdout": "",
+   "stderr": "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@         WARNING: UNPROTECTED PRIVATE KEY FILE!          @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nPermissions 0644 for './id_demo' are too open.\r\nIt is required that your private key files are NOT accessible by others.\r\nThis private key will be ignored.\r\nLoad key \"./id_demo\": bad permissions\r\n",
+   "combined": "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@         WARNING: UNPROTECTED PRIVATE KEY FILE!          @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nPermissions 0644 for './id_demo' are too open.\r\nIt is required that your private key files are NOT accessible by others.\r\nThis private key will be ignored.\r\nLoad key \"./id_demo\": bad permissions\r\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "chmod 600 id_demo && ssh-keygen -y -f ./id_demo | cut -d' ' -f1 && echo \"key loaded\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ssh-ed25519\nkey loaded\n",
+   "stderr": "",
+   "combined": "ssh-ed25519\nkey loaded\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ssh-keygen -t ed25519 -N '' -C '' -q -f ./host_key && echo \"server1.example.com $(cut -d' ' -f1,2 host_key.pub)\" > known_hosts && ssh-keygen -F server1.example.com -f known_hosts | cut -c1-60 && ssh-keygen -lf host_key.pub",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "# Host server1.example.com found: line 1 \nserver1.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKW0\n256 SHA256:CyFmtN6eCm968NRc6erk1uCjJZP1GCPZnn2vif+3CGE no comment (ED25519)\n",
+   "stderr": "",
+   "combined": "# Host server1.example.com found: line 1 \nserver1.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKW0\n256 SHA256:CyFmtN6eCm968NRc6erk1uCjJZP1GCPZnn2vif+3CGE no comment (ED25519)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "mkdir -p site/css && touch site/index.html site/css/main.css && rsync -a site dest1/ && rsync -a site/ dest2/ && find dest1 dest2 | sort",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "dest1\ndest1/site\ndest1/site/css\ndest1/site/css/main.css\ndest1/site/index.html\ndest2\ndest2/css\ndest2/css/main.css\ndest2/index.html\n",
+   "stderr": "",
+   "combined": "dest1\ndest1/site\ndest1/site/css\ndest1/site/css/main.css\ndest1/site/index.html\ndest2\ndest2/css\ndest2/css/main.css\ndest2/index.html\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "rsync -a site backup/ && find backup | sort",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "backup\nbackup/site\nbackup/site/css\nbackup/site/css/main.css\nbackup/site/index.html\n",
+   "stderr": "",
+   "combined": "backup\nbackup/site\nbackup/site/css\nbackup/site/css/main.css\nbackup/site/index.html\n",
+   "ok": true
+  }
+ ],
+ "seconds": 4,
+ "ok": true,
+ "problems": []
+}

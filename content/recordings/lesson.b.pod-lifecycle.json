@@ -1,0 +1,84 @@
+{
+ "lab": "lesson.b.pod-lifecycle",
+ "kind": "lesson",
+ "lab_hash": "c9b361fbeef40807",
+ "recorded_at": "2026-10-16T16:11:16+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-b-pod-lifecycle",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f starter.yaml && sleep 5 && oc get pod starter && oc get pod starter -o jsonpath='phase: {.status.phase}{\"\\n\"}{range .status.conditions[*]}{.type}={.status}{\"\\n\"}{end}prepare: {.status.initContainerStatuses[0].state}{\"\\n\"}app: {.status.containerStatuses[0].state}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/starter created\nNAME      READY   STATUS     RESTARTS   AGE\nstarter   0/1     Init:0/1   0          5s\nphase: Pending\nPodReadyToStartContainers=True\nInitialized=False\nReady=False\nContainersReady=False\nPodScheduled=True\nprepare: {\"running\":{\"startedAt\":\"2026-10-16T16:09:34Z\"}}\napp: {\"waiting\":{\"reason\":\"PodInitializing\"}}\n",
+   "stderr": "",
+   "combined": "pod/starter created\nNAME      READY   STATUS     RESTARTS   AGE\nstarter   0/1     Init:0/1   0          5s\nphase: Pending\nPodReadyToStartContainers=True\nInitialized=False\nReady=False\nContainersReady=False\nPodScheduled=True\nprepare: {\"running\":{\"startedAt\":\"2026-10-16T16:09:34Z\"}}\napp: {\"waiting\":{\"reason\":\"PodInitializing\"}}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait --for=condition=Ready pod/starter --timeout=120s && oc get pod starter && oc get pod starter -o jsonpath='phase: {.status.phase}{\"\\n\"}{range .status.conditions[*]}{.type}={.status}{\"\\n\"}{end}prepare: {.status.initContainerStatuses[0].state}{\"\\n\"}app: {.status.containerStatuses[0].state}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/starter condition met\nNAME      READY   STATUS    RESTARTS   AGE\nstarter   1/1     Running   0          23s\nphase: Running\nPodReadyToStartContainers=True\nInitialized=True\nReady=True\nContainersReady=True\nPodScheduled=True\nprepare: {\"terminated\":{\"containerID\":\"cri-o://413cbca452273661939d7e41c30941fd1c95a6e1cd327cc3402b85d49ace19a0\",\"exitCode\":0,\"finishedAt\":\"2026-10-16T16:09:49Z\",\"reason\":\"Completed\",\"startedAt\":\"2026-10-16T16:09:34Z\"}}\napp: {\"running\":{\"startedAt\":\"2026-10-16T16:09:53Z\"}}\n",
+   "stderr": "",
+   "combined": "pod/starter condition met\nNAME      READY   STATUS    RESTARTS   AGE\nstarter   1/1     Running   0          23s\nphase: Running\nPodReadyToStartContainers=True\nInitialized=True\nReady=True\nContainersReady=True\nPodScheduled=True\nprepare: {\"terminated\":{\"containerID\":\"cri-o://413cbca452273661939d7e41c30941fd1c95a6e1cd327cc3402b85d49ace19a0\",\"exitCode\":0,\"finishedAt\":\"2026-10-16T16:09:49Z\",\"reason\":\"Completed\",\"startedAt\":\"2026-10-16T16:09:34Z\"}}\napp: {\"running\":{\"startedAt\":\"2026-10-16T16:09:53Z\"}}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pod starter -o jsonpath='{.status.phase}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Running",
+   "stderr": "",
+   "combined": "Running",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment stubborn --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'sleep infinity' >/dev/null && oc create deployment polite --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'trap \"exit 0\" TERM; sleep infinity & wait' >/dev/null && oc rollout status deployment/stubborn --timeout=180s >/dev/null && oc rollout status deployment/polite --timeout=180s >/dev/null && for app in stubborn polite; do echo \"$app: PID 1 is $(oc exec deploy/$app -- cat /proc/1/cmdline | tr '\\0' ' ')\"; done",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "stubborn: PID 1 is /usr/bin/coreutils --coreutils-prog-shebang=sleep /usr/bin/sleep infinity \npolite: PID 1 is sh -c trap \"exit 0\" TERM; sleep infinity & wait \n",
+   "stderr": "",
+   "combined": "stubborn: PID 1 is /usr/bin/coreutils --coreutils-prog-shebang=sleep /usr/bin/sleep infinity \npolite: PID 1 is sh -c trap \"exit 0\" TERM; sleep infinity & wait \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for app in stubborn polite; do start=$(date +%s); oc delete pod -l app=$app >/dev/null; echo \"$app: gone after $(( $(date +%s) - start )) seconds\"; done",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "stubborn: gone after 33 seconds\npolite: gone after 1 seconds\n",
+   "stderr": "",
+   "combined": "stubborn: gone after 33 seconds\npolite: gone after 1 seconds\n",
+   "ok": true
+  }
+ ],
+ "seconds": 108,
+ "ok": true,
+ "problems": []
+}

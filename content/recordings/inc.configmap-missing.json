@@ -1,0 +1,179 @@
+{
+ "lab": "inc.configmap-missing",
+ "kind": "incident",
+ "lab_hash": "1d5c5824d4f875d1",
+ "recorded_at": "2026-10-20T18:21:55+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -n academy-inc-cm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS                       RESTARTS   AGE\nweb-7d57fcfc79-kh4f9   0/1     CreateContainerConfigError   0          2m31s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-cm --field-selector reason=Failed",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON   OBJECT                     MESSAGE\n7s          Warning   Failed   pod/web-7d57fcfc79-kh4f9   Error: configmap \"web-settings\" not found\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get configmaps -n academy-inc-cm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                       DATA   AGE\nkube-root-ca.crt           1      2m36s\nopenshift-service-ca.crt   1      2m36s\nweb-content                2      2m36s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create configmap web-settings -n academy-inc-cm --from-literal=LOG_LEVEL=info --from-literal=PORTAL_REGION=eu",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/web-settings created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get pods -n academy-inc-cm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS                       RESTARTS   AGE\nweb-7d57fcfc79-kh4f9   0/1     CreateContainerConfigError   0          2m39s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc wait pod -l app=web --for=condition=Ready --timeout=90s -n academy-inc-cm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/web-7d57fcfc79-kh4f9 condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get pods -l app=web -n academy-inc-cm",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-7d57fcfc79-kh4f9   1/1     Running   0          2m46s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc exec deploy/web -n academy-inc-cm -- printenv LOG_LEVEL PORTAL_REGION",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "info\neu\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "env",
+    "title": "The container received LOG_LEVEL",
+    "expect": "info",
+    "status": "error",
+    "observed": "no running pod for app=web to test from"
+   },
+   {
+    "id": "region",
+    "title": "The container received PORTAL_REGION",
+    "expect": "eu",
+    "status": "error",
+    "observed": "no running pod for app=web to test from"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-cm.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1792520671.894269
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "env",
+    "title": "The container received LOG_LEVEL",
+    "expect": "info",
+    "status": "pass",
+    "observed": "info"
+   },
+   {
+    "id": "region",
+    "title": "The container received PORTAL_REGION",
+    "expect": "eu",
+    "status": "pass",
+    "observed": "eu"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-cm.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1792520694.8766282
+ },
+ "seconds": 179,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-cm: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

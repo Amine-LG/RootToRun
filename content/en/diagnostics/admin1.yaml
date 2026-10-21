@@ -1,0 +1,763 @@
+track: admin1
+title: "Application operations: find your gaps"
+intro: >-
+  Thirty-five questions on the CLI, the web console, deploying and scaling, probes and resources, troubleshooting, configuration and
+  storage, Services and Routes, images in OpenShift and on its nodes, and rollouts. Many show real output recorded on OpenShift Local and ask what
+  it means. Allow about 30 minutes. Nothing is marked complete: the results only suggest where to start.
+minutes: 33
+items:
+  # ---------- a1-cli ----------
+  - id: forbidden-is-not-notfound
+    targets: [o1.cli]
+    prompt: "What does this answer tell you about the Secret `db-creds`?"
+    evidence: |
+      $ oc get secret db-creds -n payments
+      Error from server (Forbidden): secrets "db-creds" is forbidden: User "developer" cannot get resource "secrets" in API group "" in the namespace "payments"
+    choices:
+      - "It does not exist in the payments project at all"
+      - "Your login token has expired and you must log in again"
+      - "RBAC refused you; the Secret may or may not exist"
+      - "The payments project is currently being deleted"
+    answer: 2
+    feedback:
+      - "A missing object is reported as NotFound, and only to someone allowed to look. Forbidden is decided before the server checks whether the object exists."
+      - "An expired or invalid token gives Unauthorized ('You must be logged in to the server'); a request with no credentials at all may be treated as system:anonymous instead. Here Forbidden names developer, so authentication worked."
+      - "Authentication succeeded (the message names developer) and authorization said no. The fix is a role binding, not a different name."
+      - "A terminating namespace refuses new objects, but reads of existing ones are still authorized normally. Nothing here points to deletion."
+    explain: "Forbidden means authenticated but not authorized; NotFound means allowed to look and nothing is there; Unauthorized means the server could not identify you. Each needs a different fix."
+
+  - id: current-project-runbook
+    targets: [o1.cli]
+    prompt: "A runbook step says `oc delete pod -l app=web` to clear a stuck pod in project shop. An engineer runs it after having switched to project shop-staging earlier in the day. What happens?"
+    choices:
+      - "It deletes matching pods in shop-staging, the current project"
+      - "It deletes the pods in shop, because the app=web label belongs to that application"
+      - "It refuses to run, because delete requires an explicit -n"
+      - "It deletes matching pods in every project the engineer can access"
+    answer: 0
+    feedback:
+      - "Without -n, oc uses the namespace stored in the current kubeconfig context. Runbooks and scripts should always pass -n."
+      - "Labels are not tied to a project; the same label can exist in any namespace. The command only looks in one namespace."
+      - "oc never requires -n; it falls back to the current project silently, which is what makes this mistake easy."
+      - "Acting across namespaces needs -A (and cluster-wide permission). Without it, only the current project is touched."
+    explain: "Every oc command without -n runs in the current project of your context. Check with `oc project` and pass -n in anything you will repeat."
+
+  - id: console-and-cli-same-rbac
+    targets: [n.console-clis, o1.cli]
+    prompt: "A project admin tries to create a ResourceQuota in the web console and gets a Forbidden error. A colleague suggests using oc instead, because 'the CLI can do more'. What happens with oc?"
+    choices:
+      - "It works, because the CLI talks to the API server directly and the console does not"
+      - "It works with `oc adm`, which bypasses project-level roles"
+      - "It works once the console is switched to the Developer perspective"
+      - "It is refused the same way: one API, the same token, the same RBAC"
+    answer: 3
+    feedback:
+      - "The console is itself a client of the same API server and uses your token. Neither tool has extra rights."
+      - "`oc adm` groups administrative commands; it grants nothing. Without the permission it is Forbidden too."
+      - "Perspectives (unified since 4.19) only change navigation, never permissions."
+      - "The admin role does not allow writing ResourceQuotas; cluster administrators set them. Any client gets the same answer."
+    explain: "The console and oc are two clients of one API. What RBAC refuses in one is refused in the other."
+
+  # ---------- a2-apps ----------
+  - id: hpa-unknown-metrics
+    targets: [o1.deploy-apps, b.resources-qos, lab.deploy-apps]
+    prompt: "On OpenShift Local you set requests and create an autoscaler. Why does it show `<unknown>` and never scale?"
+    evidence: |
+      $ oc set resources deploy/hello --requests=cpu=20m,memory=32Mi --limits=memory=128Mi -n academy-apps
+      $ oc autoscale deploy/hello --min=2 --max=5 --cpu=60% -n academy-apps
+      $ oc get hpa -n academy-apps
+      NAME    REFERENCE          TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+      hello   Deployment/hello   cpu: <unknown>/60%   2         5         3          18s
+      $ oc describe hpa hello -n academy-apps
+        ScalingActive  False   FailedGetResourceMetric  the HPA was unable to compute the replica count: failed to get cpu
+        utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server
+        could not find the requested resource (get pods.metrics.k8s.io)
+    choices:
+      - "The pods have no CPU request, so the HPA has nothing to take 60% of"
+      - "No resource metrics API is served here, so CPU usage cannot be read"
+      - "A CPU utilisation target also needs a CPU limit on every container of the pods"
+      - "The autoscaler always waits five minutes before its first measurement"
+    answer: 1
+    feedback:
+      - "The first command set a CPU request of 20m. A missing request is a real cause of `<unknown>`, but not this one."
+      - "Pods.metrics.k8s.io is served by the monitoring stack, which is disabled on OpenShift Local. With requests and metrics, the HPA would work."
+      - "Utilisation targets are percentages of the request; limits are not used."
+      - "The five-minute window applies to scaling down. The condition says plainly that metrics could not be fetched."
+    explain: "A CPU utilisation HPA needs CPU requests (the denominator) and a working metrics API (the numerator). Read ScalingActive and its message to know which is missing."
+
+  - id: template-uses-your-permissions
+    targets: [n.templates]
+    prompt: "A template in the openshift namespace contains a Deployment, a Service and a ResourceQuota. A user who has the admin role on project shop instantiates it into shop. What happens to the ResourceQuota?"
+    choices:
+      - "It is created, because templates in the openshift namespace run with elevated rights"
+      - "It is created, because the API server processes the template on the user's behalf"
+      - "Refused: objects are created with the user's rights, and admin can't write quotas"
+      - "It is created later by the Cluster Samples Operator, which owns shared templates"
+    answer: 2
+    feedback:
+      - "A template has no identity or privileges. If it did, any user could escalate by instantiating it."
+      - "Processing only substitutes parameters. The resulting objects are then created as the requesting user."
+      - "The project admin role has no write access to ResourceQuotas; a template cannot add rights the user lacks."
+      - "The samples operator maintains sample templates and image streams; it never creates objects in user projects."
+    explain: "Templates are processed into plain objects that are created with the instantiating user's RBAC. They grant no permissions."
+
+  - id: liveness-wrong-port
+    targets: [b.health-probes, inc.liveness-restarts]
+    prompt: "The application listens on 8080 and answers /healthz there. What is going on?"
+    evidence: |
+      $ oc get pods -n academy-inc-live
+      NAME                   READY   STATUS    RESTARTS     AGE
+      web-77ddf8c459-9nlfr   1/1     Running   1 (7s ago)   28s
+      $ oc get events -n academy-inc-live --field-selector reason=Unhealthy
+      Warning  Unhealthy  pod/web-77ddf8c459-9nlfr  Liveness probe failed: Get "http://10.217.1.96:8081/healthz": dial tcp 10.217.1.96:8081: connect: connection refused
+      $ oc get events -n academy-inc-live --field-selector reason=Killing
+      Normal   Killing    pod/web-77ddf8c459-9nlfr  Container httpd failed liveness probe, will be restarted
+    choices:
+      - "The liveness probe targets 8081, so a healthy container keeps being restarted"
+      - "The application crashes a few seconds after each start; read `oc logs --previous`"
+      - "The readiness probe is failing, and failed readiness checks restart the container"
+      - "The container goes over its memory limit every few seconds and is killed"
+    answer: 0
+    feedback:
+      - "The Killing event names the liveness probe as the reason for the restart. Point the probe at 8080 (`oc set probe --liveness`), which triggers a rollout."
+      - "The app is not crashing: the kubelet kills it on purpose, as the Killing event says."
+      - "Readiness failures only remove the pod from endpoints. The restart here is explicitly due to liveness."
+      - "An OOM kill would show reason OOMKilled in the last state, not a probe failure."
+    explain: "A failing liveness probe restarts the container; a failing readiness probe only removes it from traffic. A wrongly configured liveness probe turns a healthy app into a restart loop."
+
+  - id: prestop-exceeds-grace
+    targets: [b.pod-lifecycle]
+    prompt: "A pod's preStop hook sleeps 20 seconds so that load balancers can stop sending traffic. After SIGTERM, the application needs 15 seconds to finish its in-flight requests. terminationGracePeriodSeconds is not set. What happens when the pod is deleted?"
+    choices:
+      - "A clean shutdown, because the grace period only starts once the preStop hook ends"
+      - "The preStop hook is skipped because it takes more than half of the grace period"
+      - "The kubelet waits for the application to exit, however long that may take"
+      - "The app gets about 10 s after SIGTERM, then SIGKILL cuts its shutdown short"
+    answer: 3
+    feedback:
+      - "The 30-second grace period counts from the deletion and includes the preStop hook."
+      - "There is no such rule. The hook runs; it just consumes part of the grace period."
+      - "When the grace period expires, anything still running receives SIGKILL."
+      - "30 s − 20 s of preStop leaves 10 s, short of the 15 s needed. Set terminationGracePeriodSeconds to at least 35 s, with some margin."
+    explain: "Termination: endpoints are removed while the preStop hook runs, then SIGTERM, then SIGKILL when the grace period (default 30 s, counted from deletion, preStop included) ends."
+
+  - id: pending-insufficient-cpu
+    targets: [b.resources-qos, inc.pending-resources]
+    prompt: "A new pod stays Pending. What is the right fix?"
+    evidence: |
+      $ oc get events -n academy-inc-pending --field-selector reason=FailedScheduling
+      Warning  FailedScheduling  pod/web-5c75dcbdf7-tfv87  0/1 nodes are available: 1 Insufficient cpu. ...
+      $ oc get node -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory
+      NODE   CPU     MEMORY
+      crc    3800m   10230560Ki
+      $ oc get deploy web -n academy-inc-pending -o jsonpath='{.spec.template.spec.containers[0].resources.requests}'
+      {"cpu":"6","memory":"32Mi"}
+    choices:
+      - "Remove the requests from the Deployment so that the pod can be scheduled"
+      - "Wait until the node's CPU usage drops; then the pod will fit on it"
+      - "Lower the CPU request: 6 cores can never fit in 3800m allocatable"
+      - "Add a CPU limit of 6 so that the pod is throttled instead of blocked"
+    answer: 2
+    feedback:
+      - "The pod would schedule as BestEffort, first in line for eviction, and the real sizing mistake would stay hidden."
+      - "The scheduler compares requests with allocatable capacity, not with current usage. A 6-core request never fits a 3.8-core node."
+      - "The recorded fix set the request to 50m and the rollout completed. Right-size requests from real usage."
+      - "A limit never lowers the request. The scheduler still has to fit the 6-core request, which this node cannot hold."
+    explain: "Requests are reservations the scheduler adds up against allocatable capacity; usage does not matter to it. Insufficient cpu means the request does not fit, not that the node is busy."
+
+  - id: qos-limits-only
+    targets: [b.resources-qos]
+    prompt: "In a project with no LimitRange, every container of a pod sets only limits (cpu 500m, memory 256Mi) and no requests. What is the pod's QoS class?"
+    choices:
+      - "BestEffort, because no requests are set on any container"
+      - "Guaranteed, because the requests default to the limits"
+      - "Burstable, because the requests and the limits are not equal"
+      - "It has no QoS class until a request is added to each container"
+    answer: 1
+    feedback:
+      - "BestEffort means no requests and no limits at all. Any limit moves the pod out of BestEffort."
+      - "A limit without a request makes the request equal to the limit, so CPU and memory requests equal limits in every container."
+      - "They do not differ: the request was filled in from the limit when the pod was created."
+      - "Every pod has one of the three classes; it is computed when the pod is created."
+    explain: "Guaranteed needs CPU and memory requests equal to limits in every container. Setting only limits is enough, because Kubernetes copies a limit into a missing request (unless a LimitRange sets a default request)."
+
+  - id: oomkilled-cache-limit
+    targets: [b.resources-qos, inc.oomkilled]
+    prompt: "A worker crash-loops right after start. What is the best fix?"
+    evidence: |
+      $ oc get pods -n academy-inc-oom
+      NAME                      READY   STATUS             RESTARTS      AGE
+      worker-6b66fffc98-6c97v   0/1     CrashLoopBackOff   1 (17s ago)   28s
+      $ oc get pod <pod> -n academy-inc-oom -o jsonpath='{...lastState.terminated.reason} exit={...exitCode}'
+      OOMKilled exit=137
+      $ oc logs deploy/worker --previous -n academy-inc-oom
+      warming cache (about 64 MiB)
+      $ oc get deploy worker -n academy-inc-oom -o jsonpath='{.spec.template.spec.containers[0].resources}'
+      {"limits":{"memory":"32Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}
+    choices:
+      - "Raise the memory request and limit above what the cache needs"
+      - "Add a CPU limit so that the cache warms up more slowly and uses less"
+      - "Delete the pod so that it is scheduled on a node with more free memory"
+      - "Remove the memory request so that the pod becomes BestEffort"
+    answer: 0
+    feedback:
+      - "The app needs about 64 MiB and is limited to 32 MiB. The recorded fix set 96Mi requested and 160Mi limit, and the worker started serving."
+      - "CPU limits throttle; they do not change how much memory the cache needs."
+      - "The limit applies on every node. The replacement pod has the same 32Mi limit and is killed again."
+      - "With the limit still set, the request simply defaults to it, so the pod does not even become BestEffort, and the 32Mi limit still kills the container."
+    explain: "OOMKilled with exit 137 means the container went over its memory limit. Compare the limit with what the app really uses and change the Deployment, leaving headroom."
+
+  - id: statefulset-headless-missing
+    targets: [f0.statefulsets]
+    prompt: "A StatefulSet `db` with serviceName `db` runs three Ready pods. From another pod in the namespace, `getent hosts db-0.db` returns nothing. `oc get svc` lists no Service called db. Why?"
+    choices:
+      - "The headless Service named in serviceName must be created by you"
+      - "StatefulSet pods can only be reached by their IP addresses, never by name"
+      - "Per-pod records appear only after the pods have been Ready for ten minutes"
+      - "The StatefulSet controller creates the Service only above three replicas"
+    answer: 0
+    feedback:
+      - "Create a Service named db with clusterIP: None selecting the pods; then db-0.db.<namespace>.svc.cluster.local resolves."
+      - "Stable per-pod DNS names are one of the main reasons to use a StatefulSet; they just need the headless Service."
+      - "Records appear as soon as a pod is ready (or earlier with publishNotReadyAddresses). Time is not the issue."
+      - "The StatefulSet controller never creates the Service, at any replica count."
+    explain: "A StatefulSet names its headless Service in spec.serviceName but does not create it. Without it the pods run, but `<pod>.<service>` names do not resolve."
+
+  - id: statefulset-ordered-ready
+    targets: [f0.statefulsets]
+    prompt: "A StatefulSet with default settings is scaled from 1 to 3 replicas. db-1 is Running but 0/1 Ready because its readiness probe fails. What about db-2?"
+    choices:
+      - "It is created at the same time as db-1"
+      - "It is created but kept out of the Service until db-1 is Ready"
+      - "It is created after a five-minute timeout"
+      - "It is not created until db-1 is Running and Ready"
+    answer: 3
+    feedback:
+      - "That is podManagementPolicy: Parallel. The default, OrderedReady, waits for each predecessor."
+      - "With OrderedReady the controller does not create the next pod at all while a predecessor is not ready."
+      - "There is no timeout: one pod that never becomes ready blocks all scaling behind it."
+      - "Fix db-1's readiness first; db-2 follows once db-1 is Running and Ready."
+    explain: "OrderedReady (the default) creates pods one at a time in ordinal order, each waiting for the previous one to be Running and Ready."
+
+  # ---------- a3-troubleshoot ----------
+  - id: no-pods-read-replicaset
+    targets: [o1.troubleshooting, inc.scc-root]
+    prompt: "A Deployment has no pods at all, not even Pending ones. Which is the most useful next step?"
+    evidence: |
+      $ oc get deploy,rs,pods
+      NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+      deployment.apps/web   0/1     0            0           21s
+
+      NAME                             DESIRED   CURRENT   READY   AGE
+      replicaset.apps/web-6c966884bf   1         0         0       21s
+    choices:
+      - "`oc logs deploy/web`, to read the error the application printed at start"
+      - "The pod's FailedScheduling events, which say why no node fits"
+      - "The ReplicaSet's FailedCreate events (`oc describe rs`)"
+      - "`oc debug deploy/web`, to start a copy of the pod with a shell inside"
+    answer: 2
+    feedback:
+      - "There is no container yet, so there are no logs to read."
+      - "FailedScheduling needs a pod that exists and waits for a node. CURRENT 0 means no pod was ever stored."
+      - "Admission (a quota, a LimitRange or an SCC) rejected the pods, so only the ReplicaSet can report it, as FailedCreate events naming the rule."
+      - "A debug copy would be refused by the same admission rule, and it would not tell you which rule it is."
+    explain: "DESIRED > CURRENT with no pods means admission refused pod creation. The reason is a FailedCreate event on the ReplicaSet, never on a pod."
+
+  - id: missing-configmap-recovers
+    targets: [o1.troubleshooting, o1.config-secrets, inc.configmap-missing]
+    prompt: "You create the ConfigMap `web-settings` with the keys the Deployment expects. What happens to this pod next?"
+    evidence: |
+      $ oc get pods -n academy-inc-cm
+      NAME                   READY   STATUS                       RESTARTS   AGE
+      web-7d57fcfc79-z2bv9   0/1     CreateContainerConfigError   0          27s
+      $ oc get events -n academy-inc-cm --field-selector reason=Failed
+      Warning  Failed  pod/web-7d57fcfc79-z2bv9  Error: configmap "web-settings" not found
+    choices:
+      - "Nothing happens until you delete the pod or restart the rollout yourself"
+      - "The kubelet retries, and the same pod starts once the ConfigMap exists"
+      - "The Deployment creates a new ReplicaSet, because its inputs changed"
+      - "The pod is recreated under a new name after passing admission again"
+    answer: 1
+    feedback:
+      - "The container was never created, so there is nothing to restart. The kubelet keeps retrying the creation on its own."
+      - "In the recorded incident the same pod, web-7d57fcfc79-z2bv9, became 1/1 Running with 0 restarts, and printenv showed the new values."
+      - "The pod template did not change; a ConfigMap is a separate object. No new ReplicaSet appears."
+      - "Admission already accepted this pod. It only waits on the node for the configuration it references."
+    explain: "Here CreateContainerConfigError comes from a referenced ConfigMap that is missing (the Failed event names it); the same status can also come from other configuration checks such as runAsNonRoot. Once the ConfigMap exists, the kubelet creates the container in the same pod."
+
+  - id: readiness-path-503
+    targets: [o1.troubleshooting, b.health-probes, inc.readiness-503]
+    prompt: "The application's Route returns 503. What is the diagnosis?"
+    evidence: |
+      $ oc get pods -n academy-inc-ready
+      NAME                  READY   STATUS    RESTARTS   AGE
+      web-84dbc4cb4-lcg4p   0/1     Running   0          27s
+      $ oc get events -n academy-inc-ready --field-selector reason=Unhealthy
+      Warning  Unhealthy  pod/web-84dbc4cb4-lcg4p  Readiness probe failed: HTTP probe failed with statuscode: 404
+      $ oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-ready -o jsonpath='...'
+      10.217.0.241 ready=false
+      $ oc exec deploy/web -n academy-inc-ready -- curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/healthz
+      200
+    choices:
+      - "The default router is down, so ingress is broken for every application"
+      - "The failing probe keeps restarting the container, so the pod is never stable"
+      - "The Service's selector matches none of the application's pods"
+      - "The readiness probe requests a missing path, so no endpoint is ready"
+    answer: 3
+    feedback:
+      - "A router fault would affect every Route. Here the evidence stops at this app's endpoint, marked ready=false."
+      - "RESTARTS is 0. Readiness failures never restart; they only keep the pod out of the endpoints."
+      - "The selector matched: the EndpointSlice lists the pod's IP. It is listed as not ready, which is a different problem."
+      - "The probe gets 404 while /healthz answers 200: point the readiness probe at /healthz (`oc set probe --readiness`). Once Ready, the router has an endpoint again."
+    explain: "Running is not Ready. A Route answers 503 when its Service has no ready endpoints; a broken readiness probe produces exactly that with a perfectly healthy process."
+
+  # ---------- a4-config-storage ----------
+  - id: env-versus-volume-update
+    targets: [o1.config-secrets, lab.config-secrets]
+    prompt: "A ConfigMap is consumed by the same pod both as environment variables and as a volume mounted at /etc/app. After you patch it, you read both. Why do they differ?"
+    evidence: |
+      $ oc patch configmap app-config -n academy-config -p '{"data":{"LOG_LEVEL":"debug"}}'
+      configmap/app-config patched
+      $ oc exec deploy/settings -n academy-config -- printenv LOG_LEVEL
+      info
+      $ oc exec deploy/settings -n academy-config -- cat /etc/app/LOG_LEVEL
+      debug
+    choices:
+      - "Env vars are set at container start; volume files are refreshed in place"
+      - "The patch has not reached the environment yet; run it a second time"
+      - "The environment updates too, but only after the next liveness probe"
+      - "The volume was mounted with subPath, which updates faster than the environment"
+    answer: 0
+    feedback:
+      - "A running process keeps its environment; only a new container gets the new value. In the lab, `oc rollout restart` brought printenv to debug."
+      - "The ConfigMap already holds debug, as the file shows. Repeating the patch changes nothing for the environment."
+      - "Probes never touch a container's environment."
+      - "It is the reverse: subPath mounts never receive updates. This is a whole-volume mount, which is why the file changed."
+    explain: "ConfigMap values in environment variables are fixed at container start; files in a whole-volume mount are updated in place (never with subPath). Most apps read config once, so plan a rollout restart."
+
+  - id: secrets-need-view-not-edit
+    targets: [o1.config-secrets]
+    prompt: "An auditor must see every Deployment, ConfigMap and Route in project payments, but must not be able to read the database password stored there in a Secret. Which default role do you bind?"
+    choices:
+      - "edit"
+      - "view"
+      - "admin"
+      - "edit, since Secret values are base64-encoded anyway"
+    answer: 1
+    feedback:
+      - "edit cannot change role bindings, but it can read Secrets (and run pods as any ServiceAccount in the namespace), so the password is exposed."
+      - "View gives read access to most objects and deliberately excludes Secrets."
+      - "admin includes everything edit can do, Secrets included, plus managing role bindings."
+      - "base64 is an encoding, not encryption: anyone who can get the Secret reads the password with `oc extract`."
+    explain: "Secrets are protected by RBAC, not by base64. edit and admin can read them; view cannot."
+
+  - id: pvc-missing-storageclass
+    targets: [e.storage, inc.pvc-pending]
+    prompt: "A pod and its claim both stay Pending. What is the cause, and the fix?"
+    evidence: |
+      $ oc get pods,pvc -n academy-inc-pvc
+      pod/ledger-6d54bcf74-sbdch          0/1   Pending
+      persistentvolumeclaim/ledger-data   Pending   ...   fast-ssd
+      $ oc get events -n academy-inc-pvc --field-selector involvedObject.kind=PersistentVolumeClaim
+      Warning  ProvisioningFailed  persistentvolumeclaim/ledger-data  storageclass.storage.k8s.io "fast-ssd" not found
+      $ oc get storageclass
+      NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE
+      crc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer
+    choices:
+      - "Normal WaitForFirstConsumer behaviour; wait until the pod is scheduled"
+      - "The node has run out of disk space; free some space on it first"
+      - "The claim names a StorageClass that does not exist on this cluster"
+      - "The project's storage quota is used up by earlier claims"
+    answer: 2
+    feedback:
+      - "WaitForFirstConsumer reads 'waiting for first consumer to be created before binding' and is a Normal event. This is a Warning naming a missing class."
+      - "Nothing mentions disk. The provisioner was never even found, because the class does not exist."
+      - "Fast-ssd came from another cluster. The recorded fix pointed the Deployment at a new claim using the default class, and it bound."
+      - "A quota refusal stops the claim from being created at all, with an 'exceeded quota' error. This claim exists and waits for a class."
+    explain: "Read a Pending claim's events: ProvisioningFailed with 'not found' is a wrong StorageClass name, while 'waiting for first consumer' is normal and resolves when a pod uses the claim."
+
+  - id: rwo-scaled-deployment
+    targets: [e.storage, f0.statefulsets]
+    prompt: "A Deployment mounts one ReadWriteOnce claim. On a cluster with several worker nodes you scale it from 1 to 3 replicas. Some new pods stay in ContainerCreating with a Multi-Attach error. Why, and what fits better?"
+    choices:
+      - "RWO attaches to one node at a time; use a claim per replica, or RWX"
+      - "RWO allows one pod at a time on any node; switch the claim to ReadWriteOncePod"
+      - "The claim is too small for three pods; request more capacity for it"
+      - "The scheduler ignores volumes; add a node selector to every pod"
+    answer: 0
+    feedback:
+      - "Pods on the node that holds the volume can share it; pods scheduled elsewhere cannot attach it. Give each replica its own claim, or use shared (RWX) storage."
+      - "RWO is per node, not per pod. ReadWriteOncePod is stricter still, so it would make the problem worse."
+      - "Capacity is not the issue; the error is about attaching one volume to a second node."
+      - "Pinning every replica to one node hides the problem and removes the point of having several replicas."
+    explain: "Access modes are about nodes: RWO is read-write by a single node. Scaling a Deployment over one RWO claim fails as soon as replicas land on other nodes."
+
+  # ---------- a5-network ----------
+  - id: endpointslice-wrong-targetport
+    targets: [d.services-dns, inc.wrong-targetport]
+    prompt: "The pod is 1/1 Ready, yet clients of the Service are refused. What is wrong?"
+    evidence: |
+      $ oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-port
+      NAME        ADDRESSTYPE   PORTS   ENDPOINTS      AGE
+      web-fglsf   IPv4          80      10.217.0.244   30s
+      $ oc exec deploy/web -n academy-inc-port -- curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/healthz
+      200
+      $ oc exec deploy/web -n academy-inc-port -- curl -sS -m 3 http://web:8080/
+      curl: (7) Failed to connect to web port 8080: Connection refused
+    choices:
+      - "The Service's selector does not match the labels on the pod"
+      - "A NetworkPolicy in the namespace is silently dropping the traffic"
+      - "Cluster DNS cannot resolve the name web from inside the pod"
+      - "Traffic goes to port 80, where nothing listens; fix targetPort"
+    answer: 3
+    feedback:
+      - "The EndpointSlice lists the pod's IP, so the selector matches."
+      - "Dropped packets end in a timeout (exit 28). An immediate refusal means the packet arrived and nothing listened."
+      - "curl resolved web and tried to connect; a DNS failure would say 'Could not resolve host'."
+      - "The PORTS column (80) is where traffic really goes, while the app listens on 8080. The recorded fix patched targetPort to 8080."
+    explain: "A Service needs three things to line up: selector, targetPort and readiness. The EndpointSlice's PORTS column shows the real target port, and Kubernetes never checks that anything listens there."
+
+  - id: short-name-other-namespace
+    targets: [d.services-dns, inc.dns-typo]
+    prompt: "A pod in namespace checkout calls `http://payments:8080`. The Service payments exists in namespace pay. curl reports `Could not resolve host: payments`. The pod's resolver configuration is below. What is the fix?"
+    evidence: |
+      $ oc exec deploy/client -n checkout -- cat /etc/resolv.conf
+      search checkout.svc.cluster.local svc.cluster.local cluster.local crc.testing
+      nameserver 10.217.4.10
+      options ndots:5
+    choices:
+      - "Restart the cluster DNS pods, which have stopped answering queries"
+      - "Call payments.pay: a short name resolves only in the caller's namespace"
+      - "Allow DNS traffic with a new NetworkPolicy in the namespace pay"
+      - "Add ready endpoints to the Service, because DNS hides Services without them"
+    answer: 1
+    feedback:
+      - "The resolver answered; it simply found no payments.checkout.svc.cluster.local. A DNS outage would break every lookup, not one name."
+      - "The first search domain is the pod's own namespace. From another namespace, use `<service>.<namespace>` or `<service>.<namespace>.svc.cluster.local`."
+      - "DNS queries go to the cluster DNS service, not to pods in pay. A policy in pay could block the later connection, never the name lookup."
+      - "A normal Service resolves to its ClusterIP whether or not it has endpoints."
+    explain: "Short Service names resolve only inside the caller's namespace, because of the search list in /etc/resolv.conf. Across namespaces, use `<service>.<namespace>`."
+
+  - id: route-503-selector
+    targets: [d.routes-tls, d.services-dns, inc.service-selector-503]
+    prompt: "A Route answers 503 'Application is not available'. Its single pod is 1/1 Running. What is the cause?"
+    evidence: |
+      $ oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-selector
+      NAME        ADDRESSTYPE   PORTS     ENDPOINTS   AGE
+      web-gzbqw   IPv4          <unset>   <unset>     28s
+      $ oc describe svc web -n academy-inc-selector | grep Selector
+      Selector:                 app=payments-web
+      $ oc get pods --show-labels -n academy-inc-selector
+      NAME                   READY   STATUS    RESTARTS   AGE   LABELS
+      web-7ddfddcc56-wchgb   1/1     Running   0          29s   app=web,pod-template-hash=7ddfddcc56
+    choices:
+      - "The pod has not passed its readiness probe, so the router skips it"
+      - "The Service's targetPort does not match the port of the container"
+      - "The Service selector matches no pod, so there are no endpoints"
+      - "The Route has no TLS certificate, so the router refuses it"
+    answer: 2
+    feedback:
+      - "READY 1/1: the pod is ready. It simply is not selected."
+      - "A wrong targetPort still lists the pod's IP in the EndpointSlice. `<unset>` endpoints mean nothing matched the selector."
+      - "The Service wants app=payments-web, the pod carries app=web. The recorded fix set the selector to app=web and the endpoint appeared."
+      - "Certificate problems show up as TLS errors in the client, not as the router's 503 page, and the evidence already shows that the Service has no endpoints."
+    explain: "The router sends traffic straight to the ready endpoints of the Route's Service. In this evidence the EndpointSlice is empty, so nothing was selected: compare the selector with the pods' labels. In general a router 503 means no usable backend, which can also be a wrong port, blocked traffic or (re-encrypt) a certificate the router cannot verify."
+
+  - id: route-termination-choice
+    targets: [d.routes-tls]
+    prompt: "A public application must send /api and /web on one hostname to two different Services, and traffic must stay encrypted between the router and the pods. Which Route termination fits?"
+    choices:
+      - "edge"
+      - "passthrough"
+      - "re-encrypt"
+      - "edge with insecureEdgeTerminationPolicy set to Allow"
+    answer: 2
+    feedback:
+      - "Edge terminates TLS at the router and forwards to the pod without TLS, which breaks the second requirement."
+      - "Passthrough keeps TLS end to end, but the router cannot read the request, so path-based routing is not available."
+      - "The router terminates TLS, can route on paths, then opens a new TLS connection to the pod and verifies its certificate (the service CA by default)."
+      - "Allow additionally serves plain HTTP from clients; it adds nothing between router and pod."
+    explain: "Edge: TLS ends at the router. Passthrough: TLS goes to the pod untouched, routed on SNI only. Re-encrypt: the router reads HTTP and re-encrypts to the pod."
+
+  # ---------- a6-images-updates ----------
+  - id: imagestream-needs-trigger
+    targets: [c.projects-builds, lab.images-builds]
+    prompt: "A build pushes a new image to ImageStream tag hello:latest in your project. Deployment hello was created with the image `image-registry.openshift-image-registry.svc:5000/academy-builds/hello:latest` and has no trigger. What happens to its pods after the build?"
+    choices:
+      - "Nothing: without an image trigger the Deployment ignores the tag"
+      - "They roll out the new image automatically, because the ImageStream tag moved"
+      - "The running containers are patched in place with the new image layers"
+      - "The build fails, because a running Deployment is still using that tag"
+    answer: 0
+    feedback:
+      - "Kubernetes objects have no trigger fields; the image.openshift.io/triggers annotation (which `oc set triggers` writes) asks OpenShift to update the template when the tag changes."
+      - "The ImageStream records the new digest, but nothing links it to the Deployment until a trigger is set."
+      - "Running containers never change image. A new image always means new pods."
+      - "Builds push freely to a tag; consumers decide when to pick the new digest up."
+    explain: "An ImageStream tag records digests. To make a Deployment follow it, add an image trigger; otherwise nothing happens until you roll out yourself."
+
+  - id: stalled-rollout-no-autorollback
+    targets: [g.rollouts-change, inc.broken-rollout]
+    prompt: "A one-replica Deployment was updated to a new image, and its rollout has now passed its progress deadline. What will Kubernetes do next, and what do users see meanwhile?"
+    evidence: |
+      $ oc get rs -l app=web -n academy-inc-rollout
+      NAME             DESIRED   CURRENT   READY   AGE
+      web-7ddfddcc56   1         1         1       44s
+      web-9889cfbb     1         1         0       43s
+      $ oc get pods -l app=web -n academy-inc-rollout
+      web-7ddfddcc56-k9f8q   1/1     Running        0          44s
+      web-9889cfbb-xrmd8     0/1     ErrImagePull   0          43s
+      $ oc get deploy web -n academy-inc-rollout -o jsonpath='...Progressing reason and message...'
+      ProgressDeadlineExceeded: ReplicaSet "web-9889cfbb" has timed out progressing.
+    choices:
+      - "It rolls back to the previous ReplicaSet automatically after the deadline"
+      - "Nothing more: the old pod keeps serving until you undo or fix it"
+      - "It deletes the old pod to make room for the new one, causing an outage"
+      - "It restarts the whole rollout from the beginning every ten minutes"
+    answer: 1
+    feedback:
+      - "Kubernetes never rolls back by itself. ProgressDeadlineExceeded is a report for a human or a tool."
+      - "With default maxUnavailable (25% of 1 rounds down to 0), the old pod stays until a new one is ready. In the recording, `oc rollout undo` then completed the rollback."
+      - "maxUnavailable 0 means capacity never drops below 1 ready pod during a rolling update."
+      - "Nothing is retried on a timer by you, but the controller keeps reconciling: if the blocker goes away (the image appears, quota frees up), the same rollout can still complete without a spec change. It never rolls back by itself."
+    explain: "A stalled rolling update keeps the old ReplicaSet's ready pods serving and reports Progressing=False with ProgressDeadlineExceeded. Undo or fix it yourself."
+
+  - id: undo-renumbers-revision
+    targets: [g.rollouts-change, lab.deployment-reconciliation]
+    prompt: "Revision 2 (release 2.3) was broken, and you undo it. What is revision 3?"
+    evidence: |
+      $ oc rollout history deploy/web -n academy-inc-rollout
+      REVISION  CHANGE-CAUSE
+      1         release 2.2
+      2         release 2.3
+      $ oc rollout undo deploy/web -n academy-inc-rollout
+      deployment.apps/web rolled back
+      $ oc rollout history deploy/web -n academy-inc-rollout
+      REVISION  CHANGE-CAUSE
+      2         release 2.3
+      3         release 2.2
+    choices:
+      - "A new version that merges the changes of releases 2.2 and 2.3"
+      - "Revision 2 restarted together with the replica count and ConfigMaps it had"
+      - "A record of the undo itself, while revision 1 was deleted by mistake"
+      - "Revision 1's pod template, copied back and numbered as the newest revision"
+    answer: 3
+    feedback:
+      - "Undo restores one earlier template as it was; it does not combine revisions."
+      - "Revision 3 runs release 2.2, not 2.3. And replicas and ConfigMaps are never part of a revision."
+      - "Revision 1 did not vanish by accident: its template now lives on as revision 3."
+      - "Undo copies the previous pod template back; the same ReplicaSet becomes the newest revision. Only the template is restored, so a bad ConfigMap change would need its own fix."
+    explain: "Each pod-template change is a revision (a ReplicaSet). `oc rollout undo` copies an earlier template back as a new revision; replicas, ConfigMaps, Secrets and claims are not restored."
+
+  # ---------- additions: multi-container pods, release strategies, Ingress and Gateway API, support data ----------
+  - id: job-sidecar-never-completes
+    targets: [o3.init-sidecars]
+    prompt: "The batch container of this Job finishes in two minutes, yet the Job is still active the next day. Which change fixes it?"
+    evidence: |
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: nightly-report
+      spec:
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: report
+              image: registry.example.com/report:2.1
+              volumeMounts: [{name: logs, mountPath: /logs}]
+            - name: log-shipper
+              image: registry.example.com/shipper:1.4
+              command: ["sh", "-c", "tail -F /logs/report.log"]
+              volumeMounts: [{name: logs, mountPath: /logs}]
+            volumes:
+            - name: logs
+              emptyDir: {}
+    choices:
+      - "Add `activeDeadlineSeconds: 300` so the Job is stopped after five minutes"
+      - "Move `log-shipper` to `initContainers` and give it `restartPolicy: Always`"
+      - "Set the Job's `restartPolicy` to `OnFailure`"
+      - "Mount the emptyDir with `medium: Memory`"
+    answer: 1
+    feedback:
+      - "That kills the pod and marks the Job Failed after five minutes, even though the report succeeded. It hides the cause instead of fixing it."
+      - "As a native sidecar the shipper starts before the report, keeps running beside it, and is stopped by the kubelet when the report finishes, so the Job completes."
+      - "The restart policy decides what happens when a container fails. Nothing fails here: the shipper simply never exits, so the pod never completes."
+      - "The volume's medium changes where the files live, not when the pod ends."
+    explain: "A pod completes only when every container in `containers` has exited. A helper that runs forever belongs in `initContainers` with `restartPolicy: Always` (a native sidecar), which does not block Job completion."
+
+  - id: canary-weight-per-endpoint
+    targets: [o3.release-strategies]
+    prompt: "The team expected about 1% of requests on the canary. Monitoring shows far more. The Route has the roundrobin annotation, `web-stable` runs 4 pods and `web-canary` runs 20. Why?"
+    evidence: |
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: web
+        annotations:
+          haproxy.router.openshift.io/balance: roundrobin
+      spec:
+        to: {kind: Service, name: web-stable, weight: 99}
+        alternateBackends:
+        - {kind: Service, name: web-canary, weight: 1}
+    choices:
+      - "alternateBackends always receive at least 10% of the traffic"
+      - "roundrobin ignores weights and alternates between the two Services"
+      - "The router's cookie sends every new client to the most recently added backend"
+      - "Every pod gets at least weight 1, so 20 canary pods get 2%"
+    answer: 3
+    feedback:
+      - "There is no minimum share for an alternate backend; a weight of 0 even removes it from load balancing."
+      - "roundrobin is what makes requests follow the weights; the documentation recommends it for weighted Routes."
+      - "Cookies keep a returning client on its pod; they do not favour the newest backend."
+      - "Each stable pod is scaled to 256 and each of the 20 canary pods is raised to 1, so the canary gets about 20 against 1024, roughly 2%, double the intended share. Keep the canary small in pods, or adjust the weights."
+    explain: "Route weights are distributed over each Service's endpoints, and the router raises every endpoint to at least weight 1 after scaling the weights. The number of canary pods therefore raises the canary's real share."
+
+  - id: ingress-foreign-class
+    targets: [o3.ingress-gateway]
+    prompt: "A team applies this Ingress from an upstream chart on OpenShift 4.21. No Route appears and the host is not served. What is the most likely reason?"
+    evidence: |
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: shop
+        annotations:
+          nginx.ingress.kubernetes.io/rewrite-target: /
+      spec:
+        ingressClassName: nginx
+        rules:
+        - host: shop.apps.example.com
+          http:
+            paths:
+            - path: /
+              pathType: Prefix
+              backend:
+                service: {name: shop, port: {number: 8080}}
+    choices:
+      - "The Ingress names a class the ingress-to-route controller does not handle"
+      - "The nginx annotation is invalid on OpenShift, so the API server rejected the Ingress"
+      - "pathType Prefix is not supported by the ingress-to-route controller"
+      - "Creating Ingress objects on OpenShift needs cluster-admin rights"
+    answer: 0
+    feedback:
+      - "Set `ingressClassName: openshift-default` (and drop the nginx annotation, which has no effect here); the controller then creates a Route for the host."
+      - "Unknown annotations are stored without complaint. They are simply meaningless to the OpenShift router."
+      - "Prefix (and ImplementationSpecific) are converted. The type the controller skips is Exact."
+      - "Ingress is a namespaced object; a project admin or editor can create it."
+    explain: "OpenShift converts an Ingress into Routes only when it names no class or a class handled by the `openshift.io/ingress-to-route` controller, such as `openshift-default`."
+
+  - id: support-data-project-admin
+    targets: [o3.support-data]
+    prompt: "You are admin of project `payments` only. Pods there failed overnight and Red Hat support needs data before the platform team wakes up. What can you collect yourself, and what should you check before handing it over?"
+    choices:
+      - "`oc adm must-gather`, since `oc adm` commands run with elevated rights; the archive is encrypted"
+      - "A sosreport of the node the pods ran on; check it for core dumps"
+      - "`oc adm inspect ns/payments`; then search it for credentials, as only Secret values are elided"
+      - "Nothing: collecting any support data needs cluster-admin rights, so wait for the platform team"
+    answer: 2
+    feedback:
+      - "must-gather needs cluster-admin, and its output is a plain directory, not an encrypted archive. `oc adm` grants no rights of its own."
+      - "A sosreport is collected from a debug pod on the node, which needs cluster-admin, and it is only useful when support asks for that node."
+      - "Inspect reads with your own permissions and collects the project's objects, events and each container's logs. Secret values become their length; ConfigMaps, env values and logs are copied as they are, so search them for credentials."
+      - "oc adm inspect works for any user on what that user can read."
+    explain: "`oc adm inspect` is the collector for application teams: it reads with your own permissions and elides Secret values, but not ConfigMaps, env literals or logs. must-gather, node logs and sosreports are cluster or node administrator work."
+
+  # ---------- ct.openshift-images ----------
+  - id: pull-secret-not-linked
+    targets: [ct.openshift-images]
+    prompt: "The Deployment sets no serviceAccountName. You created a pull secret for the vendor's registry and restarted the rollout, but the new pods still cannot pull. What is missing?"
+    evidence: |
+      $ oc create secret docker-registry vendor-pull --docker-server=registry.vendor.example --docker-username='robot+shop' --docker-password=… -n shop
+      secret/vendor-pull created
+      $ oc rollout restart deploy/api -n shop
+      $ oc get events -n shop --field-selector reason=Failed
+      Warning  Failed  pod/api-5f7c9d8b6-x2v9q  Failed to pull image "registry.vendor.example/acme/api:4.2": ... unauthorized: authentication required
+      $ oc get sa default -n shop -o jsonpath='{.imagePullSecrets[*].name}'
+      default-dockercfg-7tq2k
+    choices:
+      - "Time: the kubelet picks up new secrets in the project at its next sync loop"
+      - "The credentials in openshift-config/pull-secret, which every pull uses"
+      - "A pull link from the default ServiceAccount to the secret, and new pods"
+      - "imagePullPolicy: IfNotPresent, so that the node does not have to authenticate"
+    answer: 2
+    feedback:
+      - "The kubelet does not scan a project for secrets: a pod's pulls use only the secrets the pod, or its ServiceAccount, references. (ImageStream imports are different: they use the project's secrets without a link.)"
+      - "The cluster-wide pull secret is for administrators and every node; using it for one project's vendor would hand that access to all projects."
+      - "`oc secrets link default vendor-pull --for=pull -n shop`, then a new rollout: admission copies the ServiceAccount's pull secrets into new pods only. Listing vendor-pull under imagePullSecrets in the pod template works too."
+      - "A node without the image must still pull it, with credentials. A cached copy elsewhere would only hide the problem."
+    explain: "For pods, private registries need a kubernetes.io/dockerconfigjson secret linked to the pods' ServiceAccount for pulls, or listed in the pod template's imagePullSecrets. ImageStream imports use the project's secrets without a link. The integrated registry is different: access there is RBAC."
+
+  # ---------- ct.images-on-nodes ----------
+  - id: node-cache-hides-dead-registry
+    targets: [ct.images-on-nodes]
+    prompt: "The old registry was switched off last week. Both pods come from the same ReplicaSet, with imagePullPolicy IfNotPresent. Why does one of them run?"
+    evidence: |
+      $ oc get pods -n shop -o wide
+      NAME                  READY   STATUS             RESTARTS   AGE   IP            NODE
+      api-6d9c7b5f4-4xk2p   1/1     Running            0          9d    10.128.2.14   worker-1
+      api-6d9c7b5f4-9tq7r   0/1     ImagePullBackOff   0          6m    10.131.0.22   worker-3
+      $ oc get events -n shop --field-selector involvedObject.name=api-6d9c7b5f4-9tq7r,reason=Failed
+      Warning  Failed  pod/api-6d9c7b5f4-9tq7r  Failed to pull image "registry.old.example/team/api:2.0": ... dial tcp 10.0.40.12:443: i/o timeout
+    choices:
+      - "worker-1 reuses its own local copy; worker-3 never had the image and must pull"
+      - "Nodes share the images they pull, so worker-3 will soon receive it from worker-1"
+      - "worker-3 has no pull secret for this registry, unlike worker-1"
+      - "worker-1 pulled it through the integrated registry, which keeps a copy for that node"
+    answer: 0
+    feedback:
+      - "IfNotPresent reuses a local copy without contacting the registry. The cache only delays the failure: garbage collection or a reschedule will break worker-1's pod too. Push the image to a working registry and update the reference."
+      - "Each node has its own image store; nothing is copied between nodes."
+      - "Pull secrets belong to pods and ServiceAccounts, not nodes. And an i/o timeout means the registry was never reached, long before any authentication."
+      - "The reference names registry.old.example directly. Only an ImageStream with reference policy Local makes nodes pull through the integrated registry."
+    explain: "Every node keeps its own image store. With IfNotPresent, a node that already has the image never asks the registry, so a broken registry or credential shows up only on nodes that must really pull."
+  - id: pv-released-reclaim
+    targets: [e.storage, f0.statefulsets]
+    prompt: "As the cluster administrator you find this volume. Its project was deleted last month, its owner confirms the data is not needed, and it was made by the cluster's CSI provisioner. What do you do?"
+    evidence: |
+      $ oc get pv pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9
+      NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM
+      pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9   39Gi       RWO            Retain           Released   academy-lesson-e-storage/notes-data
+    choices:
+      - "Set this PV's persistentVolumeReclaimPolicy to Delete, so the provisioner deletes the storage and the PV"
+      - "Set the StorageClass's reclaimPolicy to Delete"
+      - "Nothing: Released volumes are reused by the next claim of the same size"
+      - "Delete every Released PV with a label selector"
+    answer: 0
+    feedback:
+      - "A Released volume whose policy becomes Delete is removed by its provisioner, storage first, then the PV. Only this volume is touched."
+      - "A class's policy is copied into new volumes only. Existing PVs keep theirs, and every future volume would lose its protection."
+      - "A Released PV still names its old claim in spec.claimRef and holds the old data. It is never handed to another claim automatically."
+      - "Reclaiming by pattern can destroy data someone kept on purpose. Name each volume after checking its claim and owner."
+    explain: "Released means the claim is gone and the data is still there. The administrator reclaims each volume by name: delete the PV and clean the storage by hand, or, for provisioner-made storage, set the PV's reclaim policy to Delete."
+
+  - id: console-matching-oc
+    targets: [n.console-tour, n.console-clis]
+    prompt: "A colleague's `oc` is several minor versions older than the cluster and some commands misbehave. Where does the web console give a matching client?"
+    choices:
+      - "Help > Command Line Tools"
+      - "The user menu's Copy login command"
+      - "Ecosystem > Software Catalog"
+      - "Administration > Cluster Settings"
+    answer: 0
+    feedback:
+      - "The cluster serves `oc` downloads built for its own version, for Linux, Mac and Windows."
+      - "That gives an `oc login` command for a client you already have; it does not download one."
+      - "The Software Catalog offers Operators, Helm charts and templates, not command-line clients."
+      - "Cluster Settings shows the cluster's version and updates; the clients are under Help."
+    explain: "Help > Command Line Tools serves `oc` (and Helm) built for this cluster: the easiest client that matches it."
+
+  - id: console-one-of-one-pods
+    targets: [o1.console-apps, o1.troubleshooting]
+    prompt: "In the console, the Deployments page shows `api` with *1 of 1 pods*, yet the application does not answer. Where do you look next?"
+    choices:
+      - "Nowhere: 1 of 1 pods means the application works"
+      - "The pod's status, then its Events tab"
+      - "Actions > Edit labels on the Deployment"
+      - "Cluster Settings > ClusterOperators"
+    answer: 1
+    feedback:
+      - "That column counts pods, ready or not: a pod that cannot pull its image or keeps crashing is still counted."
+      - "The Pods page (or Topology) shows whether the pod runs and is ready; its Events tab says why it does not, as `oc describe pod`."
+      - "Labels change which objects select the pods; they do not tell you why a pod fails."
+      - "ClusterOperators report the platform's own components, not an application in a project."
+    explain: "The Deployments list counts pods. Their state and the reason for it are on the pod: its status, then its events and logs."

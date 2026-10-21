@@ -1,0 +1,192 @@
+{
+ "lab": "lesson.o2.jobs-cronjobs",
+ "kind": "lesson",
+ "lab_hash": "7f553a32789d6bd7",
+ "recorded_at": "2026-10-16T18:11:53+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o2-jobs-cronjobs",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc create job hello --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo computing; sleep 2; echo done'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/hello created\n",
+   "stderr": "",
+   "combined": "job.batch/hello created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait --for=condition=Complete job/hello --timeout=180s",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/hello condition met\n",
+   "stderr": "",
+   "combined": "job.batch/hello condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get jobs",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    STATUS     COMPLETIONS   DURATION   AGE\nhello   Complete   1/1           9s         9s\n",
+   "stderr": "",
+   "combined": "NAME    STATUS     COMPLETIONS   DURATION   AGE\nhello   Complete   1/1           9s         9s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs job/hello",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "computing\ndone\n",
+   "stderr": "",
+   "combined": "computing\ndone\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f bounded-check.yaml && oc wait --for=condition=Failed job/bounded-check --timeout=240s",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/bounded-check created\njob.batch/bounded-check condition met\n",
+   "stderr": "",
+   "combined": "job.batch/bounded-check created\njob.batch/bounded-check condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l batch.kubernetes.io/job-name=bounded-check",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   STATUS   RESTARTS   AGE\nbounded-check-gdszx   0/1     Error    0          43s\nbounded-check-jxg54   0/1     Error    0          6s\nbounded-check-kwtx9   0/1     Error    0          29s\n",
+   "stderr": "",
+   "combined": "NAME                  READY   STATUS   RESTARTS   AGE\nbounded-check-gdszx   0/1     Error    0          43s\nbounded-check-jxg54   0/1     Error    0          6s\nbounded-check-kwtx9   0/1     Error    0          29s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get job bounded-check -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "BackoffLimitExceeded\n",
+   "stderr": "",
+   "combined": "BackoffLimitExceeded\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f deadline-check.yaml && oc wait --for=condition=Failed job/deadline-check --timeout=180s && oc get job deadline-check -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}{\"  \"}{.status.conditions[?(@.type==\"Failed\")].message}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/deadline-check created\njob.batch/deadline-check condition met\nDeadlineExceeded  Job was active longer than specified deadline\n",
+   "stderr": "",
+   "combined": "job.batch/deadline-check created\njob.batch/deadline-check condition met\nDeadlineExceeded  Job was active longer than specified deadline\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f fail-fast.yaml && oc wait --for=condition=Failed job/fail-fast --timeout=180s && oc get job fail-fast -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}{\"\\n\"}' && oc get pods -l batch.kubernetes.io/job-name=fail-fast",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/fail-fast created\njob.batch/fail-fast condition met\nPodFailurePolicy\nNAME              READY   STATUS   RESTARTS   AGE\nfail-fast-hxnj8   0/1     Error    0          7s\n",
+   "stderr": "",
+   "combined": "job.batch/fail-fast created\njob.batch/fail-fast condition met\nPodFailurePolicy\nNAME              READY   STATUS   RESTARTS   AGE\nfail-fast-hxnj8   0/1     Error    0          7s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create serviceaccount report-reader && oc create role pod-reader --verb=get,list --resource=pods && oc create rolebinding report-reader-pods --role=pod-reader --serviceaccount=\"$(oc project -q):report-reader\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/report-reader created\nrole.rbac.authorization.k8s.io/pod-reader created\nrolebinding.rbac.authorization.k8s.io/report-reader-pods created\n",
+   "stderr": "",
+   "combined": "serviceaccount/report-reader created\nrole.rbac.authorization.k8s.io/pod-reader created\nrolebinding.rbac.authorization.k8s.io/report-reader-pods created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f report-cron.yaml && oc get cronjob nightly-report",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cronjob.batch/nightly-report created\nNAME             SCHEDULE    TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE\nnightly-report   0 2 * * *   Etc/UTC    False     0        <none>          0s\n",
+   "stderr": "",
+   "combined": "cronjob.batch/nightly-report created\nNAME             SCHEDULE    TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE\nnightly-report   0 2 * * *   Etc/UTC    False     0        <none>          0s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create job report-now --from=cronjob/nightly-report && oc wait --for=condition=Complete job/report-now --timeout=180s",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/report-now created\njob.batch/report-now condition met\n",
+   "stderr": "",
+   "combined": "job.batch/report-now created\njob.batch/report-now condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs job/report-now",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pods: 200\nsecrets: 403\n",
+   "stderr": "",
+   "combined": "pods: 200\nsecrets: 403\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get job report-now -o jsonpath='{.spec.template.spec.serviceAccountName}{\"  \"}{.spec.activeDeadlineSeconds}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "report-reader  1800\n",
+   "stderr": "",
+   "combined": "report-reader  1800\n",
+   "ok": true
+  }
+ ],
+ "seconds": 122,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,198 @@
+{
+ "lab": "lab.access-paths",
+ "kind": "lab",
+ "lab_hash": "21949f27f1e0e2f0",
+ "recorded_at": "2026-10-14T17:32:42+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "why-projects",
+   "cmd": "oc auth can-i create projectrequests",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\n",
+   "ok": true
+  },
+  {
+   "step": "why-projects",
+   "cmd": "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef.name}{\" <- \"}{.subjects}'",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "self-provisioner <- [{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"Group\",\"name\":\"system:authenticated:oauth\"}]",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "broad",
+   "cmd": "oc policy add-role-to-group view system:serviceaccounts:academy-access -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"system:serviceaccounts:academy-access\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "broad",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-access:scanner -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "broad",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-access:builder-bot -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "trace",
+   "cmd": "oc adm policy who-can list pods -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourceaccessreviewresponse.authorization.openshift.io/<unknown> \n\nNamespace: academy-access\nVerb:      list\nResource:  pods\n\nUsers:  developer\n        kubeadmin\n        system:admin\n        system:kube-controller-manager\n        system:kube-scheduler\n        system:serviceaccount:academy-access:deployer\n        system:serviceaccount:academy-system:academy-reader\n        system:serviceaccount:kube-system:attachdetach-controller\n        system:serviceaccount:kube-system:cronjob-controller\n        system:serviceaccount:kube-system:daemon-set-controller\n        system:serviceaccount:kube-system:deployment-controller\n        system:serviceaccount:kube-system:endpoint-controller\n        system:serviceaccount:kube-system:endpointslice-controller\n        system:serviceaccount:kube-system:ephemeral-volume-controller\n        system:serviceaccount:kube-system:generic-garbage-collector\n        system:serviceaccount:kube-system:horizontal-pod-autoscaler\n        system:serviceaccount:kube-system:job-controller\n        system:serviceaccount:kube-system:namespace-controller\n        system:serviceaccount:kube-system:node-controller\n        system:serviceaccount:kube-system:persistent-volume-binder\n        system:serviceaccount:kube-system:pod-garbage-collector\n        system:serviceaccount:kube-system:pvc-protection-controller\n        system:serviceaccount:kube-system:replicaset-controller\n        system:serviceaccount:kube-system:replication-controller\n        system:serviceaccount:kube-system:resource-claim-controller\n        system:serviceaccount:kube-system:resourcequota-controller\n        system:serviceaccount:kube-system:selinux-warning-controller\n        system:serviceaccount:kube-system:statefulset-controller\n        system:serviceaccount:openshift-apiserver-operator:openshift-apiserver-operator\n        system:serviceaccount:openshift-apiserver:openshift-apiserver-sa\n        system:serviceaccount:openshift-authentication-operator:authentication-operator\n        system:serviceaccount:openshift-authentication:oauth-openshift\n        system:serviceaccount:openshift-cluster-version:default\n        system:serviceaccount:openshift-config-operator:openshift-config-operator\n        system:serviceaccount:openshift-controller-manager-operator:openshift-controller-manager-operator\n        system:serviceaccount:openshift-controller-manager:openshift-controller-manager-sa\n        system:serviceaccount:openshift-dns-operator:dns-operator\n        system:serviceaccount:openshift-dns:dns\n        system:serviceaccount:openshift-etcd-operator:etcd-operator\n        system:serviceaccount:openshift-etcd:installer-sa\n        system:serviceaccount:openshift-image-registry:cluster-image-registry-operator\n        system:serviceaccount:openshift-image-registry:pruner\n        system:serviceaccount:openshift-infra:build-controller\n        system:serviceaccount:openshift-infra:default-rolebindings-controller\n        system:serviceaccount:openshift-infra:deployer-controller\n        system:serviceaccount:openshift-infra:horizontal-pod-autoscaler\n        system:serviceaccount:openshift-infra:pv-recycler-controller\n        system:serviceaccount:openshift-infra:template-instance-controller\n        system:serviceaccount:openshift-infra:template-instance-finalizer-controller\n        system:serviceaccount:openshift-ingress-operator:ingress-operator\n        system:serviceaccount:openshift-kube-apiserver-operator:kube-apiserver-operator\n        system:serviceaccount:openshift-kube-apiserver:installer-sa\n        system:serviceaccount:openshift-kube-apiserver:localhost-recovery-client\n        system:serviceaccount:openshift-kube-controller-manager-operator:kube-controller-manager-operator\n        system:serviceaccount:openshift-kube-controller-manager:installer-sa\n        system:serviceaccount:openshift-kube-controller-manager:localhost-recovery-client\n        system:serviceaccount:openshift-kube-scheduler-operator:openshift-kube-scheduler-operator\n        system:serviceaccount:openshift-kube-scheduler:installer-sa\n        system:serviceaccount:openshift-kube-scheduler:localhost-recovery-client\n        system:serviceaccount:openshift-kube-scheduler:openshift-kube-scheduler-sa\n        system:serviceaccount:openshift-kube-storage-version-migrator-operator:kube-storage-version-migrator-operator\n        system:serviceaccount:openshift-kube-storage-version-migrator:kube-storage-version-migrator-sa\n        system:serviceaccount:openshift-machine-api:cluster-autoscaler\n        system:serviceaccount:openshift-machine-api:machine-api-controllers\n        system:serviceaccount:openshift-machine-config-operator:machine-config-controller\n        system:serviceaccount:openshift-machine-config-operator:machine-config-operator\n        system:serviceaccount:openshift-machine-config-operator:machine-os-builder\n        system:serviceaccount:openshift-monitoring:cluster-monitoring-operator\n        system:serviceaccount:openshift-multus:metrics-daemon-sa\n        system:serviceaccount:openshift-multus:multus\n        system:serviceaccount:openshift-multus:multus-ac\n        system:serviceaccount:openshift-multus:multus-ancillary-tools\n        system:serviceaccount:openshift-network-diagnostics:network-diagnostics\n        system:serviceaccount:openshift-network-node-identity:network-node-identity\n        system:serviceaccount:openshift-network-operator:cluster-network-operator\n        system:serviceaccount:openshift-oauth-apiserver:oauth-apiserver-sa\n        system:serviceaccount:openshift-operator-lifecycle-manager:olm-operator-serviceaccount\n        system:serviceaccount:openshift-ovn-kubernetes:ovn-kubernetes-control-plane\n        system:serviceaccount:openshift-service-ca-operator:service-ca-operator\nGroups: system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n        system:serviceaccounts:academy-access\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "trace",
+   "cmd": "oc get rolebindings -n academy-access -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                               AGE   USERS       GROUPS                                  SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  16s   developer                                           \nsystem:deployers        ClusterRole/system:deployer        16s                                                       academy-access/deployer\nsystem:image-builders   ClusterRole/system:image-builder   16s                                                       academy-access/builder\nsystem:image-pullers    ClusterRole/system:image-puller    16s               system:serviceaccounts:academy-access   \nview                    ClusterRole/view                   9s                system:serviceaccounts:academy-access   \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "precise",
+   "cmd": "oc policy remove-role-from-group view system:serviceaccounts:academy-access -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view removed: \"system:serviceaccounts:academy-access\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "precise",
+   "cmd": "oc policy add-role-to-user view -z scanner -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"scanner\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "precise",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-access:scanner -n academy-access",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "precise",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-access:builder-bot -n academy-access",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "scanner-yes",
+    "title": "scanner can list pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can scanner list pods? no"
+   },
+   {
+    "id": "bot-no",
+    "title": "builder-bot cannot list pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can builder-bot list pods? no"
+   },
+   {
+    "id": "no-group",
+    "title": "No view binding to the namespace's ServiceAccount group remains",
+    "expect": "0 bindings",
+    "status": "pass",
+    "observed": "0 matching rolebindings"
+   }
+  ],
+  "at": 1791999167.0595484
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "scanner-yes",
+    "title": "scanner can list pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can scanner list pods? yes"
+   },
+   {
+    "id": "bot-no",
+    "title": "builder-bot cannot list pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can builder-bot list pods? no"
+   },
+   {
+    "id": "no-group",
+    "title": "No view binding to the namespace's ServiceAccount group remains",
+    "expect": "0 bindings",
+    "status": "pass",
+    "observed": "0 matching rolebindings"
+   }
+  ],
+  "at": 1791999192.0020177
+ },
+ "seconds": 30,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-access: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

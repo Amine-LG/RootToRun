@@ -1,0 +1,143 @@
+{
+ "lab": "lesson.n.monitoring",
+ "kind": "lesson",
+ "lab_hash": "c922509f5eec74d6",
+ "recorded_at": "2026-10-16T18:48:11+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-monitoring",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n openshift-monitoring",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in openshift-monitoring namespace.\n",
+   "combined": "No resources found in openshift-monitoring namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusteroperator monitoring",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): clusteroperators.config.openshift.io \"monitoring\" not found\n",
+   "combined": "Error from server (NotFound): clusteroperators.config.openshift.io \"monitoring\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterversion version -o jsonpath='{range .spec.overrides[*]}{.kind}{\" \"}{.namespace}{\"/\"}{.name}{\" unmanaged=\"}{.unmanaged}{\"\\n\"}{end}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Deployment openshift-monitoring/cluster-monitoring-operator unmanaged=true\nClusterOperator /monitoring unmanaged=true\nDeployment openshift-cloud-credential-operator/cloud-credential-operator unmanaged=true\nClusterOperator /cloud-credential unmanaged=true\nDeployment openshift-machine-api/cluster-autoscaler-operator unmanaged=true\nClusterOperator /cluster-autoscaler unmanaged=true\nDeployment openshift-cloud-controller-manager-operator/cluster-cloud-controller-manager-operator unmanaged=true\nClusterOperator /cloud-controller-manager unmanaged=true\n",
+   "stderr": "",
+   "combined": "Deployment openshift-monitoring/cluster-monitoring-operator unmanaged=true\nClusterOperator /monitoring unmanaged=true\nDeployment openshift-cloud-credential-operator/cloud-credential-operator unmanaged=true\nClusterOperator /cloud-credential unmanaged=true\nDeployment openshift-machine-api/cluster-autoscaler-operator unmanaged=true\nClusterOperator /cluster-autoscaler unmanaged=true\nDeployment openshift-cloud-controller-manager-operator/cluster-cloud-controller-manager-operator unmanaged=true\nClusterOperator /cloud-controller-manager unmanaged=true\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get configmap cluster-monitoring-config -n openshift-monitoring",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): configmaps \"cluster-monitoring-config\" not found\n",
+   "combined": "Error from server (NotFound): configmaps \"cluster-monitoring-config\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get servicemonitors -A --no-headers | wc -l",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "46\n",
+   "stderr": "",
+   "combined": "46\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get servicemonitors -A | head -n 4",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAMESPACE                                    NAME                                           AGE\nopenshift-apiserver-operator                 openshift-apiserver-operator                   200d\nopenshift-apiserver                          openshift-apiserver                            200d\nopenshift-apiserver                          openshift-apiserver-operator-check-endpoints   200d\n",
+   "stderr": "",
+   "combined": "NAMESPACE                                    NAME                                           AGE\nopenshift-apiserver-operator                 openshift-apiserver-operator                   200d\nopenshift-apiserver                          openshift-apiserver                            200d\nopenshift-apiserver                          openshift-apiserver-operator-check-endpoints   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get prometheuses,alertmanagers -A",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found\n",
+   "combined": "No resources found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterrole monitoring-edit",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): clusterroles.rbac.authorization.k8s.io \"monitoring-edit\" not found\n",
+   "combined": "Error from server (NotFound): clusterroles.rbac.authorization.k8s.io \"monitoring-edit\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create servicemonitors",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "combined": "no\n",
+   "ok": true
+  }
+ ],
+ "seconds": 11,
+ "ok": true,
+ "problems": []
+}

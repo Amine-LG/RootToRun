@@ -1,0 +1,154 @@
+{
+ "lab": "inc.scc-root",
+ "kind": "incident",
+ "lab_hash": "f3ac6d58b4fef118",
+ "recorded_at": "2026-10-14T17:29:19+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy,rs,pods -n academy-inc-scc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/web   0/1     0            0           22s\n\nNAME                             DESIRED   CURRENT   READY   AGE\nreplicaset.apps/web-6c966884bf   1         0         0       22s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-scc --field-selector reason=FailedCreate",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON         OBJECT                      MESSAGE\n3s          Warning   FailedCreate   replicaset/web-6c966884bf   Error creating: pods \"web-6c966884bf-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1004080000, 1004089999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy web -n academy-inc-scc -o jsonpath='{.spec.template.spec.securityContext}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"runAsUser\":0}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get project academy-inc-scc -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1004080000/10000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch deploy/web -n academy-inc-scc --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/securityContext/runAsUser\"}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-scc --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get pod -l app=web -n academy-inc-scc -o jsonpath='{.items[0].metadata.annotations.openshift\\.io/scc}{\" uid=\"}{.items[0].spec.containers[0].securityContext.runAsUser}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "restricted-v2 uid=1004080000\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "no-root",
+    "title": "The pod no longer asks for UID 0",
+    "expect": "not set",
+    "status": "fail",
+    "observed": "spec.template.spec.securityContext.runAsUser = 0"
+   },
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/1, updated 0, total 0, observedGeneration current: True"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-scc.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791998982.8925366
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "no-root",
+    "title": "The pod no longer asks for UID 0",
+    "expect": "not set",
+    "status": "pass",
+    "observed": "spec.template.spec.securityContext.runAsUser = None"
+   },
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-scc.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791998996.0376487
+ },
+ "seconds": 37,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-scc: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,17 @@
+name: Suggest an improvement
+description: An idea for a lesson, an exercise or the website.
+labels: [enhancement]
+body:
+  - type: input
+    id: content-id
+    attributes: {label: Content id, description: "The lesson, lab or other page the idea is about; leave empty if it is about the whole site."}
+  - type: input
+    id: page-url
+    attributes: {label: Page address}
+  - type: textarea
+    id: suggestion
+    attributes: {label: Your suggestion, description: "What would help a learner, and why."}
+    validations: {required: true}
+  - type: input
+    id: reference
+    attributes: {label: Official documentation, description: "A link that supports the idea, if any."}

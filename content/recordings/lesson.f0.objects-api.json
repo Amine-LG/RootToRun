@@ -1,0 +1,120 @@
+{
+ "lab": "lesson.f0.objects-api",
+ "kind": "lesson",
+ "lab_hash": "f9f285eda4510b09",
+ "recorded_at": "2026-10-15T17:17:43+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-f0-objects-api",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "cat web.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  labels:\n    app: web\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: registry.access.redhat.com/ubi9/httpd-24:latest\n",
+   "stderr": "",
+   "combined": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  labels:\n    app: web\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: registry.access.redhat.com/ubi9/httpd-24:latest\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f web.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get deployment web -o yaml | sed -n '/^status:/,$p'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "status:\n  availableReplicas: 2\n  conditions:\n  - lastTransitionTime: \"2026-10-15T17:17:34Z\"\n    lastUpdateTime: \"2026-10-15T17:17:34Z\"\n    message: Deployment has minimum availability.\n    reason: MinimumReplicasAvailable\n    status: \"True\"\n    type: Available\n  - lastTransitionTime: \"2026-10-15T17:17:14Z\"\n    lastUpdateTime: \"2026-10-15T17:17:34Z\"\n    message: ReplicaSet \"web-99f675475\" has successfully progressed.\n    reason: NewReplicaSetAvailable\n    status: \"True\"\n    type: Progressing\n  observedGeneration: 1\n  readyReplicas: 2\n  replicas: 2\n  updatedReplicas: 2\n",
+   "stderr": "",
+   "combined": "status:\n  availableReplicas: 2\n  conditions:\n  - lastTransitionTime: \"2026-10-15T17:17:34Z\"\n    lastUpdateTime: \"2026-10-15T17:17:34Z\"\n    message: Deployment has minimum availability.\n    reason: MinimumReplicasAvailable\n    status: \"True\"\n    type: Available\n  - lastTransitionTime: \"2026-10-15T17:17:14Z\"\n    lastUpdateTime: \"2026-10-15T17:17:34Z\"\n    message: ReplicaSet \"web-99f675475\" has successfully progressed.\n    reason: NewReplicaSetAvailable\n    status: \"True\"\n    type: Progressing\n  observedGeneration: 1\n  readyReplicas: 2\n  replicas: 2\n  updatedReplicas: 2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl explain deployment.spec.replicas",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: replicas <integer>\n\n\nDESCRIPTION:\n    Number of desired pods. This is a pointer to distinguish between explicit\n    zero and not specified. Defaults to 1.\n    \n\n",
+   "stderr": "",
+   "combined": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: replicas <integer>\n\n\nDESCRIPTION:\n    Number of desired pods. This is a pointer to distinguish between explicit\n    zero and not specified. Defaults to 1.\n    \n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl explain deployment.spec.selector",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: selector <LabelSelector>\n\n\nDESCRIPTION:\n    Label selector for pods. Existing ReplicaSets whose pods are selected by\n    this will be the ones affected by this deployment. It must match the pod\n    template's labels.\n    A label selector is a label query over a set of resources. The result of\n    matchLabels and matchExpressions are ANDed. An empty label selector matches\n    all objects. A null label selector matches no objects.\n    \nFIELDS:\n  matchExpressions\t<[]LabelSelectorRequirement>\n    matchExpressions is a list of label selector requirements. The requirements\n    are ANDed.\n\n  matchLabels\t<map[string]string>\n    matchLabels is a map of {key,value} pairs. A single {key,value} in the\n    matchLabels map is equivalent to an element of matchExpressions, whose key\n    field is \"key\", the operator is \"In\", and the values array contains only\n    \"value\". The requirements are ANDed.\n\n\n",
+   "stderr": "",
+   "combined": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: selector <LabelSelector>\n\n\nDESCRIPTION:\n    Label selector for pods. Existing ReplicaSets whose pods are selected by\n    this will be the ones affected by this deployment. It must match the pod\n    template's labels.\n    A label selector is a label query over a set of resources. The result of\n    matchLabels and matchExpressions are ANDed. An empty label selector matches\n    all objects. A null label selector matches no objects.\n    \nFIELDS:\n  matchExpressions\t<[]LabelSelectorRequirement>\n    matchExpressions is a list of label selector requirements. The requirements\n    are ANDed.\n\n  matchLabels\t<map[string]string>\n    matchLabels is a map of {key,value} pairs. A single {key,value} in the\n    matchLabels map is equivalent to an element of matchExpressions, whose key\n    field is \"key\", the operator is \"In\", and the values array contains only\n    \"value\". The requirements are ANDed.\n\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken-tab.yaml",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: error parsing broken-tab.yaml: error converting YAML to JSON: yaml: line 6: found character that cannot start any token\n",
+   "combined": "error: error parsing broken-tab.yaml: error converting YAML to JSON: yaml: line 6: found character that cannot start any token\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken-field.yaml",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (BadRequest): error when creating \"broken-field.yaml\": Deployment in version \"v1\" cannot be handled as a Deployment: strict decoding error: unknown field \"spec.replica\"\n",
+   "combined": "Error from server (BadRequest): error when creating \"broken-field.yaml\": Deployment in version \"v1\" cannot be handled as a Deployment: strict decoding error: unknown field \"spec.replica\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "pod=$(kubectl get pods -l app=web -o name | head -n 1); echo \"$pod is owned by: $(kubectl get $pod -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}')\"; kubectl get replicasets",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/web-99f675475-hfn9j is owned by: ReplicaSet/web-99f675475\nNAME            DESIRED   CURRENT   READY   AGE\nweb-99f675475   2         2         2       28s\n",
+   "stderr": "",
+   "combined": "pod/web-99f675475-hfn9j is owned by: ReplicaSet/web-99f675475\nNAME            DESIRED   CURRENT   READY   AGE\nweb-99f675475   2         2         2       28s\n",
+   "ok": true
+  }
+ ],
+ "seconds": 34,
+ "ok": true,
+ "problems": []
+}

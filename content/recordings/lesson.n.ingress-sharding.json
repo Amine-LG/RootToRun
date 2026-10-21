@@ -1,0 +1,429 @@
+{
+ "lab": "lesson.n.ingress-sharding",
+ "kind": "lesson",
+ "lab_hash": "b622598800524475",
+ "recorded_at": "2026-10-16T14:18:17+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-ingress-sharding",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller -n openshift-ingress-operator",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      AGE\ndefault   200d\n",
+   "stderr": "",
+   "combined": "NAME      AGE\ndefault   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}{.status.domain}{\"\\n\"}{.status.endpointPublishingStrategy}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1\napps-crc.testing\n{\"hostNetwork\":{\"httpPort\":80,\"httpsPort\":443,\"protocol\":\"TCP\",\"statsPort\":1936},\"type\":\"HostNetwork\"}\n",
+   "stderr": "",
+   "combined": "1\napps-crc.testing\n{\"hostNetwork\":{\"httpPort\":80,\"httpsPort\":443,\"protocol\":\"TCP\",\"statsPort\":1936},\"type\":\"HostNetwork\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n openshift-ingress -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                 READY   STATUS    RESTARTS        AGE    IP               NODE   NOMINATED NODE   READINESS GATES\nrouter-default-78b77bfd47-txw5v      1/1     Running   12 (150m ago)   4d1h   192.168.126.11   crc    <none>           <none>\nroutes-controller-867bd6f755-kcn6d   1/1     Running   2               4d1h   10.217.0.25      crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME                                 READY   STATUS    RESTARTS        AGE    IP               NODE   NOMINATED NODE   READINESS GATES\nrouter-default-78b77bfd47-txw5v      1/1     Running   12 (150m ago)   4d1h   192.168.126.11   crc    <none>           <none>\nroutes-controller-867bd6f755-kcn6d   1/1     Running   2               4d1h   10.217.0.25      crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f academy-shard.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ingresscontroller.operator.openshift.io/academy-shard created\n",
+   "stderr": "",
+   "combined": "ingresscontroller.operator.openshift.io/academy-shard created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait ingresscontroller/academy-shard -n openshift-ingress-operator --for=condition=Available --timeout=300s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ingresscontroller.operator.openshift.io/academy-shard condition met\n",
+   "stderr": "",
+   "combined": "ingresscontroller.operator.openshift.io/academy-shard condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployments,services -n openshift-ingress",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/router-academy-shard   1/1     1            1           39s\ndeployment.apps/router-default         1/1     1            1           200d\ndeployment.apps/routes-controller      1/1     1            1           4d1h\n\nNAME                                    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                   AGE\nservice/router-internal-academy-shard   ClusterIP   10.217.4.170   <none>        80/TCP,443/TCP,1936/TCP   39s\nservice/router-internal-default         ClusterIP   10.217.4.211   <none>        80/TCP,443/TCP,1936/TCP   200d\n",
+   "stderr": "",
+   "combined": "NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/router-academy-shard   1/1     1            1           39s\ndeployment.apps/router-default         1/1     1            1           200d\ndeployment.apps/routes-controller      1/1     1            1           4d1h\n\nNAME                                    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                   AGE\nservice/router-internal-academy-shard   ClusterIP   10.217.4.170   <none>        80/TCP,443/TCP,1936/TCP   39s\nservice/router-internal-default         ClusterIP   10.217.4.211   <none>        80/TCP,443/TCP,1936/TCP   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n openshift-ingress -o wide -l ingresscontroller.operator.openshift.io/deployment-ingresscontroller=academy-shard",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                    READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\nrouter-academy-shard-74f9957fdd-nmddv   1/1     Running   0          40s   10.217.0.70   crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME                                    READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\nrouter-academy-shard-74f9957fdd-nmddv   1/1     Running   0          40s   10.217.0.70   crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get secret router-certs-academy-shard -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "subject=CN=*.shard.apps-crc.testing\nissuer=CN=ingress-operator@1774874284\n",
+   "stderr": "",
+   "combined": "subject=CN=*.shard.apps-crc.testing\nissuer=CN=ingress-operator@1774874284\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-ingress --admin=developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-ingress\n",
+   "stderr": "",
+   "combined": "Created project lab-ingress\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f app.yaml -n lab-ingress && oc rollout status deployment/web -n lab-ingress --timeout=180s && oc rollout status deployment/client -n lab-ingress --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/web-content created\ndeployment.apps/web created\nservice/web created\ndeployment.apps/client created\nWaiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\ndeployment \"client\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "configmap/web-content created\ndeployment.apps/web created\nservice/web created\ndeployment.apps/client created\nWaiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\ndeployment \"client\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose service web --name=web-internal --hostname=web.shard.apps-crc.testing -n lab-ingress",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/web-internal exposed\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/web-internal exposed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for i in $(seq 1 30); do oc get route web-internal -n lab-ingress -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "default\tAdmitted=True\n",
+   "stderr": "",
+   "combined": "default\tAdmitted=True\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "503\n",
+   "stderr": "",
+   "combined": "503\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label route web-internal shard=academy -n lab-ingress",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/web-internal labeled\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/web-internal labeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for i in $(seq 1 30); do oc get route web-internal -n lab-ingress -o jsonpath='{.status.ingress[*].routerName}' | grep -qw academy-shard && break; sleep 2; done; sleep 5",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get route web-internal -n lab-ingress -o yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: route.openshift.io/v1\nkind: Route\nmetadata:\n  creationTimestamp: \"2026-10-16T14:16:36Z\"\n  generation: 1\n  labels:\n    shard: academy\n  name: web-internal\n  namespace: lab-ingress\n  resourceVersion: \"581732\"\n  uid: 6f1cb7e1-7f95-4a12-a4ef-1a584a3fc7f3\nspec:\n  host: web.shard.apps-crc.testing\n  port:\n    targetPort: http\n  to:\n    kind: Service\n    name: web\n    weight: 100\n  wildcardPolicy: None\nstatus:\n  ingress:\n  - conditions:\n    - lastTransitionTime: \"2026-10-16T14:16:36Z\"\n      status: \"True\"\n      type: Admitted\n    host: web.shard.apps-crc.testing\n    routerCanonicalHostname: router-default.apps-crc.testing\n    routerName: default\n    wildcardPolicy: None\n  - conditions:\n    - lastTransitionTime: \"2026-10-16T14:16:45Z\"\n      status: \"True\"\n      type: Admitted\n    host: web.shard.apps-crc.testing\n    routerCanonicalHostname: router-academy-shard.shard.apps-crc.testing\n    routerName: academy-shard\n    wildcardPolicy: None\n",
+   "stderr": "",
+   "combined": "apiVersion: route.openshift.io/v1\nkind: Route\nmetadata:\n  creationTimestamp: \"2026-10-16T14:16:36Z\"\n  generation: 1\n  labels:\n    shard: academy\n  name: web-internal\n  namespace: lab-ingress\n  resourceVersion: \"581732\"\n  uid: 6f1cb7e1-7f95-4a12-a4ef-1a584a3fc7f3\nspec:\n  host: web.shard.apps-crc.testing\n  port:\n    targetPort: http\n  to:\n    kind: Service\n    name: web\n    weight: 100\n  wildcardPolicy: None\nstatus:\n  ingress:\n  - conditions:\n    - lastTransitionTime: \"2026-10-16T14:16:36Z\"\n      status: \"True\"\n      type: Admitted\n    host: web.shard.apps-crc.testing\n    routerCanonicalHostname: router-default.apps-crc.testing\n    routerName: default\n    wildcardPolicy: None\n  - conditions:\n    - lastTransitionTime: \"2026-10-16T14:16:45Z\"\n      status: \"True\"\n      type: Admitted\n    host: web.shard.apps-crc.testing\n    routerCanonicalHostname: router-academy-shard.shard.apps-crc.testing\n    routerName: academy-shard\n    wildcardPolicy: None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "hello from lab-ingress\n",
+   "stderr": "",
+   "combined": "hello from lab-ingress\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -n lab-ingress -- curl -s -m 5 -H 'Host: web.shard.apps-crc.testing' http://router-internal-default.openshift-ingress.svc/",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "hello from lab-ingress\n",
+   "stderr": "",
+   "combined": "hello from lab-ingress\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label route web-internal shard- -n lab-ingress",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/web-internal unlabeled\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/web-internal unlabeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 10",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get route web-internal -n lab-ingress -o jsonpath='{range .status.ingress[*]}{.routerName}{\"\\t\"}{.conditions[0].type}={.conditions[0].status}{\"\\n\"}{end}' && oc exec deploy/client -n lab-ingress -- curl -s -m 5 -o /dev/null -w '%{http_code}\\n' -H 'Host: web.shard.apps-crc.testing' http://router-internal-academy-shard.openshift-ingress.svc/",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "default\tAdmitted=True\nacademy-shard\tAdmitted=True\n503\n",
+   "stderr": "",
+   "combined": "default\tAdmitted=True\nacademy-shard\tAdmitted=True\n503\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete ingresscontroller academy-shard -n openshift-ingress-operator",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ingresscontroller.operator.openshift.io \"academy-shard\" deleted from openshift-ingress-operator namespace\n",
+   "stderr": "",
+   "combined": "ingresscontroller.operator.openshift.io \"academy-shard\" deleted from openshift-ingress-operator namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait --for=delete deployment/router-academy-shard -n openshift-ingress --timeout=300s; oc get ingresscontroller -n openshift-ingress-operator && oc get deployments,services -n openshift-ingress",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      AGE\ndefault   200d\nNAME                                READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/router-default      1/1     1            1           200d\ndeployment.apps/routes-controller   1/1     1            1           4d1h\n\nNAME                              TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                   AGE\nservice/router-internal-default   ClusterIP   10.217.4.211   <none>        80/TCP,443/TCP,1936/TCP   200d\n",
+   "stderr": "",
+   "combined": "NAME      AGE\ndefault   200d\nNAME                                READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/router-default      1/1     1            1           200d\ndeployment.apps/routes-controller   1/1     1            1           4d1h\n\nNAME                              TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                   AGE\nservice/router-internal-default   ClusterIP   10.217.4.211   <none>        80/TCP,443/TCP,1936/TCP   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1\n",
+   "stderr": "",
+   "combined": "1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-ingress",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-ingress\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-ingress\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 224,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NET-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete ingresscontroller academy-shard -n openshift-ingress-operator --ignore-not-found --timeout=300s",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project lab-ingress --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc wait co/ingress --for=condition=Available=True --timeout=60s && oc wait co/ingress --for=condition=Degraded=False --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait ingresscontroller/default -n openshift-ingress-operator --for=condition=Available=True --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "curl -sk -m 10 -o /dev/null -w '%{http_code}\\n' https://oauth-openshift.apps-crc.testing/healthz",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get ingresscontroller -n openshift-ingress-operator -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation} {.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.generation} {.spec.template.spec.containers[0].env}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get deployments,services,secrets,configmaps,poddisruptionbudgets -n openshift-ingress -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get secret router-certs -n openshift-config-managed -o jsonpath='{.data}' | sha256sum",
+    "same": true
+   },
+   {
+    "cmd": "oc get dnsrecords -n openshift-ingress-operator -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusteroperator ingress -o jsonpath='{range .status.conditions[*]}{.type}={.status} {end}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get project lab-ingress -o name --ignore-not-found",
+    "same": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,275 @@
+{
+ "lab": "lab.request-path",
+ "kind": "lab",
+ "lab_hash": "a085fce728eea901",
+ "recorded_at": "2026-10-20T17:18:58+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- getent hosts web",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc create route edge web --service=web --insecure-policy=Redirect -n academy-net",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "dns",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- getent hosts web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.4.202    web.academy-net.svc.cluster.local\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "dns",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- getent hosts web.academy-net.svc.cluster.local",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.4.202    web.academy-net.svc.cluster.local\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "dns",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- cat /etc/resolv.conf",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "search academy-net.svc.cluster.local svc.cluster.local cluster.local crc.testing\nnameserver 10.217.4.10\noptions ndots:5\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "dns",
+   "cmd": "oc get svc web -n academy-net",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nweb    ClusterIP   10.217.4.202   <none>        8080/TCP   22s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "service",
+   "cmd": "oc exec deploy/toolbox -n academy-net -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>academy request path</h1>",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "service",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-net -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS                   AGE\nweb-pskbc   IPv4          8080    10.217.0.102,10.217.0.101   24s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "service",
+   "cmd": "oc get pods -l app=web -n academy-net -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nweb-7ddfddcc56-55fgx   1/1     Running   0          25s   10.217.0.101   crc    <none>           <none>\nweb-7ddfddcc56-7zkrw   1/1     Running   0          25s   10.217.0.102   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "route",
+   "cmd": "oc create route edge web --service=web --insecure-policy=Redirect -n academy-net",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/web created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "route",
+   "cmd": "oc get route web -n academy-net -o yaml",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: route.openshift.io/v1\nkind: Route\nmetadata:\n  annotations:\n    openshift.io/host.generated: \"true\"\n  creationTimestamp: \"2026-10-20T17:19:29Z\"\n  generation: 1\n  name: web\n  namespace: academy-net\n  resourceVersion: \"220715\"\n  uid: a220214a-caae-42c7-9f76-09ef2f7e66cb\nspec:\n  host: web-academy-net.apps-crc.testing\n  port:\n    targetPort: http\n  tls:\n    insecureEdgeTerminationPolicy: Redirect\n    termination: edge\n  to:\n    kind: Service\n    name: web\n    weight: 100\n  wildcardPolicy: None\nstatus:\n  ingress:\n  - conditions:\n    - lastTransitionTime: \"2026-10-20T17:19:29Z\"\n      status: \"True\"\n      type: Admitted\n    host: web-academy-net.apps-crc.testing\n    routerCanonicalHostname: router-default.apps-crc.testing\n    routerName: default\n    wildcardPolicy: None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale deploy/web --replicas=3 -n academy-net",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-net",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS                   AGE\nweb-pskbc   IPv4          8080    10.217.0.102,10.217.0.101   30s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "svc-from-pod",
+    "title": "The Service answers from inside the cluster",
+    "expect": "page content via http://web:8080/",
+    "status": "pass",
+    "observed": "<h1>academy request path</h1>"
+   },
+   {
+    "id": "dns-fqdn",
+    "title": "The FQDN resolves",
+    "expect": "a 10.x ClusterIP",
+    "status": "pass",
+    "observed": "10.217.4.202    web.academy-net.svc.cluster.local"
+   },
+   {
+    "id": "endpoints",
+    "title": "web has ready endpoints",
+    "expect": ">= 2 ready",
+    "status": "pass",
+    "observed": "2 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "route-edge",
+    "title": "Route web uses edge termination",
+    "expect": "edge",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"web\" not found"
+   },
+   {
+    "id": "route-redirect",
+    "title": "Plain HTTP is redirected to HTTPS (checked from this machine)",
+    "expect": "HTTP 302 → https://",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"web\" not found"
+   },
+   {
+    "id": "route-https",
+    "title": "The Route serves the app over HTTPS from this machine",
+    "expect": "HTTPS 200",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"web\" not found"
+   },
+   {
+    "id": "three-endpoints",
+    "title": "Three ready endpoints after scaling",
+    "expect": "3 ready",
+    "status": "fail",
+    "observed": "2 ready endpoint address(es), ports [8080]"
+   }
+  ],
+  "at": 1792516757.6292849
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "svc-from-pod",
+    "title": "The Service answers from inside the cluster",
+    "expect": "page content via http://web:8080/",
+    "status": "pass",
+    "observed": "<h1>academy request path</h1>"
+   },
+   {
+    "id": "dns-fqdn",
+    "title": "The FQDN resolves",
+    "expect": "a 10.x ClusterIP",
+    "status": "pass",
+    "observed": "10.217.4.202    web.academy-net.svc.cluster.local"
+   },
+   {
+    "id": "endpoints",
+    "title": "web has ready endpoints",
+    "expect": ">= 2 ready",
+    "status": "pass",
+    "observed": "3 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "route-edge",
+    "title": "Route web uses edge termination",
+    "expect": "edge",
+    "status": "pass",
+    "observed": "spec.tls.termination = 'edge'"
+   },
+   {
+    "id": "route-redirect",
+    "title": "Plain HTTP is redirected to HTTPS (checked from this machine)",
+    "expect": "HTTP 302 → https://",
+    "status": "pass",
+    "observed": "http://web-academy-net.apps-crc.testing/ → HTTP 302 → https://web-academy-net.apps-crc.testing/ · "
+   },
+   {
+    "id": "route-https",
+    "title": "The Route serves the app over HTTPS from this machine",
+    "expect": "HTTPS 200",
+    "status": "pass",
+    "observed": "https://web-academy-net.apps-crc.testing/ → HTTP 200 · academy request path"
+   },
+   {
+    "id": "three-endpoints",
+    "title": "Three ready endpoints after scaling",
+    "expect": "3 ready",
+    "status": "pass",
+    "observed": "3 ready endpoint address(es), ports [8080]"
+   }
+  ],
+  "at": 1792516781.9170213
+ },
+ "seconds": 43,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-net: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

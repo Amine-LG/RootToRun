@@ -1,0 +1,676 @@
+track: platform
+title: "Enterprise: find your gaps"
+intro: >-
+  Twenty-six scenario questions across the Enterprise platform engineering track: installation, scheduling and
+  partitioning, corporate identity, GitOps, observability and SLOs, delivery and supply chain, high availability and
+  recovery, governance and platform teams. Many ask you to read output or YAML from multi-node clusters, which this
+  course describes rather than runs. This is a self-assessment: nothing is marked complete, and the results only
+  suggest which lessons to start with.
+minutes: 34
+items:
+  # ---------------------------------------------------------------- p0-install
+  - id: install-service-network-overlap
+    targets: [n.installation]
+    prompt: >-
+      You review this `install-config.yaml` excerpt before a bare-metal installation. The network team tells you
+      that the data-warehouse subnet 172.30.40.0/24, which applications on the cluster must reach, is routed inside
+      the corporate network. What do you do?
+    evidence: |
+      networking:
+        networkType: OVNKubernetes
+        clusterNetwork:
+        - cidr: 10.128.0.0/14
+          hostPrefix: 23
+        machineNetwork:
+        - cidr: 10.20.0.0/24
+        serviceNetwork:
+        - 172.30.0.0/16
+    choices:
+      - "Install as planned, then add an egress NetworkPolicy that allows 172.30.40.0/24 if pods cannot reach it."
+      - "Install as planned and move `serviceNetwork` to another range later, during a maintenance window."
+      - "Pick a `serviceNetwork` that overlaps no corporate range before installing; it cannot be changed afterwards."
+      - "Install as planned: the service network is virtual, so it cannot clash with a subnet routed elsewhere."
+    answer: 2
+    feedback:
+      - "A NetworkPolicy filters traffic; it cannot make a destination reachable when the cluster treats that range as its own service network."
+      - "The service network is a day-1 decision: it cannot be changed after installation (the pod network can only be expanded)."
+      - "Network ranges are agreed with the network team before installing, because fixing an overlap later means a migration."
+      - "Service IPs are virtual, which is exactly the problem: traffic from pods to 172.30.40.x is treated as service traffic inside the cluster and never reaches the real warehouse subnet."
+    explain: >-
+      Cluster, service and machine network ranges must not overlap networks the cluster needs to reach, and the
+      service network is fixed at installation. Decide them with the network team, in writing, before day 1.
+
+  # ---------------------------------------------------------------- p1-scheduling
+  - id: sched-read-failedscheduling
+    targets: [b.scheduler, n.nodes-capacity]
+    prompt: >-
+      A reporting pod requesting 24Gi of memory stays Pending on a cluster with three control-plane nodes and three
+      workers. What is the right reading of this event?
+    evidence: |
+      $ oc get events -n reports --field-selector reason=FailedScheduling
+      LAST SEEN   TYPE      REASON             OBJECT                 MESSAGE
+      12s         Warning   FailedScheduling   pod/report-7d9c-x2kq   0/6 nodes are available: 3 Insufficient memory, 3 node(s) had untolerated taint(s). preemption: 0/6 nodes are available: 3 No preemption victims found for incoming pod, 3 Preemption is not helpful for scheduling.
+    choices:
+      - "The workers lack 24Gi of unrequested memory, and the control plane is excluded on purpose."
+      - "The control-plane taint is the real blocker: add a toleration so the pod can use the control-plane nodes' memory."
+      - "The kube-scheduler itself is short of memory: restarting its pods clears the message and the pod is placed."
+      - "The nodes' memory is busy right now: the pod is placed automatically when actual usage on the workers drops."
+    answer: 0
+    feedback:
+      - "Each count names one filter: three nodes fail on requests, three on a taint (the three control-plane nodes, which carry the control-plane taint). Only the first is a problem to fix: lower the request or add worker capacity."
+      - "Tolerating the control-plane taint would put an application on the control plane, which the taint exists to prevent. Fix the request or the worker capacity."
+      - "`0/6 nodes are available` is the result of the filter phase on each node, not a sign that the scheduler is unhealthy."
+      - "The scheduler compares requests with allocatable capacity; actual usage plays no part, so waiting for quieter nodes changes nothing."
+    explain: >-
+      A FailedScheduling message lists, per reason, how many nodes each filter rejected. Read every part: here the
+      taint is expected, and the memory requests are the real constraint.
+
+  - id: capacity-drain-blocked-pdb
+    targets: [n.nodes-capacity, i.ha-architecture]
+    prompt: >-
+      A cluster update has been stuck on the worker pool for three hours. What is the most likely cause, and the
+      right next step?
+    evidence: |
+      $ oc get mcp worker
+      NAME     CONFIG                    UPDATED   UPDATING   DEGRADED   MACHINECOUNT   READYMACHINECOUNT   UPDATEDMACHINECOUNT
+      worker   rendered-worker-5be1…     False     True       False      6              4                   4
+      $ oc get nodes
+      NAME       STATUS                     ROLES    AGE    VERSION
+      worker-3   Ready,SchedulingDisabled   worker   212d   v1.34.5
+      ...
+      $ oc get pdb -A
+      NAMESPACE   NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+      ledger      ledger   1               N/A               0                     90d
+    choices:
+      - "worker-3 has failing hardware: delete its Machine so that its MachineSet replaces it and the update can continue."
+      - "The update is merely slow: raise `maxUnavailable` on the worker pool so the remaining nodes update in parallel."
+      - "The MCO cordoned worker-3 by mistake: uncordon it and the Machine Config Operator retries the update later on."
+      - "The `ledger` budget allows no disruption, so the drain is refused: add a replica or relax it."
+    answer: 3
+    feedback:
+      - "Nothing points at hardware: the node is Ready. A replacement machine would not help either, since the drain of the old one still has to evict the ledger pod."
+      - "More nodes in parallel means more drains blocked by the same budget, and less spare capacity while they wait."
+      - "Cordoning is the first step of every node update; uncordoning undoes it without solving the eviction that is failing."
+      - "One replica with `minAvailable: 1` can never be disrupted. Fix the application design with its owners before the next window."
+    explain: >-
+      The MCO drains each node through the eviction API, which respects PodDisruptionBudgets. A budget that allows
+      zero disruptions stalls the pool's update until the application can tolerate losing a pod.
+
+  - id: partition-toleration-only
+    targets: [p.cluster-partitioning, b.scheduler]
+    prompt: >-
+      Nodes pay-1 to pay-3 carry the taint `dedicated=payments:NoSchedule`, and the payments Deployment tolerates
+      it. Yet two of the three replicas run on general workers. Why?
+    evidence: |
+      $ oc get pods -n payments -o wide
+      NAME              READY   STATUS    RESTARTS   AGE   IP            NODE
+      api-6f9d8-2kqzt   1/1     Running   0          3h    10.131.0.12   pay-1
+      api-6f9d8-8wlxv   1/1     Running   0          3h    10.129.2.40   worker-4
+      api-6f9d8-qq7rm   1/1     Running   0          3h    10.128.4.7    worker-9
+
+      # pod template excerpt
+      tolerations:
+      - {key: dedicated, operator: Equal, value: payments, effect: NoSchedule}
+      # no nodeSelector, no nodeAffinity
+    choices:
+      - "`NoSchedule` is too weak: only a `NoExecute` taint keeps the team's own pods on the tainted nodes."
+      - "A toleration permits tainted nodes but never requires them: add a label and a selector."
+      - "The scheduler ignores tolerations when the tainted nodes are busier than the general workers are."
+      - "The pay nodes must also belong to a custom MachineConfigPool before the scheduler treats them as dedicated."
+    answer: 1
+    feedback:
+      - "Taint effects decide what happens to pods *without* the toleration. No effect pulls pods that tolerate it towards the node."
+      - "The taint keeps others off; a selector (for example the project's `openshift.io/node-selector`) keeps payments on. Exclusive nodes need both."
+      - "Tolerations are not weighed against load: they only lift the taint's filter. These pods were simply free to go anywhere."
+      - "A MachineConfigPool configures and updates nodes; it has no influence on where pods are scheduled."
+    explain: >-
+      Selectors pull and taints push. A dedicated pool needs a taint to keep other pods out and a selector to keep
+      the team's pods in, set durably in the MachineSet template and imposed by the project.
+
+  # ---------------------------------------------------------------- p5-identity
+  - id: ldap-mover-stale-group
+    targets: [p.ldap-oidc]
+    prompt: >-
+      Bob moved from payments to marketing on 1 October and the directory was updated the same day. Today, two weeks
+      later, he can still deploy to the payments projects, which are bound to the group below. What do you check
+      first?
+    evidence: |
+      $ oc get group team-payments -o yaml
+      apiVersion: user.openshift.io/v1
+      kind: Group
+      metadata:
+        name: team-payments
+        annotations:
+          openshift.io/ldap.sync-time: "2026-09-02T08:00:12Z"
+          openshift.io/ldap.uid: cn=team-payments,ou=groups,dc=example,dc=com
+          openshift.io/ldap.url: ldap.example.com:636
+      users:
+      - alice
+      - bob
+    choices:
+      - "His OAuth tokens: delete them and he loses the access, since each token carries his group membership."
+      - "The group sync job: the last sync was on 2 September; fix it and confirm bob drops."
+      - "The LDAP identity provider: it should have removed him from the group at his next login to the console."
+      - "Nothing: a move between teams never changes cluster access until the User object itself is deleted."
+    answer: 1
+    feedback:
+      - "With the built-in OAuth server, RBAC evaluates the current Group objects; deleting tokens would not change his groups."
+      - "The sync-time annotation shows the CronJob (or whatever runs the sync) stopped six weeks ago. Groups only change when a sync runs."
+      - "The LDAP identity provider only authenticates; it never writes Group objects."
+      - "Group-based access changes as soon as the Group changes; the point of syncing is that movers need no manual step."
+    explain: >-
+      LDAP group sync copies membership at each run, so a stopped sync freezes access. Watch the sync job and the
+      `openshift.io/ldap.sync-time` annotations.
+
+  # ---------------------------------------------------------------- p6-gitops
+  - id: gitops-selfheal-hotfix
+    targets: [gx.argocd]
+    prompt: >-
+      A Deployment is managed by an Argo CD Application with automated sync and self-heal enabled. During an incident
+      you raise its replicas with `oc scale`; a few seconds later your change is gone. What is the right way to keep the
+      extra replicas?
+    choices:
+      - "Use `oc edit` instead of `oc scale`, because self-heal only watches the scale subresource and ignores direct edits."
+      - "Enable prune on the Application, so that Argo CD stops reverting fields it did not create."
+      - "Delete the Application first; the Deployment then stays in place and can safely be changed by hand."
+      - "Commit the new count to the Git path it tracks (or deliberately pause automated sync, then back-port)."
+    answer: 3
+    feedback:
+      - "Self-heal compares the whole live object with Git. An `oc edit` is reverted just like `oc scale`."
+      - "Prune deletes objects that were removed from Git. It does nothing to stop Argo CD from reverting a changed field."
+      - "Depending on its finalizer, deleting an Application can delete everything it manages. Even when it does not, the object is now unmanaged and can drift without anyone noticing."
+      - "With self-heal, Git is the only lasting way to change the live state. If you must act in the cluster first, pause automated sync on purpose and record the change in Git afterwards."
+    explain: >-
+      Self-heal makes Git the only durable source of change. During an incident, either commit the fix or suspend
+      automated sync knowingly, then back-port.
+
+  - id: secret-in-git
+    targets: [gx.argocd-ops]
+    prompt: "A Secret manifest with `data: {password: czNjcjN0}` was committed to the GitOps repository. What is the problem?"
+    choices:
+      - "The password is only base64-encoded, which anyone can decode"
+      - "Argo CD refuses to sync Secret objects from Git"
+      - "Nothing, as long as the cluster encrypts Secrets at rest"
+    answer: 0
+    feedback:
+      - "`base64 -d` reverses it without any key, and Git keeps it in the history. Use an external secret store or Sealed Secrets, and change the password."
+      - "Argo CD syncs Secrets like any other object. That is why a plain Secret in Git is dangerous, not blocked."
+      - "Encryption at rest protects etcd, not the repository, where the value is readable by anyone with access."
+    explain: "Secret values are base64-encoded, not encrypted. Keep them out of Git: reference an external store (External Secrets Operator) or commit only encrypted values (Sealed Secrets)."
+
+  - id: default-instance-access
+    targets: [gx.openshift-gitops]
+    prompt: "On OpenShift GitOps, a team wants to deploy its own application with Argo CD. Where should its Applications live?"
+    choices:
+      - "In the default instance, in the namespace `openshift-gitops`"
+      - "In a team instance limited to the team's namespaces"
+      - "In the namespace `argocd`, as in the upstream examples"
+    answer: 1
+    feedback:
+      - "The default instance has cluster-wide permissions for cluster configuration; giving teams Applications there gives them those permissions."
+      - "A team instance (an `ArgoCD` object) or a restricted AppProject keeps the team's deployments within its own namespaces."
+      - "OpenShift GitOps does not use `argocd`: Applications go in the namespace of the instance that handles them."
+    explain: "The default instance in `openshift-gitops` is for cluster administrators. Teams get their own instance or a restricted project, with namespaces labelled `argocd.argoproj.io/managed-by`."
+
+  # ---------------------------------------------------------------- p2-reliability
+  - id: obs-crashloop-previous
+    targets: [h.observability]
+    prompt: >-
+      `oc logs` only shows clean start-up lines for this pod. Where is the most direct evidence of why the
+      container keeps dying?
+    evidence: |
+      $ oc get pods -n shop
+      NAME                READY   STATUS             RESTARTS      AGE
+      cart-5c7b9d-hx2lp   0/1     CrashLoopBackOff   6 (40s ago)   9m
+      $ oc logs cart-5c7b9d-hx2lp -n shop
+      2026-10-14T09:12:03Z INFO starting cart service v2.3.1
+      2026-10-14T09:12:03Z INFO loading configuration from /etc/cart/config.yaml
+    choices:
+      - "In Prometheus: the container's memory graph shows the moment of the crash and therefore its cause."
+      - "Nowhere: a restarted container's output is lost, so add more logging and wait for the next crash."
+      - "In the previous instance's output (`--previous`) and the last state shown by `oc describe pod`."
+      - "In the API server's audit log, which records the reason every container exited on every node."
+    answer: 2
+    feedback:
+      - "Metrics show trends, not the error line; and if memory were the cause, `oc describe pod` would already say OOMKilled."
+      - "The kubelet keeps the previous terminated instance of each container; its output is exactly what you need here."
+      - "The current instance has just started; the one that crashed is the previous one, and its last state gives the exit code and reason."
+      - "Audit logs record API requests (who changed what), not why a process inside a container exited."
+    explain: >-
+      For a crash loop, read the previous instance's logs and the container's last state. Events, logs, metrics and
+      traces each answer a different question; pick the one that answers yours.
+
+  - id: monitoring-uwm-not-enabled
+    targets: [n.monitoring]
+    prompt: >-
+      A team created a ServiceMonitor for its Service in project `shop` yesterday; the selector matches the Service's
+      labels and the port name is right. Observe > Targets shows nothing for `shop`. What is missing?
+    evidence: |
+      $ oc get configmap cluster-monitoring-config -n openshift-monitoring -o yaml
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: cluster-monitoring-config
+        namespace: openshift-monitoring
+      data:
+        config.yaml: |
+          prometheusK8s:
+            retention: 15d
+      $ oc get pods -n openshift-user-workload-monitoring
+      No resources found in openshift-user-workload-monitoring namespace.
+    choices:
+      - "User workload monitoring: `enableUserWorkload: true` is absent, so no Prometheus scrapes user projects."
+      - "Time: with a 15-day retention, Prometheus only discovers new targets at its next weekly compaction."
+      - "A PrometheusRule: a target appears in Observe only once at least one alert rule refers to its metrics."
+      - "The label `openshift.io/cluster-monitoring: \"true\"` on `shop`, so that the platform Prometheus scrapes it."
+    answer: 0
+    feedback:
+      - "The empty `openshift-user-workload-monitoring` namespace confirms it. An administrator enables it in this ConfigMap."
+      - "Retention is how long data is kept; target discovery takes minutes, not days."
+      - "Scraping and alerting are independent: a ServiceMonitor produces targets and metrics without any rule."
+      - "That label is for platform namespaces; putting it on your own project is explicitly unsupported."
+    explain: >-
+      The platform Prometheus watches only platform namespaces. User projects need user workload monitoring, enabled
+      with `enableUserWorkload: true` in `cluster-monitoring-config`.
+
+  - id: prometheus-counter-alert
+    targets: [n.monitoring, h.slo-incidents]
+    prompt: >-
+      This alert started firing a week after a release and has never stopped, although the error rate has been close
+      to zero ever since. `http_requests_total` is a counter. What is wrong with the rule?
+    evidence: |
+      - alert: CheckoutErrors
+        expr: http_requests_total{job="checkout", code=~"5.."} > 100
+        for: 5m
+        labels:
+          severity: page
+    choices:
+      - "`for: 5m` is too short: with `for: 1h` the alert would resolve on its own once errors stop."
+      - "The regular expression `5..` is not valid PromQL, so the selector matches every status code."
+      - "A counter is reset by Alertmanager when an alert resolves, so it must be silenced once to reset."
+      - "A counter only grows until its process restarts: alert on a rate, such as the 5xx ratio."
+    answer: 3
+    feedback:
+      - "`for` delays firing; it never resolves an alert whose condition stays true, and a running total over 100 stays true."
+      - "`=~\"5..\"` is a valid regular-expression matcher selecting 500 to 599."
+      - "Alertmanager never touches metrics; a counter resets only when the process that exposes it restarts."
+      - "Once 100 errors have ever happened the total stays above 100. Use `rate()` or `increase()` over a window, ideally as an error ratio tied to the SLO."
+    explain: >-
+      Counters are cumulative. Alert on how fast they grow (`rate`, `increase`), and prefer symptom ratios such as
+      failed requests over all requests.
+
+  - id: logging-forwarder-unauthorized
+    targets: [n.logging]
+    prompt: >-
+      Yesterday someone added the `audit` input to a pipeline of this ClusterLogForwarder. Since then no logs of any
+      type reach the store. What happened?
+    evidence: |
+      $ oc get clusterlogforwarder collector -n openshift-logging -o jsonpath='{.status.conditions}'
+      [{"type":"observability.openshift.io/Authorized","status":"False",
+        "message":"insufficient permissions on service account, not authorized to collect [\"audit\"] logs"},
+       {"type":"observability.openshift.io/Valid","status":"True"},
+       {"type":"Ready","status":"False"}]
+      $ oc get daemonset -n openshift-logging
+      No resources found in openshift-logging namespace.
+    choices:
+      - "Audit logs are so large that they saturated the LokiStack, which now refuses every tenant's writes."
+      - "The ServiceAccount lacks `collect-audit-logs`, so the operator removed the whole collector until it is bound."
+      - "The audit input is invalid in Logging 6, so the Valid condition failed and disabled every pipeline."
+      - "Audit collection also needs a journal input, so the operator paused the collector until one is added."
+    answer: 1
+    feedback:
+      - "A saturated store would show rate-limit errors in the collector's logs; here there is no collector at all."
+      - "Authorization is checked for the forwarder as a whole: bind the role first, then add the input, then check the Authorized condition."
+      - "Read the evidence: Valid is True. The spec is fine; the permissions are not."
+      - "No such dependency exists; the Authorized condition names the missing permission directly."
+    explain: >-
+      The collector runs as a ServiceAccount you create, and each log type needs its `collect-*` cluster role. A
+      missing role removes the whole collector, not just one input.
+
+  - id: loki-retention-unset
+    targets: [n.logging]
+    prompt: >-
+      Eight months after logging was installed, the object storage bill grows every month although log volume is
+      stable. The LokiStack looks like this. What is the cause?
+    evidence: |
+      apiVersion: loki.grafana.com/v1
+      kind: LokiStack
+      metadata:
+        name: logging-loki
+        namespace: openshift-logging
+      spec:
+        size: 1x.small
+        storage:
+          schemas:
+          - {version: v13, effectiveDate: "2025-01-01"}
+          secret: {name: logging-loki-s3, type: s3}
+        storageClassName: gp3-csi
+        tenants:
+          mode: openshift-logging
+    choices:
+      - "No retention is set, so nothing is ever pruned: set global or per-tenant retention."
+      - "`1x.small` caps Loki's local disks, so data overflows into object storage; a larger size fixes it."
+      - "The `v13` schema stores each log line twice; moving to another schema version halves the bucket."
+      - "Loki keeps 30 days by default, so the growth comes from collectors re-sending logs after restarts."
+    answer: 0
+    feedback:
+      - "Retention lives in the LokiStack's limits (globally or per tenant, in days). Without it the bucket only grows."
+      - "The size sets the components' replicas and resources; object storage is where Loki always keeps its chunks."
+      - "The schema describes how chunks and indexes are laid out; it does not duplicate log lines."
+      - "There is no implicit 30-day retention here: unless you configure it, logs are kept forever."
+    explain: >-
+      LokiStack is meant for short-term storage, and only deletes what its retention settings tell it to. Set
+      retention per log type, and send long-term audit data to a system built for it.
+
+  - id: slo-budget-arithmetic
+    targets: [h.slo-incidents]
+    prompt: >-
+      A service has an availability SLO of 99.9%, measured in available minutes over a rolling 30-day window. In the
+      current window it had one 25-minute outage and two 6-minute outages. How much budget is left, and what does a
+      typical error budget policy say?
+    choices:
+      - "About 43 minutes: the budget is 0.1% of each day, so outages on earlier days no longer count."
+      - "None: any outage above 0.1% of a single day breaks the SLO, so this window has already failed."
+      - "About 6 minutes, some 14% of a 43.2-minute budget: slow or freeze risky changes until it recovers."
+      - "About 395 minutes: 0.1% of 30 days is 432 minutes, so a 37-minute total is far from the limit."
+    answer: 2
+    feedback:
+      - "The budget belongs to the whole 30-day window; every outage inside the window counts against it."
+      - "The SLO is judged over the window, not per day; a long outage spends budget, it does not fail the SLO by itself."
+      - "30 days are 43,200 minutes; 0.1% of that is 43.2 minutes; 37 are spent. Policies tie the remaining budget to how much risk the team may take."
+      - "0.1% of 43,200 minutes is 43.2 minutes, not 432: the decimal point moved."
+    explain: >-
+      Error budget = (1 − SLO) × window. At 99.9% over 30 days that is 43.2 minutes; the policy decides what the team
+      does as it runs out.
+
+  # ---------------------------------------------------------------- p3-delivery
+  - id: iac-terraform-console-drift
+    targets: [g.iac]
+    prompt: >-
+      During an incident last week, an engineer raised the ingress load balancer's idle timeout to 300 seconds in
+      the cloud console. Today the pipeline's plan shows this. What should happen?
+    evidence: |
+      $ terraform plan
+        # aws_lb.ingress will be updated in-place
+        ~ resource "aws_lb" "ingress" {
+            ~ idle_timeout = 300 -> 60
+              id           = "arn:aws:elasticloadbalancing:…"
+              name         = "prod-ingress"
+          }
+      Plan: 0 to add, 1 to change, 0 to destroy.
+    choices:
+      - "Nothing: Terraform has noticed that the console value is now the truth and will keep 300 from now on."
+      - "Remove the load balancer from the state so that Terraform stops managing it and the incident fix stays."
+      - "Apply the plan as it is, without discussion: Terraform's code always wins, and the incident is over."
+      - "Decide whether 300 is still needed: if so, change the code; if not, apply knowingly."
+    answer: 3
+    feedback:
+      - "The plan says the opposite: `300 -> 60` means applying it puts the code's value back."
+      - "Dropping the object from state makes it unmanaged: the next drift will go unnoticed, and the fix is still not recorded anywhere."
+      - "Applying blindly may reintroduce the incident; the change was made for a reason that needs a decision."
+      - "A hand change during an incident is fine if it is back-ported to the code, so the plan is empty; otherwise the next apply silently reverts it."
+    explain: >-
+      Terraform compares its code and state with reality, and the plan shows how it would converge. Incident
+      changes made by hand must be committed or deliberately reverted.
+
+  - id: argocd-hpa-replicas
+    targets: [g.iac, gx.argocd]
+    prompt: >-
+      Argo CD manages the `web` Deployment with automated sync and self-heal. Its manifest in Git sets
+      `replicas: 2`, and an HPA scales it between 2 and 10. Under load the replica count jumps to 6 and straight
+      back to 2. Which change lets the HPA own the count?
+    evidence: |
+      $ oc get hpa web -n shop
+      NAME   REFERENCE        TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+      web    Deployment/web   cpu: 92%/70%   2         10        2          41d
+    choices:
+      - "Drop `replicas` from Git, or ignore `/spec/replicas` and sync with `RespectIgnoreDifferences=true`."
+      - "Disable self-heal permanently, because an HPA cannot work on any Application that heals itself."
+      - "Set `replicas: 10` in Git so that there is always capacity and the HPA never needs to scale up."
+      - "Add `/spec/replicas` to `ignoreDifferences` only; that alone stops Argo CD writing it on a sync."
+    answer: 0
+    feedback:
+      - "One owner per field: the HPA owns `spec.replicas`, so Git must stop asserting it."
+      - "Self-heal is valuable for every other field; the conflict is about one field with two owners."
+      - "That wastes capacity permanently and still fights the HPA whenever it scales down."
+      - "Close, but by default `ignoreDifferences` only affects the diff: on the next sync Argo CD still applies `replicas: 2` as written, unless `RespectIgnoreDifferences=true` is set."
+    explain: >-
+      Two controllers writing the same field fight forever. With GitOps and an HPA, leave replicas out of Git (or
+      make Argo CD respect the ignored field during sync).
+
+  - id: tekton-emptydir-workspace
+    targets: [n.cicd]
+    prompt: >-
+      In this pipeline, the `clone` Task writes the repository into the `source` workspace and the `build` Task,
+      which runs after it, reads it. `clone` succeeds; `build` fails because the directory is empty. Why?
+    evidence: |
+      apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: build-
+      spec:
+        pipelineRef:
+          name: build-and-push
+        workspaces:
+        - name: source
+          emptyDir: {}
+    choices:
+      - "`build` must also declare `runAfter: [clone]` in the PipelineRun itself, or Tekton clears the workspace."
+      - "Workspaces are read-only by default, so `clone` silently wrote nothing; mark the workspace writable."
+      - "Each Task has its own pod, and an emptyDir dies with it: use a PVC."
+      - "Tekton empties every workspace between Tasks for security; persist files with Task results instead."
+    answer: 2
+    feedback:
+      - "Ordering is declared in the Pipeline and the build did run after the clone; the data never left the clone's pod."
+      - "Workspaces are writable unless declared `readOnly`; the clone did write, into a volume that disappeared with its pod."
+      - "EmptyDir is fine for sharing between the steps of one Task; between Tasks you need a volume that outlives the pod, such as a PVC from a volumeClaimTemplate."
+      - "Tekton does not wipe workspaces; and results are for small values, not a source tree."
+    explain: >-
+      A Task's steps share one pod; a Pipeline's Tasks are separate pods. Data passed between Tasks needs a
+      persistent workspace, usually a volumeClaimTemplate per run.
+
+  - id: supplychain-unsigned-pull
+    targets: [n.supply-chain]
+    prompt: >-
+      A ClusterImagePolicy covers `quay.corp.example/payments`. A hotfix image was built on a laptop and pushed by
+      hand, outside the pipeline that signs images. What happened, and what is the right fix?
+    evidence: |
+      $ oc describe pod api-7c4f-9mkdz -n payments
+      ...
+      Events:
+        Type     Reason   Age   From     Message
+        ----     ------   ----  ----     -------
+        Warning  Failed   12s   kubelet  Failed to pull image "quay.corp.example/payments/api:1.8.1": SignatureValidationFailed: Source image rejected: A signature was required, but no signature exists
+    choices:
+      - "Quay refused the push of an unsigned image; push it again with the pipeline's robot account instead."
+      - "CRI-O on the node refused the unsigned image: build and sign the hotfix through the normal pipeline."
+      - "Admission rejected the Deployment: lift the policy for the duration of the hotfix, then restore it."
+      - "ACS found a vulnerability and blocked the container at runtime: rerun the scan and redeploy it."
+    answer: 1
+    feedback:
+      - "The pull reached the registry and found an image; what is missing is a signature, checked on the node."
+      - "Signature verification happens when the node pulls the image. The fast path for a hotfix is the signing pipeline, not an exception to the policy."
+      - "The pod exists and the kubelet tried to pull: the object was admitted. The refusal comes from the node."
+      - "The message is about a missing signature, not a vulnerability; signatures prove origin, scans judge content."
+    explain: >-
+      With a ClusterImagePolicy, CRI-O verifies signatures before running an image in scope; unsigned images fail to
+      pull. Keep hotfixes on the signed path.
+
+  # ---------------------------------------------------------------- p4-enterprise
+  - id: ha-stretched-quorum
+    targets: [i.ha-architecture]
+    prompt: >-
+      A cluster is stretched over two data centres: control-plane nodes master-0 and master-1 in DC-A, master-2 in
+      DC-B, workers in both. DC-A loses power. What is the state of the cluster right after?
+    choices:
+      - "Healthy: master-2 becomes the etcd leader and the API keeps serving reads and writes on its own."
+      - "Paused for 300 seconds, then the surviving member is promoted automatically and writes resume."
+      - "Down everywhere: the DC-B workers stop their pods at once, since they can no longer reach the API."
+      - "Below quorum (1 of 3): the API is read-only or offline, but running DC-B pods keep running."
+    answer: 3
+    feedback:
+      - "etcd needs a majority, 2 of 3, to elect a leader and accept writes; one member alone has no quorum."
+      - "The 300 seconds are the pods' tolerations for unreachable nodes; etcd quorum is never restored by a timer."
+      - "The kubelet keeps running containers it already has, even without the API; it simply cannot receive changes."
+      - "Placing the majority of control-plane nodes in one site makes that site a single point of failure; recovery then needs the documented quorum procedure."
+    explain: >-
+      etcd survives the loss of a minority of members only. A topology that puts two of three members in one failure
+      domain loses quorum with that domain.
+
+  - id: dr-crash-consistent-db
+    targets: [e.stateful-dr]
+    prompt: >-
+      OADP takes nightly CSI snapshots of a busy PostgreSQL volume, without hooks. In a restore drill, the database
+      starts with recovery errors and some tables are unusable. What does this point to, and what fixes it?
+    choices:
+      - "Crash-consistent snapshots: quiesce the database with backup hooks, or use its own backups off-cluster."
+      - "A restore ordering bug: Velero restored pods before their claims, so restore the claims by hand first."
+      - "CSI snapshots cannot hold databases: switch to File System Backup, which copies the files consistently."
+      - "A newer PostgreSQL image in the drill cluster: pin the image tag and the corruption will disappear."
+    answer: 0
+    feedback:
+      - "A snapshot of a running database is like pulling the plug. Hooks make it application-consistent; the database's own tools are often more reliable still."
+      - "Velero restores claims before pods by design; ordering does not corrupt tables."
+      - "File-level copies of a live database can be worse: files copied at different moments may never form a valid state."
+      - "An image change could break startup, but recovery errors on the data itself point at how the data was captured."
+    explain: >-
+      Backups of live databases need quiescing (Velero pre and post hooks) or the database's own backup method. Test
+      restores, not just backups.
+
+  - id: velero-restore-existing
+    targets: [e.stateful-dr, i.day2-backup]
+    prompt: >-
+      The `web` Deployment and its ConfigMap in `shop` were damaged. You restored last night's OADP backup of `shop`
+      without deleting anything. The Restore is Completed, but the application is unchanged. What happened, and
+      what do you do?
+    evidence: |
+      Phase:  Completed
+      Warnings:
+        Velero:     <none>
+        Cluster:    <none>
+        Namespaces:
+          shop:  could not restore, ConfigMap "web-config" already exists. Warning: the in-cluster version is different than the backed-up version
+                 could not restore, Deployment "web" already exists. Warning: the in-cluster version is different than the backed-up version
+    choices:
+      - "The backup was empty: check the BackupStorageLocation, take a fresh backup and restore from that."
+      - "Velero restores only volume data by default: list Deployments and ConfigMaps in `includedResources`."
+      - "Existing objects are skipped: delete them, restore into a mapped namespace, or use `existingResourcePolicy`."
+      - "Completed only means queued: the operator applies the restored objects at its next hourly reconcile."
+    answer: 2
+    feedback:
+      - "The warnings name the very objects you wanted, so they are in the backup."
+      - "By default a restore includes every resource in the backup; the warnings show the objects were found and skipped."
+      - "Restores are non-destructive by default. Restoring beside the original with a namespace mapping is the safest way to compare first."
+      - "Completed is a final phase; there is no later reconciliation that applies skipped objects."
+    explain: >-
+      Velero never overwrites existing objects unless asked. Read a restore's warnings as carefully as its phase.
+
+  - id: day2-namespace-deleted
+    targets: [i.day2-backup, e.stateful-dr]
+    prompt: >-
+      At 10:00 someone deleted the namespace `billing`. The API and every ClusterOperator are healthy. You have a
+      02:00 etcd backup, the manifests in Git (Argo CD), and nightly OADP backups of `billing`. What is the right
+      recovery?
+    choices:
+      - "Restore the cluster to its 02:00 state from the etcd backup: the only way to get everything back exactly."
+      - "Re-sync the definitions from Git with Argo CD and restore the data from OADP; leave etcd untouched."
+      - "Run the quorum-restore script on one control-plane node to recover the deleted objects from local data."
+      - "Recreate the namespace with the same name: deleted objects are kept for 24 hours and re-link to it."
+    answer: 1
+    feedback:
+      - "A restore to a previous cluster state rolls every object in the cluster back to 02:00 and is a last resort; with a healthy API it is the wrong tool."
+      - "Choose the smallest recovery: Git for definitions, application backups for data."
+      - "quorum-restore rebuilds a lost etcd quorum; it does not undo a deletion that the healthy cluster has already committed."
+      - "Kubernetes has no recycle bin: deleted objects are gone, whatever name the new namespace has."
+    explain: >-
+      Use the smallest tool that repairs the damage. etcd restores are for losing the control plane's state, not for
+      one deleted application.
+
+  - id: secrets-base64-encryption
+    targets: [f.secrets-supplychain]
+    prompt: >-
+      Etcd encryption is enabled. A developer who holds the `edit` role in `shop` runs the second command. What does
+      the output give them?
+    evidence: |
+      $ oc get apiserver cluster -o jsonpath='{.spec.encryption.type}{"\n"}'
+      aesgcm
+      $ oc get secret db-creds -n shop -o jsonpath='{.data.password}'
+      UzNjcjN0LVBAc3M=
+    choices:
+      - "Nothing usable: with aesgcm enabled, the API returns ciphertext that only the key holder can decrypt."
+      - "A one-way hash of the password, which is safe to share because it cannot be turned back into it."
+      - "Nothing yet: `edit` cannot read Secrets, so this output proves that a binding is misconfigured."
+      - "The password, merely base64-encoded: encryption at rest protects etcd's disks and backups, not API reads."
+    answer: 3
+    feedback:
+      - "The API server decrypts transparently for every request that RBAC allows; encryption only protects what is stored."
+      - "Base64 is an encoding, not a hash: this decodes to `S3cr3t-P@ss` in one command."
+      - "`edit` and `admin` can read Secrets in their namespace; `view` cannot."
+      - "Who can read a Secret is a question of RBAC (and of who can create pods or exec into them), not of etcd encryption."
+    explain: >-
+      Secret data is base64. RBAC decides who reads it through the API; etcd encryption protects disks and backups.
+      Check every path to a Secret, not only `get secrets`.
+
+  - id: multicluster-which-product
+    targets: [i.multicluster]
+    prompt: >-
+      A critical vulnerability is published for a widely used library. Security asks, within the hour: which running
+      deployments, on which of the 30 production clusters, use an image that contains it? Which product answers that
+      directly?
+    choices:
+      - "ACM governance: an inform policy reports which clusters are non-compliant for that library."
+      - "Quay alone: its scanner lists the affected images in the registry, which is what is running."
+      - "ACS: it scans images and knows which deployments on each secured cluster run each of them."
+      - "OpenShift Logging: search every cluster's container logs for the library name and version."
+    answer: 2
+    feedback:
+      - "ACM policies check cluster configuration against a desired state; they do not inventory image contents."
+      - "The registry knows what is stored, not what runs where; old images may run long after a new push."
+      - "Linking image vulnerabilities to running deployments across secured clusters is what ACS is for."
+      - "Applications rarely log their library versions; logs are the wrong inventory."
+    explain: >-
+      ACM manages and governs the fleet, ACS answers "is what we run secure?", Quay stores and scans images. Each
+      answers a different question.
+
+  - id: policy-webhook-down
+    targets: [n.policy-governance]
+    prompt: >-
+      Since this morning's node maintenance, creating or updating almost anything in application namespaces fails
+      like this. What is happening?
+    evidence: |
+      $ oc create configmap test --from-literal=a=b -n shop
+      error: failed to create configmap: Internal error occurred: failed calling webhook "validate.kyverno.svc-fail": failed to call webhook: Post "https://kyverno-svc.kyverno.svc:443/validate/fail?timeout=10s": no endpoints available for service "kyverno-svc"
+    choices:
+      - "The engine's pods are down and its webhook fails closed: restore it, exclude platform namespaces, run it HA."
+      - "A new policy denies ConfigMaps in every namespace: find that policy and switch it to audit mode first."
+      - "The API server lost its serving certificates during the maintenance, so it now rejects every write."
+      - "The `shop` namespace reached its object-count quota: raise the ResourceQuota on ConfigMaps there."
+    answer: 0
+    feedback:
+      - "`no endpoints available` means no engine pod is running; with `failurePolicy: Fail`, the API refuses what it cannot check."
+      - "A denial would quote the policy's message; this error says the webhook could not be called at all."
+      - "The API answered with an error from a webhook call; its own certificates are working."
+      - "A quota refusal says `exceeded quota`; this message names a webhook."
+    explain: >-
+      An admission webhook that fails closed turns its own outage into a cluster-wide outage for the requests it
+      matches. Run it highly available and keep platform namespaces out of its scope.
+
+  - id: platform-team-bypass
+    targets: [i.platform-team]
+    prompt: >-
+      Six months after the platform team published a mandatory pipeline template, a survey finds that seven of
+      twelve teams run their own pipelines instead. What is the most useful reading?
+    choices:
+      - "The seven teams lack discipline: enforce the template with a policy that rejects images built elsewhere."
+      - "Pipelines are each team's own business: drop the template, since a platform should not hold opinions."
+      - "The template is fine and the teams have not heard of it: send another announcement and a deadline."
+      - "Treat it as product feedback: find what the template lacks, improve it, keep exceptions possible."
+    answer: 3
+    feedback:
+      - "Enforcement without understanding drives workarounds underground and loses the teams' trust."
+      - "Dropping the paved road throws away the guardrails it carries; the goal is a road teams choose."
+      - "A majority of teams bypassing it is a signal about the template, not about the newsletter."
+      - "A platform is a product: adoption is evidence, and a documented exception path keeps legitimate needs visible."
+    explain: >-
+      Paved roads work when they are the easiest safe path. Low adoption is feedback; guardrails go in the platform,
+      and deviations go through a reviewed path.

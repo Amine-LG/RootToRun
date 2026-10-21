@@ -1,0 +1,1510 @@
+# Kubernetes path (start track), written as teaching flows; recorded with kubectl on a cluster as the learner.
+- id: f0.objects-api
+  title: "Objects, YAML and the API"
+  subtitle: "What a manifest is made of, desired and observed state, and asking the cluster about its own fields"
+  module: f0-prereqs
+  mode: REAL_LAB
+  minutes: 25
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local as an ordinary user, in a temporary namespace; every command and object here is plain Kubernetes."
+  concepts: [k8s.architecture, k8s.labels, k8s.ownerrefs]
+  prerequisites: [a.what-kubernetes-does]
+  labs: [lab.cli-tour]
+  record_on: cluster
+  objective: |
+    Read and write a manifest (apiVersion, kind, metadata, spec), tell the desired state you write from the
+    status the cluster writes, look up any field with kubectl explain, read a YAML error, and follow the
+    owners from a pod up to its Deployment.
+  flow:
+    - kind: ask
+      id: recall-deployment
+      prompt: "A look back. Where do you change the number of copies of an application so that it lasts?"
+      recalls: a.what-kubernetes-does
+      choices:
+        - text: "In its Deployment"
+          why: "The Deployment holds the desired state; its controller creates or removes pods to match."
+        - text: "By starting more pods with `kubectl run`"
+          why: "Those pods would not belong to the Deployment, and nothing would replace them."
+        - text: "By deleting pods until enough come back"
+          why: "The controller recreates pods up to the Deployment's number, which deleting pods never changes."
+      answer: 0
+    - kind: teach
+      id: objects
+      title: "Everything is an object"
+      body: |
+        In [the last lesson](/lesson/a.what-kubernetes-does) you created a Deployment with one command. Behind it, the cluster stored an
+        **object**: a record with a type and a name, kept by the API. Pods, Deployments, Services, and everything
+        else you will meet, are objects of different **kinds**.
+
+        Commands like `kubectl create deployment` are shortcuts. The usual way is to write the object in a file,
+        a **manifest**, and send it with `kubectl apply -f`. Files can be reviewed, versioned and applied again.
+        Manifests are written in **YAML**. This is not the image manifest of the registry lessons, which lists an
+        image's layers: in Kubernetes, a manifest is a file describing objects.
+
+        YAML describes nested fields by indentation. A small excerpt first: the Deployment's `metadata` contains a
+        `name` and a `labels` field, and `labels` contains one label, `app` with the value `web`.
+    - kind: show
+      id: nesting-excerpt
+      caption: "an excerpt of a manifest"
+      code: |
+        metadata:
+          name: web
+          labels:
+            app: web
+    - kind: show
+      id: manifest
+      body: "Here is a Deployment like the one you created, written as a manifest. It is `web.yaml`, one of this lesson's source files (**Before you start**), with the two broken files used later; save them in a folder and run the commands there:"
+      run: "cat web.yaml"
+      highlight: ["apiVersion", "kind", "metadata", "spec"]
+      notice: |
+        Four top-level fields, the same for almost every kind:
+
+        - `apiVersion`: which version of the API describes this kind (`apps/v1`: the group `apps`, version `v1`);
+        - `kind`: the type of object;
+        - `metadata`: its identity, here its name and labels;
+        - `spec`: the desired state, what you want.
+
+        Inside `spec` the next steps look at two things: `replicas`, how many pods you want, and `template`, which
+        describes those pods.
+
+        The file names no namespace, so `kubectl apply` puts the object in the current namespace of your
+        connection; `-n NAME` chooses another. A name is unique only within one kind and one namespace: another
+        namespace can hold its own Deployment `web`.
+    - kind: teach
+      id: yaml
+      title: "YAML in three rules"
+      body: |
+        1. `key: value` on a line is one field, and **indentation is structure**: a line indented under another
+           belongs to it. Use spaces only, never tabs.
+        2. A line starting with `- ` is an item of a list. `containers:` is a list, which is why the container
+           starts with `-`.
+        3. The colon needs a space after it: `replicas: 2`, not `replicas:2`.
+
+        So `spec.template.spec.containers` is a path: the `containers` list inside the pod template's `spec`.
+    - kind: ask
+      id: read-yaml
+      prompt: "In this manifest, which field does the line `image: registry.access.redhat.com/ubi9/httpd-24:latest` belong to?"
+      choices:
+        - text: "The first container in `containers`"
+          why: "It is indented under the item that starts with `- name: web`, so it belongs to that container."
+        - text: "The Deployment's `metadata`"
+          why: "`metadata` is at the top of the file. The image is several levels deeper, under the pod template's containers."
+        - text: "The Deployment's `spec`, directly"
+          why: "It is inside `spec`, but deeper: `spec.template.spec.containers[0].image`. Indentation tells you exactly where."
+      answer: 0
+      evidence: |
+        spec:
+          template:
+            spec:
+              containers:
+                - name: web
+                  image: registry.access.redhat.com/ubi9/httpd-24:latest
+    - kind: teach
+      id: template
+      title: "The template and the repeated label"
+      body: |
+        The `template` is the description copied into each new pod: the Deployment keeps `replicas: 2` pods, and
+        every one of them is made from this template, with its container image under `template.spec.containers`.
+        (The `spec` inside `template` is the pod's spec; the outer `spec` is the Deployment's.)
+
+        The label `app: web` appears three times because each copy has a different job. The one in the
+        Deployment's `metadata` labels the Deployment itself. The one in `template.metadata` is put on every pod
+        the template creates. `selector.matchLabels` tells the Deployment which pods count as its own, so it must
+        match the pods' labels. You will read the selector's documentation in a moment.
+    - kind: try
+      id: apply
+      body: "Create the Deployment from the file `web.yaml`."
+      accept: ["kubectl apply -f web.yaml", "kubectl apply -f ./web.yaml", "kubectl create -f web.yaml", "kubectl apply --filename web.yaml", "kubectl apply --filename=web.yaml"]
+      hints:
+        - match: "^kubectl apply web\\.yaml"
+          say: "`apply` needs `-f` before the file name: `-f` stands for file."
+        - match: "^kubectl create deployment"
+          say: "That would create a Deployment from options, ignoring the file. The task is to send the manifest itself."
+        - match: "^oc "
+          say: "This lesson is about Kubernetes, so it uses `kubectl`. (OpenShift's own client has the same subcommand.)"
+      hint: "`kubectl apply`, `-f`, then the file name."
+      run: "kubectl apply -f web.yaml"
+      then: "`created`: the API stored the object, and the Deployment's controller started creating its pods."
+    - kind: teach
+      id: status
+      title: "What you write, and what the cluster writes"
+      body: |
+        Read the object back and it has more than you wrote. Next to your `spec`, the cluster keeps a
+        **`status`**: what the controller actually observed. You write `spec`; controllers write `status`.
+        Comparing the two is how you see whether reality has caught up with what you asked for.
+
+        `-o yaml` prints the whole stored object. The recording shows only its `status` part:
+    - kind: show
+      id: status-show
+      run: "kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get deployment web -o yaml | sed -n '/^status:/,$p'"
+      highlight: ["readyReplicas"]
+      notice: |
+        `replicas: 2` and `readyReplicas: 2`: the controller observed two pods, both ready. `conditions` explain
+        the state in words (`Available`, `Progressing`). None of this was in your file.
+    - kind: ask
+      id: which-to-edit
+      prompt: "You want 3 replicas. Which part of the Deployment do you change?"
+      choices:
+        - text: "`spec.replicas`, in the manifest"
+          why: "`spec` is the desired state. Apply the changed manifest and the controller makes `status` follow."
+        - text: "`status.replicas`, to tell the cluster"
+          why: "`status` is written by the controller from what it observes. Changing it would not create a pod, and the controller would overwrite it."
+        - text: "`metadata.labels`, with a count"
+          why: "Labels are tags for finding objects. The number of copies is part of the desired state, in `spec`."
+      answer: 0
+    - kind: teach
+      id: explain
+      title: "Asking the cluster about a field"
+      body: |
+        Nobody remembers every field of every kind. The cluster knows them all: `kubectl explain` prints the
+        documentation of a kind or of one field, straight from the API, for this cluster's version. Use a path
+        with dots to go deeper:
+    - kind: show
+      id: explain-replicas
+      run: "kubectl explain deployment.spec.replicas"
+      notice: "The field's type (`integer`), and what it means, including its default of 1."
+    - kind: try
+      id: try-explain
+      body: "Your Deployment file also has a `selector` field inside `spec`, next to `replicas`. Ask the cluster what it is for."
+      accept: ["kubectl explain deployment.spec.selector", "kubectl explain deployments.spec.selector", "kubectl explain deploy.spec.selector"]
+      hints:
+        - match: "^kubectl explain selector"
+          say: "`explain` needs the full path from the kind: `deployment.spec.selector`."
+        - match: "^kubectl explain deployment\\.selector"
+          say: "`selector` is inside `spec`: `deployment.spec.selector`."
+        - match: "^kubectl get"
+          say: "`get` shows objects; `explain` shows the documentation of their fields."
+      hint: "`kubectl explain`, then the path from the kind down to the field, joined with dots."
+      run: "kubectl explain deployment.spec.selector"
+      then: |
+        The selector says which pods belong to the Deployment: the ones whose labels match. That is why the pod
+        template carries the label `app: web` in your file.
+    - kind: teach
+      id: errors
+      title: "When a manifest is wrong"
+      body: |
+        These two broken single-object files, `broken-tab.yaml` and `broken-field.yaml` from the source files, are
+        refused before their object is created, and the message usually
+        says where to look. (With several objects in one file, check the result of each one: applying a file is
+        not an all-or-nothing transaction.) Two classics. First, a tab character used for indentation, which YAML
+        forbids:
+    - kind: show
+      id: tab-error
+      run: "kubectl apply -f broken-tab.yaml"
+      notice: |
+        "found character that cannot start any token" points at the line with the tab (line 6 here). Tabs are
+        invisible in most editors; `cat -A broken-tab.yaml` would show each one as `^I`.
+    - kind: show
+      id: field-error
+      body: "Second, a field that does not exist at that place, here `replica` instead of `replicas`:"
+      run: "kubectl apply -f broken-field.yaml"
+      notice: |
+        The API refuses an unknown field and names it, with its path: `spec.replica`. A field indented one level
+        too far gives the same kind of error, because it ends up under the wrong parent.
+
+        Notice where each error comes from. `error: error parsing …` in the previous step was `kubectl` itself:
+        the file was not valid YAML, so nothing reached the cluster. `Error from server (BadRequest)` means the API
+        server received the object and refused it. It refused the unknown field because `kubectl` asks for strict
+        checking by default (`--validate=strict`); with checking switched off, unknown fields are dropped silently.
+    - kind: ask
+      id: read-error
+      prompt: "`kubectl apply` reports `unknown field \"spec.template.spec.image\"`. What is most likely wrong?"
+      choices:
+        - text: "`image` is not indented under its container"
+          why: "`image` belongs to a container, so it should be at `spec.template.spec.containers[0].image`. At the level of the pod's `spec`, the field does not exist."
+        - text: "The image name is misspelled"
+          why: "A wrong image name is accepted by the API and fails later, when the node tries to pull it. This error is about the field's position."
+        - text: "The cluster cannot reach the registry"
+          why: "The API checks the manifest's structure before anything is pulled. This error is about where the field is."
+      answer: 0
+    - kind: teach
+      id: owners
+      title: "Who owns this pod?"
+      body: |
+        Objects can **own** other objects. A Deployment does not create pods directly: it creates a
+        **ReplicaSet**, and the ReplicaSet creates the pods. Each owned object records its owner in
+        `metadata.ownerReferences`. Following those references upwards tells you which object to change: the
+        one at the top.
+    - kind: show
+      id: owner-chain
+      run: "pod=$(kubectl get pods -l app=web -o name | head -n 1); echo \"$pod is owned by: $(kubectl get $pod -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}')\"; kubectl get replicasets"
+      notice: |
+        The recording took the first pod with the label `app=web` and printed its owner: a ReplicaSet whose name
+        is the Deployment's name plus a hash. `kubectl get replicasets` lists it, wanting and having 2 pods. The
+        Deployment owns the ReplicaSet in the same way.
+      understand:
+        purpose: Picks one pod of the application, prints the kind and name of its owner from `metadata.ownerReferences`,
+          then lists the ReplicaSets to compare.
+        parts:
+          - text: pod=$(
+            means: Runs the command inside `$( )` and stores what it prints in the shell variable `pod`.
+          - text: -l app=web
+            means: Only the pods with the label `app=web`.
+          - text: -o name
+            means: Prints each object as `kind/name` (for example `pod/web-…`), a form that later commands accept as is.
+          - text: head -n 1
+            means: 'Keeps the first line: one pod.'
+          - text: '{.metadata.ownerReferences[0].kind}'
+            means: 'A JSONPath expression: the `kind` of the first entry (`[0]`) of the `ownerReferences` list. Text between
+              the expressions, here `/`, is printed as written.'
+        concepts:
+          - k8s.ownerrefs
+          - k8s.labels
+          - linux.shell
+        refs:
+          - title: 'kubectl: JSONPath support'
+            url: https://kubernetes.io/docs/reference/kubectl/jsonpath/
+          - title: 'kubectl: output options'
+            url: https://kubernetes.io/docs/reference/kubectl/#output-options
+          - title: 'Bash manual: Command substitution'
+            url: https://www.gnu.org/software/bash/manual/html_node/Command-Substitution.html
+    - kind: order
+      id: order-owners
+      prompt: "Put the objects in order, from the one you write to the one that runs your container."
+      items:
+        - "Deployment"
+        - "ReplicaSet"
+        - "Pod"
+        - "Container"
+      why: "You write the Deployment; its controller creates a ReplicaSet for the current version; the ReplicaSet creates the pods; each pod runs its containers on a node."
+    - kind: reflect
+      id: explain-spec-status
+      prompt: "Explain to a colleague the difference between `spec` and `status`, using the Deployment from this lesson."
+      model: |
+        `spec` is what I asked for: two replicas of this pod template, written in the manifest. `status` is what
+        the Deployment's controller observed: how many replicas exist and are ready, and conditions such as
+        Available. I change `spec`; the controller works to make `status` match it.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read and write a manifest, apply it, tell `spec` from `status`, look up any field with
+        `kubectl explain`, read the two most common manifest errors, and follow a pod's owners up to its
+        Deployment.
+
+        Next: what the cluster is made of, the components that store these objects, decide where pods run and
+        start their containers.
+  sections:
+    - id: more-api
+      title: "Groups, versions, and the rest of the API"
+      depth: true
+      body: |
+        - `kubectl api-resources` lists every kind the cluster serves, with its short name (`deploy`, `po`),
+          API group and whether it is namespaced. Kinds of the original core group, such as Pod, Service and
+          ConfigMap, have no group: their `apiVersion` is just `v1`.
+        - A kind's identity is its group, version and kind. An object's identity over time is its `uid`:
+          delete an object and create another with the same name and it is a different object.
+        - Several objects can live in one file, separated by a line containing only `---`. If one of them is
+          rejected, the others can still be created, so read the result line of each object.
+        - Values that look like numbers or booleans (`8080`, `true`, `0755`) are read as such; fields that
+          must be strings, such as environment variable values, need quotes: `value: "true"`.
+        - Deleting an owner deletes what it owns (garbage collection) unless you ask otherwise with
+          `kubectl delete … --cascade=orphan`.
+        - OpenShift serves the same API, plus its own groups (`route.openshift.io`, `project.openshift.io`…),
+          covered in the lesson From kubectl to oc.
+  review:
+    - q: "What are the four top-level fields of most manifests?"
+      a: "`apiVersion`, `kind`, `metadata` and `spec` (the cluster adds `status`)."
+    - q: "Who writes `spec`, and who writes `status`?"
+      a: "You write `spec` (the desired state); controllers write `status` (what they observe)."
+    - q: "How do you see the documentation of a field on your cluster?"
+      a: "`kubectl explain <kind>.<path>`, for example `kubectl explain deployment.spec.replicas`."
+    - q: "Which object owns a Deployment's pods directly?"
+      a: "A ReplicaSet, which the Deployment owns in turn."
+  commands:
+    - cmd: "cat web.yaml"
+      meaning: "a Deployment manifest"
+    - cmd: "kubectl apply -f web.yaml"
+      meaning: "the object is stored"
+    - cmd: "kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get deployment web -o yaml | sed -n '/^status:/,$p'"
+      meaning: "the status the controller wrote"
+    - cmd: "kubectl explain deployment.spec.replicas"
+      meaning: "documentation of one field"
+    - cmd: "kubectl explain deployment.spec.selector"
+      meaning: "documentation of the selector"
+    - cmd: "kubectl apply -f broken-tab.yaml"
+      expect: fail
+      meaning: "a tab in the indentation"
+    - cmd: "kubectl apply -f broken-field.yaml"
+      expect: fail
+      meaning: "a field that does not exist"
+    - cmd: "pod=$(kubectl get pods -l app=web -o name | head -n 1); echo \"$pod is owned by: $(kubectl get $pod -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}')\"; kubectl get replicasets"
+      meaning: "a pod's owner is a ReplicaSet"
+  files:
+    web.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+        labels:
+          app: web
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+              - name: web
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+    broken-tab.yaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n\tmode: production\n"
+    broken-field.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: broken
+      spec:
+        replica: 2
+        selector:
+          matchLabels:
+            app: broken
+        template:
+          metadata:
+            labels:
+              app: broken
+          spec:
+            containers:
+              - name: web
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+  references:
+    - {title: "Kubernetes documentation: Objects in Kubernetes", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/"}
+    - {title: "Kubernetes documentation: Labels and selectors", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/"}
+    - {title: "Kubernetes documentation: Owners and dependents", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/"}
+    - {title: "kubectl reference: kubectl explain", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_explain/"}
+    - {title: "kubectl reference: kubectl apply (--validate)", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_apply/"}
+    - {title: "YAML 1.2 specification: indentation (no tabs)", url: "https://yaml.org/spec/1.2.2/#61-indentation-spaces"}
+
+- id: b.architecture
+  title: "What a cluster is made of"
+  subtitle: "The API, the stored state, the controllers, the scheduler and the agent on each node"
+  module: f2-kubernetes
+  mode: REAL_LAB
+  minutes: 22
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local (one machine acting as control plane and worker) as an ordinary user, in a temporary namespace."
+  concepts: [k8s.architecture, k8s.controllers, k8s.etcd]
+  prerequisites: [f0.objects-api]
+  labs: [lab.cluster-health]
+  record_on: cluster
+  objective: |
+    Name the parts of a cluster and what each does, follow a pod from your command to a running container,
+    read which component acted from a pod's events, and say which part to suspect when a step fails.
+  flow:
+    - kind: ask
+      id: recall-status
+      prompt: "A look back. Who writes a Deployment's `status`?"
+      recalls: f0.objects-api
+      choices:
+        - text: "Its controller, from what it observes"
+          why: "You write `spec`; controllers write `status`, describing what they actually see."
+        - text: "You, in the manifest"
+          why: "Your manifest holds `spec`, the desired state. `status` is filled in by the cluster."
+        - text: "kubectl, when it applies the file"
+          why: "kubectl only sends your manifest to the API. The controller writes `status` afterwards."
+      answer: 0
+    - kind: teach
+      id: two-halves
+      title: "Two halves: deciding and doing"
+      body: |
+        So far the cluster has been a black box that keeps what you ask for. Inside, it has two halves.
+
+        The **control plane** is the set of components that decide: they store every object, and run the
+        controllers that compare `spec` with reality. The **nodes** are the machines where containers actually
+        run. Larger deployments often put the control plane on three dedicated nodes; smaller clusters can combine
+        the roles. The practice cluster in these recordings, OpenShift Local, combines them on one machine.
+
+        Knowing which part does what tells you where to look when something does not happen.
+    - kind: teach
+      id: api-etcd
+      title: "The API server and etcd"
+      body: |
+        Every request, from `kubectl`, a web console or a controller, goes to one place: the **API server**. It
+        checks who you are and whether you are allowed, validates the object, and stores it.
+
+        It stores objects in **etcd**, a database that keeps the cluster's whole state and copies it to several
+        machines so that losing one does not lose it. Nothing but the API server talks to etcd. Everything else
+        talks to the API server.
+    - kind: teach
+      id: controllers
+      title: "Controllers, and the scheduler"
+      body: |
+        **Controllers** are the loops you met in the first Kubernetes lesson. Each one watches some kinds of
+        objects through the API server and acts when `spec` and reality differ: the Deployment controller
+        creates ReplicaSets, the ReplicaSet controller creates pods. They run together on the control plane, in
+        a process called the controller manager.
+
+        A new pod has no machine yet. The **scheduler** is a controller with one job: for each pod without a
+        node, pick a node that has room for it and meets its requirements, and record that choice.
+
+        "Room" means room for the pod's **requests**: the CPU and memory its containers declare they need. The
+        scheduler adds up the requests of the pods on a node, not what they actually use, so a node can be
+        refused while nearly idle. [Requests, limits, QoS and quotas](/lesson/b.resources-qos) covers them later.
+    - kind: teach
+      id: kubelet
+      title: "The kubelet: the cluster's agent on each node"
+      body: |
+        On every node runs the **kubelet**. It watches for pods assigned to its node and makes them real: it asks
+        the **container runtime** on the node (CRI-O on OpenShift, containerd on many other clusters) to pull
+        the image and start the containers, the same way Podman did on your workstation. Then it keeps reporting
+        the pod's state back to the API server.
+    - kind: order
+      id: order-start
+      prompt: "You run `kubectl run web --image=…`. Put what happens next in order."
+      items:
+        - "The API server checks the request and stores the pod in etcd"
+        - "The scheduler picks a node and records it on the pod"
+        - "The kubelet on that node sees a pod assigned to it"
+        - "The container runtime pulls the image and starts the container"
+        - "The kubelet reports the pod as Running"
+      why: "Every step is a component reacting to a change it watched through the API server: stored, scheduled, noticed by the node, started, reported."
+    - kind: explore
+      id: diagram
+      diagram: control-loop
+      body: "The same journey for a Deployment, which adds two controllers at the start. Select each part to read what it does."
+    - kind: teach
+      id: evidence
+      title: "Watching the components work"
+      body: |
+        The commands here run as `developer`, an ordinary user who administers only their own namespace. With this
+        account, we cannot inspect the control-plane processes, but we can read their traces. Each
+        component records **events** about what it did to an object, with its own name as the source. Here a
+        pod is created, and its events listed:
+    - kind: show
+      id: events
+      run: "kubectl run web --image=registry.access.redhat.com/ubi9/httpd-24:latest >/dev/null; kubectl wait --for=condition=Ready pod/web --timeout=180s >/dev/null; kubectl get events --field-selector involvedObject.name=web -o custom-columns=SOURCE:.source.component,REPORTER:.reportingComponent,REASON:.reason"
+      highlight: ["default-scheduler", "Started"]
+      notice: |
+        Each event names the component that recorded it. `REPORTER` holds the name for every event;
+        `SOURCE` is an older field, which the scheduler no longer fills in, hence `<none>` on its line.
+        `default-scheduler` assigned the pod to a node (`Scheduled`); `multus` attached its network interface
+        (Multus is how OpenShift calls its network plugins, which follow a standard called CNI, the Container
+        Network Interface; the default plugin is OVN-Kubernetes); the `kubelet` pulled
+        the image, created and started the container. (`-o custom-columns` only chose which fields to print; the
+        full messages are in `kubectl describe pod web`.)
+      understand:
+        purpose: Creates a single pod, waits until it is ready, then lists the project's events about objects named `web`,
+          in three chosen columns. The `;` between the commands means the list is printed even if the wait fails.
+        parts:
+          - text: kubectl run web --image=
+            means: Creates one pod called `web` from that image (no Deployment).
+          - text: '>/dev/null'
+            means: Throws away the command's normal output, to keep the recording short. Errors still appear.
+          - text: kubectl wait --for=condition=Ready pod/web --timeout=180s
+            means: Returns as soon as the pod's `Ready` condition is true, or fails after 180 seconds.
+          - text: --field-selector involvedObject.name=web
+            means: The API server returns only the events whose `involvedObject.name`, the name of the object the event
+              is about, is `web`. Any kind of object with that name matches, including an earlier pod called `web`.
+          - text: -o custom-columns=SOURCE:.source.component,REPORTER:.reportingComponent,REASON:.reason
+            means: 'A table with your own columns: each `HEADER:.field.path` pair, separated by commas, names a column
+              and the field shown in it.'
+        concepts:
+          - obs.signals
+          - k8s.architecture
+        refs:
+          - title: 'kubectl: custom columns'
+            url: https://kubernetes.io/docs/reference/kubectl/#custom-columns
+          - title: 'Kubernetes: Field selectors'
+            url: https://kubernetes.io/docs/concepts/overview/working-with-objects/field-selectors/
+          - title: kubectl wait
+            url: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_wait/
+    - kind: teach
+      id: describe-pod
+      title: "The whole report: kubectl describe"
+      body: |
+        The same events also appear at the end of `kubectl describe pod web`, a long report on one pod that you
+        will use constantly once applications misbehave. Three parts matter most at first: each container's
+        **State** (and, after a restart, its **Last State**, which says how the previous run ended, with its exit
+        code), the pod's **Conditions**, and the **Events**. The next excerpt is from a later lesson's recording of
+        an ordinary web pod; the rest of the report can wait.
+    - kind: show
+      id: describe-excerpt
+      origin: lab
+      caption: "Excerpt of `oc describe pods -l app=web`, recorded in the lesson Health probes (OpenShift's client; `kubectl describe` prints the same report)"
+      code: |
+        State:          Running
+          Started:      Fri, 16 Oct 2026 16:02:59 +0000
+        Ready:          True
+        Restart Count:  0
+        ...
+        Conditions:
+          Type                        Status
+          PodReadyToStartContainers   True
+          Initialized                 True
+          Ready                       True
+          ContainersReady             True
+          PodScheduled                True
+        ...
+        Events:
+          Type     Reason          Age                 From               Message
+          ----     ------          ----                ----               -------
+          Normal   Scheduled       2m                  default-scheduler  Successfully assigned academy-lesson-b-health-probes/web-77746978cd-lm8mg to crc
+          Normal   AddedInterface  2m                  multus             Add eth0 [10.217.0.92/23] from ovn-kubernetes
+      notice: |
+        `State: Running` with `Restart Count: 0`: the container started once and still runs; a container that
+        had crashed would also show a `Last State: Terminated` block with its `Exit Code`, the Linux exit status
+        you already know. `Conditions` lists the pod's milestones, scheduled to ready. `Events` names the
+        component in `From`, as in the table above. [Why is my application not working?](/lesson/o1.troubleshooting)
+        builds its method on these three parts.
+    - kind: ask
+      id: who-pending
+      prompt: "A pod stays `Pending`, and its only event says `0/3 nodes are available: 3 Insufficient memory`. Which component reported this?"
+      choices:
+        - text: "The scheduler: no node had room"
+          why: "Choosing a node is the scheduler's job, and this message is its explanation: every node lacks the memory the pod requests."
+        - text: "The kubelet on each node"
+          why: "No kubelet is involved yet: a pod reaches a kubelet only after the scheduler has assigned it to a node."
+        - text: "The container runtime"
+          why: "The runtime starts containers on a node, which never happened here: the pod was never placed."
+      answer: 0
+    - kind: show
+      id: wide
+      body: "`-o wide` adds the node and the pod's address to the usual list:"
+      run: "kubectl get pod web -o wide"
+      notice: "One node, `crc`, as expected on this one-machine cluster. On a real cluster the column tells you which machine to investigate. `IP` is the pod's own address inside the cluster; `NOMINATED NODE` and `READINESS GATES` can be ignored for now."
+    - kind: show
+      id: nodes-forbidden
+      body: "And the nodes themselves? Still as `developer`, an ordinary user. Expect a refusal: nodes belong to the whole cluster, not to developer's namespace."
+      run: "kubectl get nodes"
+      notice: |
+        Refused: this account cannot list nodes, because nodes belong to the whole cluster and the cluster's access
+        rules decide who may read them. Other accounts may have read access. That is a permission, not a
+        limitation of `kubectl`. You will meet the administrator's view in the OpenShift administration part of
+        the course.
+    - kind: ask
+      id: who-pull
+      prompt: "A pod shows `ImagePullBackOff`, with events like this example. Which component reports the failed pull?"
+      evidence: |
+        Warning  Failed   kubelet  Failed to pull image "quay.io/acme/web:9.9": manifest unknown
+        Warning  Failed   kubelet  Error: ErrImagePull
+        Normal   BackOff  kubelet  Back-off pulling image "quay.io/acme/web:9.9"
+      choices:
+        - text: "The kubelet"
+          why: "It asked the container runtime to pull the image and reports the failure as events. The cause is usually in the input (a wrong tag, bad credentials, an unreachable registry), not a broken kubelet."
+        - text: "The scheduler"
+          why: "Scheduling succeeded: the pod has a node. Pulling the image happens afterwards, on that node."
+        - text: "The API server"
+          why: "The API server stores and serves objects; it does not pull images. Images come from a registry, pulled by the node's runtime."
+      answer: 0
+    - kind: reflect
+      id: explain-parts
+      prompt: "Explain to a colleague, in a few sentences, what happens between `kubectl run` and a running container, naming the components."
+      model: |
+        kubectl sends the pod to the API server, which checks it and stores it in etcd. The scheduler sees a pod
+        without a node and assigns one. The kubelet on that node sees the assignment and asks the container
+        runtime to pull the image and start the container, then reports the pod's status back through the API
+        server. Each step can be seen in the pod's events.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can name the parts of a cluster, follow a pod from your command to a running container, read which
+        component acted from a pod's events, and tell a scheduling problem from a problem on the node.
+
+        Next: the loop at the centre of all this, reconciliation, and why a change made in the wrong place does
+        not last.
+  sections:
+    - id: ha
+      title: "Three control-plane machines, and leader election"
+      depth: true
+      body: |
+        - etcd needs a majority of its members (a quorum) to accept writes: with three members it survives the
+          loss of one; with four, still only one; with five, two. Hence three or five.
+        - Several copies of the scheduler and controller manager run, but only one of each acts at a time, the
+          **leader**; the others take over if it stops. The API server runs on every control-plane machine
+          behind a load balancer.
+        - If the API server is down, running containers keep running: the kubelet restarts them locally. What
+          stops is anything that needs a decision: new pods, scaling, replacing pods on a failed node.
+  review:
+    - q: "What does the API server do, and what is etcd?"
+      a: "The API server receives, checks and stores every request; it is the only component that talks to etcd, the database holding the cluster's state."
+    - q: "What does the scheduler do?"
+      a: "It assigns each new pod to a node that has room for it and meets its requirements."
+    - q: "What does the kubelet do?"
+      a: "On each node, it starts the containers of the pods assigned to that node (through the container runtime) and reports their status."
+    - q: "How can an ordinary user see which component acted on a pod?"
+      a: "In the pod's events: the reporting component (`REPORTER`, or `From` in `kubectl describe`) names the scheduler, the kubelet and others."
+  commands:
+    - cmd: "kubectl run web --image=registry.access.redhat.com/ubi9/httpd-24:latest >/dev/null; kubectl wait --for=condition=Ready pod/web --timeout=180s >/dev/null; kubectl get events --field-selector involvedObject.name=web -o custom-columns=SOURCE:.source.component,REPORTER:.reportingComponent,REASON:.reason"
+      meaning: "the components that acted on a new pod, from its events"
+    - cmd: "kubectl get pod web -o wide"
+      meaning: "the pod's node and address"
+    - cmd: "kubectl get nodes"
+      expect: fail
+      meaning: "an ordinary user may not list nodes"
+  references:
+    - {title: "Kubernetes documentation: Cluster architecture", url: "https://kubernetes.io/docs/concepts/architecture/"}
+    - {title: "Kubernetes documentation: Kubernetes components", url: "https://kubernetes.io/docs/concepts/overview/components/"}
+    - {title: "Kubernetes documentation: Kubernetes scheduler", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/"}
+    - {title: "Kubernetes documentation: how pods with resource requests are scheduled", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"}
+    - {title: "Kubernetes documentation: Operating etcd clusters (quorum)", url: "https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/"}
+    - {title: "kubectl reference: kubectl get events", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_events/"}
+
+- id: b.reconciliation
+  title: "Why your change did not stick"
+  subtitle: "Reconciliation: controllers keep putting the declared state back"
+  module: f2-kubernetes
+  mode: REAL_LAB
+  minutes: 22
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local as an ordinary user, in a temporary namespace; every command here is plain Kubernetes."
+  concepts: [k8s.controllers, k8s.ownerrefs, k8s.replicaset]
+  prerequisites: [b.architecture]
+  labs: [lab.deployment-reconciliation]
+  simulator: reconcile
+  record_on: cluster
+  objective: |
+    Predict what a controller does when you change an object it owns, make a change at the level where it lasts,
+    and use labels to take a pod out of its ReplicaSet without deleting it.
+  flow:
+    - kind: ask
+      id: recall-chain
+      prompt: "A look back. Which object creates a Deployment's pods directly?"
+      recalls: f0.objects-api
+      choices:
+        - text: "A ReplicaSet"
+          why: "The Deployment creates a ReplicaSet, and the ReplicaSet creates the pods."
+        - text: "The Deployment itself"
+          why: "The Deployment works through a ReplicaSet, which it owns; the ReplicaSet creates the pods."
+        - text: "The scheduler"
+          why: "The scheduler assigns pods to nodes. Creating them is the ReplicaSet controller's job."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "A change that disappears"
+      body: |
+        Sooner or later everyone working with Kubernetes changes something, sees it take effect, and finds it
+        undone a moment later. It feels like a bug. It is the design you met in the first Kubernetes lesson,
+        seen from the other side: a controller keeps making reality match a description, so a change made to the
+        thing it controls, rather than to the description, is reversed.
+
+        This lesson provokes that on purpose, twice, so that the next time it happens to you it is evidence,
+        not a mystery.
+    - kind: teach
+      id: loop
+      title: "The loop"
+      body: |
+        Every controller runs the same loop, forever:
+
+        1. read the desired state (the `spec` of the objects it watches);
+        2. read the actual state;
+        3. act to reduce the difference;
+        4. write what it observed into `status`.
+
+        It works from the *current* state each time, not from a list of past changes. A controller that missed
+        an event, or restarted, looks again and acts on what it sees.
+    - kind: show
+      id: setup
+      body: "A Deployment with 2 replicas, and the ReplicaSet it created:"
+      run: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 >/dev/null; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get replicasets"
+      notice: "One ReplicaSet, owned by the Deployment, wanting (`DESIRED`) and having 2 pods."
+    - kind: ask
+      id: guess-scale-rs
+      guess: true
+      prompt: "You scale that ReplicaSet directly to 5. A few seconds later, how many pods does it want?"
+      choices:
+        - text: "5: you set it explicitly"
+          why: "The ReplicaSet accepts the change, and starts creating pods. Watch who else is looking, in the next step."
+        - text: "2: the Deployment puts it back"
+          why: "See the next step."
+        - text: "7: the old and the new number add up"
+          why: "Replica counts are never added: each controller sets one number. The next step shows which number wins."
+      answer: 1
+    - kind: show
+      id: scale-rs
+      body: "The command finds the ReplicaSet by its label (`rs` is the short name of `replicasets`), scales it to 5, waits five seconds and lists the ReplicaSets again:"
+      run: "rs=$(kubectl get rs -l app=web -o name); kubectl scale $rs --replicas=5; sleep 5; kubectl get replicasets"
+      notice: |
+        `scaled`: the ReplicaSet accepted 5. Five seconds later it wants 2 again. The Deployment owns the
+        ReplicaSet, and the Deployment's controller saw a ReplicaSet whose `replicas` did not match the
+        Deployment's 2, so it changed it back. The extra pods, if any had started, were removed.
+    - kind: teach
+      id: change-the-top
+      title: "Change the object at the top"
+      body: |
+        Change the Deployment's replica count to change how many pods it maintains: that is the object you
+        declared yourself, and its number is carried down to the ReplicaSet. Changing an existing pod does not update
+        the template for future pods. A controller only corrects the differences it is designed to manage: here, the
+        ReplicaSet's replica count and the number of pods. It does not copy every field of the template back onto
+        pods that already exist, as the question at the end of this lesson shows.
+    - kind: try
+      id: try-scale
+      body: "Make the application run 3 pods, in a way that lasts."
+      accept:
+        - "kubectl scale deployment web --replicas=3"
+        - "kubectl scale --replicas=3 deployment web"
+        - "kubectl scale deployment web --replicas 3"
+        - "kubectl scale --replicas 3 deployment web"
+        - "kubectl scale deployment/web --replicas=3"
+        - "kubectl scale --replicas=3 deployment/web"
+        - "kubectl scale deployment/web --replicas 3"
+        - "kubectl scale --replicas 3 deployment/web"
+        - "kubectl scale deploy web --replicas=3"
+        - "kubectl scale --replicas=3 deploy web"
+        - "kubectl scale deploy web --replicas 3"
+        - "kubectl scale --replicas 3 deploy web"
+        - "kubectl scale deploy/web --replicas=3"
+        - "kubectl scale --replicas=3 deploy/web"
+        - "kubectl scale deploy/web --replicas 3"
+        - "kubectl scale --replicas 3 deploy/web"
+        - "kubectl scale deployments web --replicas=3"
+        - "kubectl scale --replicas=3 deployments web"
+        - "kubectl scale deployments web --replicas 3"
+        - "kubectl scale --replicas 3 deployments web"
+        - "kubectl scale deployments/web --replicas=3"
+        - "kubectl scale --replicas=3 deployments/web"
+        - "kubectl scale deployments/web --replicas 3"
+        - "kubectl scale --replicas 3 deployments/web"
+      hints:
+        - match: "kubectl scale (rs|replicaset)"
+          say: "That is the change you saw undone. Scale the object at the top, the Deployment."
+        - match: "^kubectl run"
+          say: "A pod created on its own would not belong to the Deployment, and nothing would replace it. Change the Deployment's number of replicas."
+        - match: "^kubectl scale( --replicas[ =]3)?$"
+          say: "`kubectl scale` needs the object to scale: `deployment web`."
+        - match: "^kubectl scale (deployment|deploy)[ /]web$"
+          say: "The number is missing: add `--replicas=3` (or `--replicas 3`), the number of pods you want."
+      hint: "`kubectl scale`, the Deployment (`deployment web`), and `--replicas=3`."
+      run: "kubectl scale deployment web --replicas=3; sleep 5; kubectl get deployment web; kubectl get replicasets"
+      then: "The Deployment wants 3, and it carried the number down: its ReplicaSet now wants 3 too. `READY 2/3` reads ready/desired: five seconds after the change, the third pod was still starting. That is progress, not a failure; `kubectl rollout status` waits until it is done."
+    - kind: teach
+      id: labels
+      title: "How a ReplicaSet counts its pods"
+      body: |
+        A ReplicaSet maintains the pods that it controls and that match its **selector** (here the labels
+        `app=web`, plus a hash for the version). The pods it controls are the ones whose `ownerReferences` name it,
+        as you saw in [Objects, YAML and the API](/lesson/f0.objects-api). It can also adopt matching pods that
+        have no controller. Each time, it counts them: if it counts fewer than it wants, it creates more; if more,
+        it deletes some.
+
+        That gives you a useful trick, and a trap. Change a pod's label so that it no longer matches, and the
+        ReplicaSet no longer counts it.
+    - kind: ask
+      id: guess-relabel
+      guess: true
+      prompt: "You change one pod's label from `app=web` to `app=debug`. What happens?"
+      choices:
+        - text: "The ReplicaSet deletes that pod at once"
+          why: "It can only delete pods it counts as its own, and it no longer counts this one. See the next step."
+        - text: "A replacement appears; the old one stays"
+          why: "See the next step."
+        - text: "Nothing happens: labels are only decoration"
+          why: "Labels are how controllers find their pods. Changing one changes what the ReplicaSet counts, as the next step shows."
+      answer: 1
+    - kind: show
+      id: relabel
+      run: "pod=$(kubectl get pods -l app=web --no-headers | awk '$3==\"Running\"{print \"pod/\"$1; exit}'); kubectl label $pod app=debug --overwrite; sleep 5; kubectl get pods -L app | grep -v Terminating; echo \"owner of the debug pod: [$(kubectl get pods -l app=debug -o jsonpath='{.items[0].metadata.ownerReferences[0].name}')]\""
+      highlight: ["debug"]
+      notice: |
+        The relabelled pod is still running, now with `APP` `debug`, and the last line shows that its owner
+        reference is empty: the ReplicaSet released it. A new `web` pod was created a few seconds ago (the
+        ReplicaSet counted 2 matching pods where it wanted 3 and closed the gap). Pods still terminating from the
+        earlier experiment are filtered out of the list.
+
+        Here the pod stops matching this ReplicaSet and is replaced. A **Service**, the object that gives a set of
+        pods one stable address and sends traffic to the pods its label selector matches, behaves the same way: if
+        one selects `app=web`, it stops sending traffic to this pod. Engineers use this on purpose: keep a misbehaving pod running to investigate
+        while the controller replaces it. The pod must then be deleted by hand.
+      understand:
+        purpose: Picks one running `web` pod, changes its `app` label to `debug`, waits five seconds, lists the pods with
+          their `app` label, and prints the name of the debug pod's owner.
+        parts:
+          - text: --no-headers
+            means: Leaves out the line of column titles, so the next command sees only pod lines.
+          - text: awk '$3=="Running"{print "pod/"$1; exit}'
+            means: 'For each line whose third column (`STATUS`) is `Running`, prints `pod/` followed by the first column
+              (`NAME`), then stops after the first match: one running pod, in the `kind/name` form kubectl accepts.'
+          - text: --overwrite
+            means: Allows `kubectl label` to replace a label that already has a value; without it, kubectl refuses to
+              change `app=web`.
+          - text: -L app
+            means: Adds a column showing each pod's value of the label `app`.
+          - text: grep -v Terminating
+            means: Hides the lines that contain `Terminating`, pods still shutting down from the earlier experiment.
+          - text: '{.items[0].metadata.ownerReferences[0].name}'
+            means: 'The name of the first owner of the first pod in the list. The list holds one pod, the one labelled
+              `debug`; the brackets around the result show an empty value as `[]`.'
+        mistakes:
+          - 'Using `kubectl label` without `--overwrite` on an existing key: the command fails and the pod keeps its
+            label.'
+        concepts:
+          - k8s.labels
+          - k8s.ownerrefs
+          - k8s.replicaset
+        refs:
+          - title: 'kubectl reference: kubectl label'
+            url: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_label/
+          - title: 'kubectl reference: kubectl get (--no-headers, -L)'
+            url: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/
+          - title: 'kubectl: JSONPath support'
+            url: https://kubernetes.io/docs/reference/kubectl/jsonpath/
+          - title: 'GNU awk manual: patterns and actions'
+            url: https://www.gnu.org/software/gawk/manual/html_node/Pattern-Overview.html
+    - kind: explore
+      id: model
+      sim: reconcile
+      body: "Try the same experiments in the model: change the Deployment, the ReplicaSet or a pod, and watch which controller reacts."
+    - kind: ask
+      id: transfer
+      prompt: "Someone fixed a production bug by changing the image field of one pod with `kubectl edit pod`. Why will the fix not last?"
+      choices:
+        - text: "The next replacement pod uses the Deployment's image"
+          why: "Pods come from the Deployment's template. When this pod is deleted or lost with its node, its replacement has the old image; a container restart inside the same pod is different and creates no new pod. The fix belongs in the Deployment."
+        - text: "Pods cannot have their image changed"
+          why: "A running pod's container image can be changed in place. The problem is that the change is not in the Deployment, so new pods do not have it."
+        - text: "The ReplicaSet reverts the image at once"
+          why: "ReplicaSets count pods; they do not compare pod contents with the template. The change stays on that pod until it is replaced, then disappears."
+      answer: 0
+    - kind: reflect
+      id: explain-revert
+      prompt: "Explain to a colleague why scaling a ReplicaSet by hand did not last, and what they should have done."
+      model: |
+        The ReplicaSet is owned by a Deployment, and the Deployment's controller keeps the ReplicaSet's replica
+        count equal to the Deployment's. Scaling the ReplicaSet created a difference, which the controller
+        corrected within seconds. The change has to be made on the Deployment, the object at the top, with
+        `kubectl scale deployment web --replicas=…` or by changing `replicas` in its manifest.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can predict when a change will be undone, make it at the level where it lasts, and use labels to
+        take a pod out of a ReplicaSet for investigation.
+
+        Next: the other kinds of controllers, each keeping a different promise: one pod per node, work that
+        runs to completion, work on a schedule, pods with a stable identity.
+  sections:
+    - id: more-reconciliation
+      title: "generation, observedGeneration and conflicts"
+      depth: true
+      body: |
+        - `metadata.generation` increases each time an object's `spec` changes. `status.observedGeneration` is
+          the generation the controller last acted on. While they differ, the status describes an older
+          version: wait (`kubectl rollout status` does) before reading it.
+        - `metadata.resourceVersion` changes on every write. A client that replaces a whole object sends the
+          version it read; if someone else wrote in between, the API answers `409 Conflict` and the client must
+          re-read and retry. `kubectl apply`, `scale` and `patch` send only a change, so they rarely conflict.
+        - Controllers are level-triggered: they act on the current state, not on events, which makes them
+          robust to missed events and restarts.
+  review:
+    - q: "Why does scaling a Deployment's ReplicaSet by hand not last?"
+      a: "The Deployment owns it, and its controller sets the ReplicaSet's replicas back to the Deployment's number."
+    - q: "Where do you make a change so that it lasts?"
+      a: "On the object nobody owns, the one you declared: for a Deployment's pods, the Deployment."
+    - q: "How does a ReplicaSet know which pods are its own?"
+      a: "It maintains the pods it controls (named in their `ownerReferences`) that match its selector, and can adopt matching pods that have no controller."
+    - q: "What happens when you change a pod's label so it no longer matches its ReplicaSet?"
+      a: "The ReplicaSet creates a replacement; the relabelled pod keeps running, no longer owned by the ReplicaSet, until you delete it."
+  commands:
+    - cmd: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 >/dev/null; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get replicasets"
+      meaning: "a Deployment and its ReplicaSet"
+    - cmd: "rs=$(kubectl get rs -l app=web -o name); kubectl scale $rs --replicas=5; sleep 5; kubectl get replicasets"
+      meaning: "the ReplicaSet scaled by hand goes back to 2"
+    - cmd: "kubectl scale deployment web --replicas=3; sleep 5; kubectl get deployment web; kubectl get replicasets"
+      meaning: "scaling the Deployment lasts"
+    - cmd: "pod=$(kubectl get pods -l app=web --no-headers | awk '$3==\"Running\"{print \"pod/\"$1; exit}'); kubectl label $pod app=debug --overwrite; sleep 5; kubectl get pods -L app | grep -v Terminating; echo \"owner of the debug pod: [$(kubectl get pods -l app=debug -o jsonpath='{.items[0].metadata.ownerReferences[0].name}')]\""
+      meaning: "a relabelled pod leaves its ReplicaSet, which replaces it"
+  references:
+    - {title: "Kubernetes documentation: Controllers", url: "https://kubernetes.io/docs/concepts/architecture/controller/"}
+    - {title: "Kubernetes documentation: ReplicaSet", url: "https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/"}
+    - {title: "Kubernetes documentation: Deployments", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"}
+    - {title: "Kubernetes documentation: Owners and dependents", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/"}
+
+- id: b.workloads
+  title: "Choosing the right kind of workload"
+  subtitle: "Deployments, Jobs, CronJobs, DaemonSets and StatefulSets: five controllers, five promises"
+  module: f2-kubernetes
+  mode: REAL_LAB
+  minutes: 22
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local (a single node) as an ordinary user, in a temporary namespace; every command here is plain Kubernetes."
+  concepts: [k8s.workloads, k8s.labels]
+  prerequisites: [b.reconciliation]
+  labs: [lab.deployment-reconciliation]
+  record_on: cluster
+  objective: |
+    Say what each workload controller promises, run a Job and a CronJob and read their results, see the stable
+    names a StatefulSet gives its pods, and choose the right kind for a given piece of work.
+  flow:
+    - kind: ask
+      id: recall-top
+      prompt: "A look back. Where do you change a Deployment's image so that every future pod gets it?"
+      recalls: b.reconciliation
+      choices:
+        - text: "In the Deployment's pod template"
+          why: "New pods are created from the Deployment's template; changing it there is the change that lasts."
+        - text: "In each running pod"
+          why: "A pod changed by hand keeps the change only until it is replaced; new pods come from the template."
+        - text: "In the ReplicaSet"
+          why: "The Deployment owns its ReplicaSets and manages them; change the object at the top."
+      answer: 0
+    - kind: teach
+      id: promises
+      title: "Each controller keeps one promise"
+      body: |
+        A Deployment promises: "N interchangeable copies of this pod, always running". That fits a web server.
+        It fits badly for other work: a database migration that must finish and stop, a report every night,
+        a monitoring agent that must run on every machine, or a database whose copies are not interchangeable.
+
+        Kubernetes has a controller for each of those promises. They all create pods from a template, as a
+        Deployment does; what differs is the rule they enforce.
+    - kind: teach
+      id: job
+      title: "Work that finishes: Job"
+      body: |
+        A **Job** runs pods until a task has completed successfully, then stops. If the task fails, it retries,
+        up to a limit. A Deployment would restart a program that exits, forever; a Job considers an exit with
+        status 0 a success and is done.
+
+        A Job does not promise that the work runs exactly once. Kubernetes can occasionally start the same program
+        twice, and a retry repeats whatever the failed attempt had already done. Work given to a Job must be safe
+        to run again.
+    - kind: show
+      id: job-run
+      body: "`kubectl create job` names the Job and its image; everything after `--` is the command its container runs, as everything after the image name was for `podman run` in [Running a service with Podman](/lesson/ct.podman-run):"
+      run: "kubectl create job report --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo report: 42 orders processed' >/dev/null; kubectl wait --for=condition=Complete job/report --timeout=180s >/dev/null; kubectl get jobs; kubectl get pods -l job-name=report"
+      notice: |
+        The Job shows `Complete` with `1/1` completions; its pod is `Completed`, with 0 restarts. Nothing will
+        restart it: that is the promise kept. The pod is kept, finished, so that its logs can still be read.
+        Its `READY 0/1` is normal: the column counts containers that are running and ready, and this one has
+        finished.
+    - kind: ask
+      id: retry-safe
+      prompt: "A migration Job fails after adding one of its two columns, and the Job retries it. What must the migration be designed for?"
+      choices:
+        - text: "Running again safely after partial work"
+          why: "A retry starts the program again, and the first attempt's side effects remain, so the migration must cope with its own half-finished work."
+        - text: "Running exactly once, as a Job promises"
+          why: "A Job does not promise exactly once: it retries failures, and Kubernetes can occasionally start the same program twice."
+        - text: "Never failing, because Jobs do not retry"
+          why: "A Job does retry a failed task, up to its limit (`backoffLimit`, 6 by default)."
+      answer: 0
+    - kind: show
+      id: logs-pod
+      body: "The program's output is in the logs of the Job's pod: `kubectl logs` is the cluster's `podman logs`. Here the pod is named explicitly, looked up by the label `job-name=report` that the Job controller puts on its pods:"
+      run: "kubectl logs $(kubectl get pods -l job-name=report -o name)"
+    - kind: show
+      id: logs-job
+      body: "`kubectl logs job/report` is shorter: `job/` followed by the Job's name makes kubectl find the Job's pod itself."
+      run: "kubectl logs job/report"
+      notice: "The same line. The slash form, `TYPE/NAME`, also works for `deployment/web` and others."
+    - kind: show
+      id: audit-setup
+      body: "A second Job, `audit`, runs the same way:"
+      run: "kubectl create job audit --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo audit: 7 findings' >/dev/null; kubectl wait --for=condition=Complete job/audit --timeout=180s >/dev/null; kubectl get jobs audit"
+    - kind: try
+      id: try-job-logs
+      body: "Read what the program of the Job `audit` printed, naming the Job rather than its pod."
+      accept: ["kubectl logs job/audit", "kubectl logs jobs/audit", "kubectl logs job.batch/audit"]
+      hints:
+        - match: "^kubectl logs audit$"
+          say: "`audit` is the Job, not a pod. Write `job/audit` and kubectl finds its pod for you."
+        - match: "^kubectl logs job/report"
+          say: "That is the first Job. The task is about `audit`."
+        - match: "^kubectl get"
+          say: "`get` shows the state; the program's output is in the logs: `kubectl logs`."
+      hint: "`kubectl logs`, then `job/` and the Job's name."
+      run: "kubectl logs job/audit"
+    - kind: teach
+      id: cronjob
+      title: "Work on a schedule: CronJob"
+      body: |
+        A **CronJob** creates a Job on a schedule, written like a Linux crontab line: minute, hour, day of
+        month, month, day of week. `*/1 * * * *` means every minute, and `0 2 * * *` every night at 02:00. The
+        recording creates one that runs every minute and looks a little over a minute later:
+    - kind: show
+      id: cronjob-run
+      run: "kubectl create cronjob tick --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --schedule='*/1 * * * *' -- date >/dev/null; sleep 75; kubectl get cronjobs; kubectl get jobs"
+      notice: |
+        The CronJob shows its schedule and when it last ran (`LAST SCHEDULE`). `kubectl get jobs` lists the Job
+        that run created, named after the CronJob plus a number derived from its scheduled time, next to the
+        `report` and `audit` Jobs from before. Each run is an ordinary Job, with an ordinary pod.
+    - kind: ask
+      id: which-schedule
+      prompt: "Which schedule runs a CronJob at 02:30 every night?"
+      choices:
+        - text: "`30 2 * * *`"
+          why: "Minute first, then hour: minute 30 of hour 2, every day of every month."
+        - text: "`2 30 * * *`"
+          why: "The first field is the minute and the second the hour; hour 30 does not exist."
+        - text: "`*/30 2 * * *`"
+          why: "`*/30` in the minute field means every 30 minutes, so this runs at 02:00 and at 02:30."
+      answer: 0
+    - kind: teach
+      id: daemonset
+      title: "One pod on every machine: DaemonSet"
+      body: |
+        A **DaemonSet** runs one copy of a pod on every node (or on every node of a chosen kind). When a node
+        joins the cluster, it gets its pod; when a node leaves, the pod goes with it. It is the kind for agents
+        that serve or watch their own machine: log collectors, monitoring agents, network plugins.
+
+        The count is not yours to choose: it aims at one pod per eligible node. Which nodes are eligible depends
+        on node selectors, taints, permissions and scheduling, so the number is not always the number of nodes.
+        This cluster has one node, so it can show at most one pod. The recording applies this manifest,
+        `daemonset.yaml` from the lesson's source files, and reads its counts:
+    - kind: show
+      id: daemonset-manifest
+      caption: "daemonset.yaml"
+      code: |
+        apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: agent
+        spec:
+          selector:
+            matchLabels:
+              app: agent
+          template:
+            metadata:
+              labels:
+                app: agent
+            spec:
+              containers:
+                - name: agent
+                  image: registry.access.redhat.com/ubi9/httpd-24:latest
+      notice: "The same shape as a Deployment, with a selector and a pod template, but no `replicas`. The image is the ordinary web server of the earlier lessons, standing in for a real node agent."
+    - kind: show
+      id: daemonset-run
+      run: "kubectl apply -f daemonset.yaml >/dev/null; kubectl rollout status daemonset/agent --timeout=180s >/dev/null; kubectl get daemonset agent"
+      notice: "`DESIRED`, `CURRENT` and `READY` are 1: this cluster has one eligible node, so the DaemonSet wants one pod, has one, and it is ready. The count follows the nodes, not a number you write; the manifest has no `replicas` field."
+    - kind: teach
+      id: statefulset
+      title: "Copies that are not interchangeable: StatefulSet"
+      body: |
+        A Deployment's pods are interchangeable, with random names. Some software cares which copy is which: in a
+        database cluster, one member is the primary and each keeps its own data. A **StatefulSet** gives each pod
+        a stable name with a number (`db-0`, `db-1`), creates them in order, and can give each one its own
+        storage that stays with that name when the pod is replaced.
+    - kind: ask
+      id: daemonset-count
+      prompt: "A DaemonSet is created on a cluster with 4 eligible nodes. How many pods does it want?"
+      choices:
+        - text: "4, one per eligible node"
+          why: "The DaemonSet controller aims at one pod on every eligible node."
+        - text: "1, like a Deployment's default"
+          why: "A Deployment's default of 1 replica is its own setting; a DaemonSet has no replica count, and its number follows the nodes."
+        - text: "The number in `replicas`"
+          why: "A DaemonSet has no `replicas` field: the number of eligible nodes decides the count."
+      answer: 0
+    - kind: show
+      id: sts-manifest
+      body: "The manifest has two objects. Read the StatefulSet's template, and then the Service above it. (A **Service** gives a set of pods, chosen by their labels, a stable network name; Services have their own lesson later.)"
+      run: "cat statefulset.yaml"
+      highlight: ["serviceName", "clusterIP: None", "replicas"]
+      notice: |
+        The StatefulSet looks like a Deployment, plus `serviceName: db`. That name points at the first object, a
+        **headless Service** (`clusterIP: None`): a Service without a single address in front of the pods. It
+        exists so that each pod of the StatefulSet gets its own stable DNS name. The image here is an ordinary web
+        server named `db`: this example shows stable identities only. It configures no storage and no database
+        replication.
+    - kind: show
+      id: sts
+      body: "Applying it, with two replicas:"
+      run: "kubectl apply -f statefulset.yaml >/dev/null; kubectl rollout status statefulset/db --timeout=180s >/dev/null; kubectl get pods -l app=db"
+      notice: "`db-0` and `db-1`: numbered, not random, and created in that order."
+    - kind: ask
+      id: guess-sts-delete
+      guess: true
+      prompt: "You delete the pod `db-0`. What is its replacement called?"
+      choices:
+        - text: "`db-0`, the same name"
+          why: "See the next step."
+        - text: "`db-2`, the next number"
+          why: "That would make sense for a counter, but a StatefulSet keeps identities, not a counter. The next step shows it."
+        - text: "A random name, like a Deployment's"
+          why: "Random names are what Deployments give. The next step shows what a StatefulSet does."
+      answer: 0
+    - kind: show
+      id: sts-replace
+      run: "kubectl delete pod db-0 >/dev/null; sleep 3; kubectl wait --for=condition=Ready pod/db-0 --timeout=180s >/dev/null; kubectl get pods -l app=db"
+      notice: "A new `db-0`, only a few seconds old, next to the untouched `db-1`. Same name, new pod: with its own storage, it would also find its own data again."
+    - kind: ask
+      id: decide
+      prompt: "A report must be produced every night at 02:00 and then stop. Which kind fits?"
+      choices:
+        - text: "A CronJob"
+          why: "It creates a Job on a schedule, and each Job runs the report to completion."
+        - text: "A Deployment"
+          why: "A Deployment keeps its pods running, so it would restart the report as soon as it finished, at the wrong times."
+        - text: "A StatefulSet"
+          why: "A StatefulSet is for copies with their own identity, and it also keeps pods running; the report has neither need."
+      answer: 0
+    - kind: ask
+      id: decide-agent
+      prompt: "A log collector must run one copy on every node of the cluster. Which kind fits?"
+      choices:
+        - text: "A DaemonSet"
+          why: "It aims at one pod per eligible node, and follows nodes as they join or leave."
+        - text: "A Deployment with many replicas"
+          why: "A Deployment spreads its replicas wherever there is room, so a node can get two copies or none."
+        - text: "A Job"
+          why: "A Job runs until it completes and stops; a collector must keep running on each node."
+      answer: 0
+    - kind: ask
+      id: decide-identity
+      prompt: "Three database members each need their own name and their own storage. Which kind fits?"
+      choices:
+        - text: "A StatefulSet"
+          why: "It gives each pod a stable numbered name, and can give each its own storage that follows the name."
+        - text: "A Deployment"
+          why: "Its pods are interchangeable and get random names; a replacement does not inherit an identity."
+        - text: "A DaemonSet"
+          why: "A DaemonSet is about nodes, one pod each, not about identities or storage."
+      answer: 0
+    - kind: ask
+      id: transfer
+      prompt: "A database schema migration must finish before the new version of the application starts. Which kind runs the migration itself?"
+      choices:
+        - text: "A Job"
+          why: "It runs the work to successful completion and retries on failure. Make the migration safe to retry, and have your release procedure wait for the Job to complete: a Job alone does not delay the application."
+        - text: "A Deployment with 1 replica"
+          why: "When the migration exits, the Deployment restarts it, again and again: a Deployment's promise is to keep a program running."
+        - text: "A CronJob"
+          why: "There is no schedule here: the work is needed once, at one moment in the release, not repeatedly."
+      answer: 0
+    - kind: reflect
+      id: explain-kinds
+      prompt: "Explain to a colleague why a nightly report should not run in a Deployment."
+      model: |
+        A Deployment promises to keep its pods running, so when the report program finishes and exits, it is
+        restarted, over and over, and runs at the wrong times. A CronJob creates a Job at the scheduled time;
+        the Job runs the report to completion, retries only on failure, and stops when it succeeds.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can say what each workload controller promises, run and read a Job and a CronJob, recognise a
+        StatefulSet's stable names, and choose a kind by matching the work to the promise.
+
+        Next: custom resources and operators, the way Kubernetes is extended with new kinds of objects, which
+        is also how OpenShift is built.
+  sections:
+    - id: more-workloads
+      title: "Details worth knowing"
+      depth: true
+      body: |
+        - A Job's `backoffLimit` (6 by default) limits retries; `ttlSecondsAfterFinished` deletes finished Jobs
+          automatically. A CronJob keeps the last few successful and failed Jobs (3 and 1 by default).
+        - A CronJob's `concurrencyPolicy` decides what happens when a run is still going at the next time:
+          `Allow` (the default) starts another, `Forbid` skips, `Replace` stops the old one. Its schedule uses the
+          time zone of the controller unless `spec.timeZone` is set.
+        - A StatefulSet needs a headless Service (`clusterIP: None`) for the stable DNS names
+          (`db-0.db.<namespace>.svc`), and creates one PersistentVolumeClaim per pod from its
+          `volumeClaimTemplates`. Claims are retained by default, including across replacement of a failed pod; a
+          configured `persistentVolumeClaimRetentionPolicy` can delete them on scale-down or when the StatefulSet
+          is deleted (see the StatefulSet documentation, "PersistentVolumeClaim retention").
+        - A DaemonSet's pods often need tolerations to run on control-plane nodes, which are tainted to keep
+          ordinary pods away.
+  review:
+    - q: "What does a Job promise, and a Deployment?"
+      a: "A Job: the task runs until it completes successfully, then stops. A Deployment: N copies always running."
+    - q: "What does the CronJob schedule `0 2 * * *` mean?"
+      a: "Every day at 02:00 (minute 0, hour 2)."
+    - q: "When do you use a DaemonSet?"
+      a: "For a pod that must run on every node, such as a log collector or monitoring agent."
+    - q: "What does a StatefulSet give its pods that a Deployment does not?"
+      a: "Stable names with a number (db-0, db-1), ordered creation, and optionally storage of their own that follows the name."
+  commands:
+    - cmd: "kubectl create job report --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo report: 42 orders processed' >/dev/null; kubectl wait --for=condition=Complete job/report --timeout=180s >/dev/null; kubectl get jobs; kubectl get pods -l job-name=report"
+      meaning: "a Job that completes"
+    - cmd: "kubectl logs $(kubectl get pods -l job-name=report -o name)"
+      meaning: "the Job's output, from its pod named explicitly"
+    - cmd: "kubectl logs job/report"
+      meaning: "what the Job printed, naming the Job"
+    - cmd: "kubectl create job audit --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo audit: 7 findings' >/dev/null; kubectl wait --for=condition=Complete job/audit --timeout=180s >/dev/null; kubectl get jobs audit"
+      meaning: "a second Job that completes"
+    - cmd: "kubectl logs job/audit"
+      meaning: "what the second Job printed"
+    - cmd: "kubectl create cronjob tick --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --schedule='*/1 * * * *' -- date >/dev/null; sleep 75; kubectl get cronjobs; kubectl get jobs"
+      meaning: "a CronJob that has created its first Job"
+    - cmd: "kubectl apply -f daemonset.yaml >/dev/null; kubectl rollout status daemonset/agent --timeout=180s >/dev/null; kubectl get daemonset agent"
+      meaning: "a DaemonSet's desired, current and ready counts"
+    - cmd: "cat statefulset.yaml"
+      meaning: "the StatefulSet and its headless Service"
+    - cmd: "kubectl apply -f statefulset.yaml >/dev/null; kubectl rollout status statefulset/db --timeout=180s >/dev/null; kubectl get pods -l app=db"
+      meaning: "a StatefulSet's numbered pods"
+    - cmd: "kubectl delete pod db-0 >/dev/null; sleep 3; kubectl wait --for=condition=Ready pod/db-0 --timeout=180s >/dev/null; kubectl get pods -l app=db"
+      meaning: "the replacement keeps the name db-0"
+  files:
+    daemonset.yaml: |
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: agent
+      spec:
+        selector:
+          matchLabels:
+            app: agent
+        template:
+          metadata:
+            labels:
+              app: agent
+          spec:
+            containers:
+              - name: agent
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+    statefulset.yaml: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: db
+      spec:
+        clusterIP: None
+        selector:
+          app: db
+        ports:
+          - port: 8080
+      ---
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: db
+      spec:
+        serviceName: db
+        replicas: 2
+        selector:
+          matchLabels:
+            app: db
+        template:
+          metadata:
+            labels:
+              app: db
+          spec:
+            containers:
+              - name: db
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+  references:
+    - {title: "Kubernetes documentation: Workload management", url: "https://kubernetes.io/docs/concepts/workloads/controllers/"}
+    - {title: "Kubernetes documentation: Jobs", url: "https://kubernetes.io/docs/concepts/workloads/controllers/job/"}
+    - {title: "Kubernetes documentation: CronJob", url: "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/"}
+    - {title: "Kubernetes documentation: DaemonSet", url: "https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/"}
+    - {title: "Kubernetes documentation: StatefulSets", url: "https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/"}
+
+- id: b.crds-operators
+  title: "Custom resources and operators"
+  subtitle: "How Kubernetes learns new kinds of objects, and controllers that run software for you"
+  module: f3-openshift
+  mode: REAL_LAB
+  minutes: 20
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local as an ordinary user, in a temporary namespace; the custom kinds shown are the monitoring kinds whose definitions that cluster installs, although it leaves the monitoring components themselves out."
+  concepts: [k8s.crd-operator, k8s.controllers]
+  prerequisites: [b.workloads]
+  labs: [lab.cluster-health]
+  record_on: cluster
+  objective: |
+    Explain what a CustomResourceDefinition adds to the API and why it does nothing on its own, find and read
+    custom kinds as an ordinary user, and describe the operator pattern: a controller that manages an application
+    from a custom resource.
+  flow:
+    - kind: ask
+      id: recall-kinds
+      prompt: "A look back. Which kind runs a task once until it succeeds?"
+      recalls: b.workloads
+      choices:
+        - text: "A Job"
+          why: "A Job runs pods until the task completes, then stops."
+        - text: "A Deployment"
+          why: "A Deployment keeps pods running; a program that exits would be restarted."
+        - text: "A DaemonSet"
+          why: "A DaemonSet keeps one pod on every node, for work tied to machines."
+      answer: 0
+    - kind: teach
+      id: extend
+      title: "New kinds of objects"
+      body: |
+        Pods, Deployments, Jobs: every kind so far was built into Kubernetes. But the API can be extended. A
+        **CustomResourceDefinition** (CRD) adds a new kind, with its own name and fields, and from then on the API
+        server stores objects of that kind like any other: you can `get`, `apply`, `describe` and `delete` them with
+        `kubectl`.
+
+        Installing a CRD affects the whole cluster, so it needs cluster-wide permission, which ordinary users
+        usually do not have. They can still see which custom kinds exist, because the kinds show up in the list the
+        API serves. On this cluster, several belong to the monitoring system (`monitoring.coreos.com`): their definitions are
+        installed even though this small cluster leaves the monitoring components themselves out. (Prometheus, the monitoring system here,
+        collects **metrics**: numbers about running programs, such as requests per second.)
+    - kind: show
+      id: api-resources
+      run: "kubectl api-resources --api-group=monitoring.coreos.com"
+      highlight: ["ServiceMonitor"]
+      notice: "Kinds such as `ServiceMonitor` and `PrometheusRule`, in their own API group, `monitoring.coreos.com`. To kubectl they are ordinary kinds, namespaced like most."
+    - kind: try
+      id: try-explain
+      body: "Show the documentation of the `spec` of a ServiceMonitor, the way you did for Deployments."
+      accept: ["kubectl explain servicemonitor.spec", "kubectl explain servicemonitors.spec", "kubectl explain ServiceMonitor.spec", "kubectl explain servicemonitor.spec --api-version=monitoring.coreos.com/v1"]
+      hints:
+        - match: "^kubectl explain deployment"
+          say: "Same command, different kind: `servicemonitor.spec`."
+        - match: "^kubectl get servicemonitor"
+          say: "`get` lists objects; the documentation of their fields comes from `explain`."
+        - match: "^kubectl explain servicemonitor$"
+          say: "That shows the whole kind. The task asks for its `spec`: add `.spec`."
+      hint: "`kubectl explain`, then the kind's name in lower case, a dot, and `spec`."
+      run: "kubectl explain servicemonitor.spec | head -n 14"
+      then: "The CRD carries a schema, so `kubectl explain` documents custom kinds exactly like built-in ones. This one describes which Services Prometheus should collect metrics from."
+    - kind: ask
+      id: guess-crd-alone
+      guess: true
+      prompt: "An administrator installs a CRD for a kind `Backup`, and you create a `Backup` object. Nothing else is installed. What happens?"
+      choices:
+        - text: "A backup is taken"
+          why: "That is what the kind's name suggests. Read on for what actually acts on objects."
+        - text: "The object is stored, and nothing happens"
+          why: "See the next step."
+        - text: "The API refuses unknown kinds"
+          why: "Once the CRD is installed, the kind is known and the object is accepted. The question is what acts on it."
+      answer: 1
+    - kind: teach
+      id: operator
+      title: "The operator pattern"
+      body: |
+        A CRD only teaches the API a new kind of object: it stores what you write, and that is all. Something must
+        act on it, and you know what that something is: a **controller**, watching objects of that kind and making
+        reality match their `spec`, exactly as the Deployment controller does for Deployments.
+
+        A controller packaged with its CRDs, encoding how to run one piece of software, is called an **operator**.
+        You write "I want a PostgreSQL cluster with 3 members and nightly backups" as a custom resource; the operator
+        creates the StatefulSets, Services and Jobs, and handles upgrades and failures the way an experienced
+        administrator would. Its `status` reports how it is going.
+    - kind: show
+      id: example
+      body: "A ServiceMonitor as a user would write it: it describes which Services to collect metrics from, those labelled `app: web`, on their port named `metrics`. An example to read, not applied here:"
+      code: |
+        apiVersion: monitoring.coreos.com/v1
+        kind: ServiceMonitor
+        metadata:
+          name: web
+        spec:
+          selector:
+            matchLabels:
+              app: web
+          endpoints:
+            - port: metrics
+              interval: 30s
+      caption: "servicemonitor.yaml (example)"
+      origin: example
+      notice: "Same shape as every other object: `apiVersion` (the custom group), `kind`, `metadata`, and a `spec` whose fields the CRD defines. If a Prometheus instance selects this ServiceMonitor, the monitoring operator configures it to collect from the matching Services' `metrics` port. That also needs the right namespace to be watched, a matching Service, and a metrics endpoint that works: creating the object alone does not guarantee collection."
+    - kind: show
+      id: no-crd-access
+      body: "And the definitions themselves? `developer`, the ordinary user who ran the commands above, asks for them. Expect a refusal: CRDs belong to the whole cluster, not to a namespace."
+      run: "kubectl get crd"
+      notice: "Forbidden: this user has no permission to list CRDs. Discovery and `kubectl explain` still work here. Listing definitions and creating them are separate permissions, controlled by the cluster's access rules; using the kinds they define depends on yet other permissions."
+    - kind: ask
+      id: delete-crd
+      prompt: "An administrator deletes the CRD for `Backup` to get rid of one stuck object. What else does that do?"
+      choices:
+        - text: "Deletes every Backup object, in every namespace"
+          why: "The objects live under the kind the CRD defines; remove the definition and the API deletes all of them, cluster-wide."
+        - text: "Nothing else: the CRD holds only the schema"
+          why: "The objects are served through the CRD; without it, they cannot exist, so they are deleted too."
+        - text: "Uninstalls the operator"
+          why: "The operator is a separate workload: deleting a CRD does not uninstall it. It may keep managing its other kinds, or report errors because this API is missing."
+      answer: 0
+    - kind: reflect
+      id: explain-operator
+      prompt: "Explain to a colleague the difference between a CRD and an operator."
+      model: |
+        A CRD adds a new kind of object to the Kubernetes API, with its fields; on its own it only stores those objects.
+        An operator is a controller, usually installed with its CRDs, that watches objects of those kinds and acts on
+        them, creating and managing the real resources, like a Deployment controller for a whole application.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can explain what a CRD adds, find custom kinds and read their documentation as an ordinary user, and
+        describe what an operator does.
+
+        This matters for the next step: OpenShift is Kubernetes with more built on top, and much of what it adds is
+        custom kinds and operators. Next: from Kubernetes to OpenShift, what stays the same and what changes.
+  sections:
+    - id: status-and-conditions
+      title: Reading status and conditions
+      depth: true
+      body: |
+        The spec of a custom resource is your request; its **status** is the operator's answer. Most operators
+        report it in three ways:
+
+        - `status.conditions`: a list of named facts, each with a `type`, a `status` (`True`, `False` or
+          `Unknown`), a machine-readable `reason`, a human `message` and a `lastTransitionTime`.
+        - `status.observedGeneration`: the spec generation the operator last acted on, as for a Deployment.
+        - kind-specific fields that describe what the operator built.
+
+        You have already read conditions on an object of a kind you know: the Deployment in
+        [Objects, YAML and the API](/lesson/f0.objects-api) had `Available` and `Progressing` conditions under its
+        `status`. Custom resources use the same shape.
+
+        Read a condition by its type first, then its status, then its reason and message. The same value means
+        different things for different types: `Available` with `status: True` is good news, while a condition named
+        `Degraded` with `status: False` is also good news, because it says the operator found nothing degraded.
+        OpenShift's cluster operators, which you meet later in the course, report `Available`, `Progressing` and
+        `Degraded` this way.
+
+        To wait for a condition instead of polling, `kubectl wait` takes `--for=condition=<Type>` (or
+        `--for=condition=<Type>=False`), as the incidents do for Deployments.
+    - id: what-goes-wrong
+      title: What goes wrong, and how to investigate
+      depth: true
+      body: '| Symptom | Evidence | Cause | Fix |
+
+        |---|---|---|---|
+
+        | the custom resource is stored but nothing happens | `status` is empty or never changes; no events | no operator
+        watches this kind, or it is not running or not watching this namespace | check the operator''s Deployment and logs,
+        and for OLM operators the CSV phase and OperatorGroup |
+
+        | `kubectl apply` is refused | an error naming the field: unknown field, wrong type, value not allowed | the object
+        does not match the CRD schema | fix the manifest; `kubectl explain` shows the expected fields |
+
+        | a change you made to a generated object is undone | the object''s `ownerReferences` or operator labels | the operator
+        reconciles it | change the custom resource (or the operator''s configuration object) |
+
+        | your change to the custom resource seems ignored | `observedGeneration` lower than `generation`, or a condition
+        that signals trouble (for example `Available` with `status: False`) and a message | the operator has not processed
+        it yet, or rejected it | read each condition''s type, status, reason and message together, and the operator''s
+        events and logs; `Degraded` with `status: False` is usually good news |
+
+        | the custom resource stays `Terminating` | `metadata.finalizers` still lists the operator''s finalizer | the operator
+        must clean up first, and it is down or uninstalled | bring the operator back so it finishes; remove the finalizer
+        by hand only once you know what it protected |
+
+        | every custom resource of a kind vanished | the CRD is gone | the CRD was deleted, which deletes all its objects
+        | restore the CRD and recreate the objects from their source of truth |
+
+        '
+    - id: common-mistakes
+      title: Common mistakes
+      depth: true
+      body: "- **Deleting a CRD to \"clean up\".** Deleting a CustomResourceDefinition deletes every custom resource\n  of\
+        \ that kind, in every namespace.\n- **Editing what an operator manages.** Change the custom resource (or the operator's\
+        \ config object)\n  instead; direct edits to its Deployments or ConfigMaps are reverted at the next reconciliation.\n\
+        - **Assuming uninstalling an operator removes its data.** With OLM, uninstalling an operator leaves its\n  CRDs and\
+        \ custom resources behind; they must be removed deliberately.\n- **Reading a custom resource's `spec` as the truth.**\
+        \ As for any object, `status` and its conditions say\n  what the operator actually achieved.\n- **Stripping finalizers\
+        \ to unblock a deletion.** The object disappears, but whatever the operator was\n  supposed to clean up (volumes,\
+        \ DNS records, cloud resources) may stay behind with nobody tracking it.\n- **Writing `status` in a manifest.** With\
+        \ the status subresource enabled, normal writes ignore the\n  `status` section; only the operator writes it, through\
+        \ `/status`.\n"
+  review:
+    - q: "What does a CustomResourceDefinition do?"
+      a: "It adds a new kind of object to the API; objects of that kind are then stored and managed with kubectl like any other."
+    - q: "What is an operator?"
+      a: "A controller, installed with its CRDs, that watches custom resources and manages the real resources for an application."
+    - q: "How can an ordinary user find the custom kinds on a cluster?"
+      a: "`kubectl api-resources` (optionally `--api-group=…`), then `kubectl explain` for their fields."
+    - q: "What happens to the objects of a kind when its CRD is deleted?"
+      a: "They are all deleted, in every namespace."
+  commands:
+    - cmd: "kubectl api-resources --api-group=monitoring.coreos.com"
+      meaning: "the monitoring.coreos.com kinds, served because their CRDs are installed"
+    - cmd: "kubectl explain servicemonitor.spec | head -n 14"
+      meaning: "a custom kind documented from its CRD"
+    - cmd: "kubectl get crd"
+      expect: fail
+      meaning: "this user has no permission to list CRDs; discovery and explain still work"
+  references:
+    - {title: "Kubernetes documentation: Custom resources", url: "https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/"}
+    - {title: "Kubernetes documentation: Operator pattern", url: "https://kubernetes.io/docs/concepts/extend-kubernetes/operator/"}
+    - {title: "Kubernetes documentation: Extend the API with CustomResourceDefinitions", url: "https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/"}
+    - {title: "Prometheus Operator: ServiceMonitor", url: "https://prometheus-operator.dev/docs/developer/getting-started/"}

@@ -1,0 +1,217 @@
+{
+ "lab": "lab.troubleshooting-tools",
+ "kind": "lab",
+ "lab_hash": "48e2e931d4b28c63",
+ "recorded_at": "2026-10-20T17:00:46+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc get pods -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\napp-54fb6d4866-dvv7c   0/1     Error     0          8s\nweb-7d578f5fb7-xm8gq   1/1     Running   0          8s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc describe pod -l app=app -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:             app-54fb6d4866-dvv7c\nNamespace:        academy-debug\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Tue, 20 Oct 2026 17:00:52 +0000\nLabels:           app=app\n                  pod-template-hash=54fb6d4866\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.48/23\"],\"mac_address\":\"0a:58:0a:d9:00:30\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.48\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:30\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.48\nIPs:\n  IP:           10.217.0.48\nControlled By:  ReplicaSet/app-54fb6d4866\nContainers:\n  app:\n    Container ID:  cri-o://bca7f27e571c8812d3c46ee0e2561190f762ff458596ddcce757bec8db698092\n    Image:         registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Image ID:      registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n    Port:          <none>\n    Host Port:     <none>\n    Command:\n      sh\n      -c\n      echo starting app; if [ -z \"$CONFIG_URL\" ]; then echo 'fatal: CONFIG_URL is not set' >&2; sleep 3; exit 3; fi; echo \"using $CONFIG_URL\"; sleep infinity\n    State:          Terminated\n      Reason:       Error\n      Exit Code:    3\n      Started:      Tue, 20 Oct 2026 17:00:56 +0000\n      Finished:     Tue, 20 Oct 2026 17:00:59 +0000\n    Ready:          False\n    Restart Count:  0\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:        10m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-cfrlc (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       False \n  ContainersReady             False \n  PodScheduled                True \nVolumes:\n  kube-api-access-cfrlc:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type    Reason          Age              From               Message\n  ----    ------          ----             ----               -------\n  Normal  Scheduled       9s               default-scheduler  Successfully assigned academy-debug/app-54fb6d4866-dvv7c to crc\n  Normal  AddedInterface  8s               multus             Add eth0 [10.217.0.48/23] from ovn-kubernetes\n  Normal  Pulled          5s               kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 3.082s (3.082s including waiting). Image size: 108819904 bytes.\n  Normal  Created         5s               kubelet            Created container: app\n  Normal  Started         5s               kubelet            Started container app\n  Normal  Pulling         1s (x2 over 8s)  kubelet            Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc logs <pod> --previous -n academy-debug",
+   "as": "learner",
+   "expect": "any",
+   "run": "oc logs app-54fb6d4866-dvv7c --previous -n academy-debug",
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (BadRequest): previous terminated container \"app\" in pod \"app-54fb6d4866-dvv7c\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "status",
+   "cmd": "oc get pods -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS     AGE\napp-54fb6d4866-dvv7c   1/1     Running   1 (4s ago)   11s\nweb-7d578f5fb7-xm8gq   1/1     Running   0            11s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "describe",
+   "cmd": "oc get pods -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS      AGE\napp-54fb6d4866-dvv7c   1/1     Running   2 (15s ago)   29s\nweb-7d578f5fb7-xm8gq   1/1     Running   0             29s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "describe",
+   "cmd": "oc describe pod -l app=app -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:             app-54fb6d4866-dvv7c\nNamespace:        academy-debug\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Tue, 20 Oct 2026 17:00:52 +0000\nLabels:           app=app\n                  pod-template-hash=54fb6d4866\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.48/23\"],\"mac_address\":\"0a:58:0a:d9:00:30\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0.0...\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.48\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:30\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.48\nIPs:\n  IP:           10.217.0.48\nControlled By:  ReplicaSet/app-54fb6d4866\nContainers:\n  app:\n    Container ID:  cri-o://b44a2338fd866a885fa1632d8d1fcb949cf918478fa697bb5655213f30dbb7a9\n    Image:         registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Image ID:      registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n    Port:          <none>\n    Host Port:     <none>\n    Command:\n      sh\n      -c\n      echo starting app; if [ -z \"$CONFIG_URL\" ]; then echo 'fatal: CONFIG_URL is not set' >&2; sleep 3; exit 3; fi; echo \"using $CONFIG_URL\"; sleep infinity\n    State:          Running\n      Started:      Tue, 20 Oct 2026 17:01:20 +0000\n    Last State:     Terminated\n      Reason:       Error\n      Exit Code:    3\n      Started:      Tue, 20 Oct 2026 17:01:03 +0000\n      Finished:     Tue, 20 Oct 2026 17:01:06 +0000\n    Ready:          True\n    Restart Count:  2\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:        10m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-cfrlc (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-cfrlc:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age               From               Message\n  ----     ------          ----              ----               -------\n  Normal   Scheduled       30s               default-scheduler  Successfully assigned academy-debug/app-54fb6d4866-dvv7c to crc\n  Normal   AddedInterface  29s               multus             Add eth0 [10.217.0.48/23] from ovn-kubernetes\n  Normal   Pulled          26s               kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 3.082s (3.082s including waiting). Image size: 108819904 bytes.\n  Normal   Pulled          20s               kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 2.87s (2.87s including waiting). Image size: 108819904 bytes.\n  Warning  BackOff         16s               kubelet            Back-off restarting failed container app in pod app-54fb6d4866-dvv7c_academy-debug(c60d222f-9b78-4884-8712-b95e21856f67)\n  Normal   Pulling         5s (x3 over 29s)  kubelet            Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n  Normal   Created         2s (x3 over 26s)  kubelet            Created container: app\n  Normal   Started         2s (x3 over 26s)  kubelet            Started container app\n  Normal   Pulled          2s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 3.097s (3.097s including waiting). Image size: 108819904 bytes.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "logs",
+   "cmd": "oc logs deploy/app -n academy-debug",
+   "as": "learner",
+   "expect": "any",
+   "run": null,
+   "code": 0,
+   "stdout": "starting app\nfatal: CONFIG_URL is not set\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "logs",
+   "cmd": "oc logs <pod> --previous -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc logs app-54fb6d4866-dvv7c --previous -n academy-debug",
+   "code": 0,
+   "stdout": "unable to retrieve container logs for cri-o://76261115d915d7781338fdbbe48a84936643554a6e1cf643b255db26dbf96654",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "exec",
+   "cmd": "oc exec deploy/web -n academy-debug -- ps aux",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n1000740+       1  0.5  0.2  53468 21788 ?        Ss   17:00   0:00 httpd -D FOREGROUND\n1000740+      48  0.0  0.0   5168  2432 ?        S    17:00   0:00 /usr/bin/coreutils --coreutils-prog-shebang=cat /usr/bin/cat\n1000740+      49  0.0  0.0   5168  2432 ?        S    17:00   0:00 /usr/bin/coreutils --coreutils-prog-shebang=cat /usr/bin/cat\n1000740+      50  0.0  0.0   5168  2432 ?        S    17:00   0:00 /usr/bin/coreutils --coreutils-prog-shebang=cat /usr/bin/cat\n1000740+      51  0.0  0.0   5168  2432 ?        S    17:00   0:00 /usr/bin/coreutils --coreutils-prog-shebang=cat /usr/bin/cat\n1000740+      52  0.0  0.0  33532  5804 ?        S    17:00   0:00 httpd -D FOREGROUND\n1000740+      53  0.0  0.2 2388992 24680 ?       Sl   17:00   0:00 httpd -D FOREGROUND\n1000740+      58  0.0  0.1 2257856 18596 ?       Sl   17:00   0:00 httpd -D FOREGROUND\n1000740+      69  0.0  0.1 2257856 16596 ?       Sl   17:00   0:00 httpd -D FOREGROUND\n1000740+     231  0.0  0.0   7060  3072 ?        Rs   17:01   0:00 ps aux\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "exec",
+   "cmd": "oc exec deploy/web -n academy-debug -- id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1000740000(1000740000) gid=0(root) groups=0(root),1000740000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "debug",
+   "cmd": "oc debug deploy/app -n academy-debug -- env",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nTERM=xterm\nHOSTNAME=app-debug-5v2tk\nNSS_SDB_USE_CACHE=no\nKUBERNETES_PORT_443_TCP_PROTO=tcp\nKUBERNETES_PORT_443_TCP_PORT=443\nKUBERNETES_PORT_443_TCP_ADDR=10.217.4.1\nKUBERNETES_SERVICE_HOST=10.217.4.1\nKUBERNETES_SERVICE_PORT=443\nKUBERNETES_SERVICE_PORT_HTTPS=443\nKUBERNETES_PORT=tcp://10.217.4.1:443\nKUBERNETES_PORT_443_TCP=tcp://10.217.4.1:443\ncontainer=oci\nHOME=/\n",
+   "stderr": "Starting pod/app-debug-5v2tk, command was: sh -c echo starting app; if [ -z \"$CONFIG_URL\" ]; then echo 'fatal: CONFIG_URL is not set' >&2; sleep 3; exit 3; fi; echo \"using $CONFIG_URL\"; sleep infinity\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set env deploy/app CONFIG_URL=http://config.example.internal -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/app -n academy-debug --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"app\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc logs deploy/app -n academy-debug",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "starting app\nusing http://config.example.internal\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "app-ready",
+    "title": "app is rolled out and ready",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "app-env",
+    "title": "CONFIG_URL is set (not empty) in the template",
+    "expect": "CONFIG_URL set",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].env[?name=CONFIG_URL].value = None"
+   }
+  ],
+  "at": 1792515659.4353046
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "app-ready",
+    "title": "app is rolled out and ready",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "app-env",
+    "title": "CONFIG_URL is set (not empty) in the template",
+    "expect": "CONFIG_URL set",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].env[?name=CONFIG_URL].value = 'http://config.example.internal'"
+   }
+  ],
+  "at": 1792515701.8381643
+ },
+ "seconds": 55,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-debug: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

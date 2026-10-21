@@ -1,0 +1,133 @@
+{
+ "lab": "lesson.lx.storage-filesystems",
+ "kind": "lesson",
+ "lab_hash": "332c0f2ee28550b5",
+ "recorded_at": "2026-10-17T16:30:46+00:00",
+ "cluster": {},
+ "host": {},
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME           TYPE  SIZE FSTYPE      MOUNTPOINTS\nvda            disk   12G             \n├─vda1         part    1M             \n├─vda2         part  200M vfat        /boot/efi\n├─vda3         part    1G xfs         /boot\n└─vda4         part 10.8G xfs         /\nvdb            disk    3G LVM2_member \n├─vg_data-swap lvm   512M swap        [SWAP]\n└─vg_data-home lvm   2.5G xfs         /home\n",
+   "stderr": "",
+   "combined": "NAME           TYPE  SIZE FSTYPE      MOUNTPOINTS\nvda            disk   12G             \n├─vda1         part    1M             \n├─vda2         part  200M vfat        /boot/efi\n├─vda3         part    1G xfs         /boot\n└─vda4         part 10.8G xfs         /\nvdb            disk    3G LVM2_member \n├─vg_data-swap lvm   512M swap        [SWAP]\n└─vg_data-home lvm   2.5G xfs         /home\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "findmnt -o TARGET,SOURCE,FSTYPE -t xfs,vfat",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "TARGET        SOURCE                   FSTYPE\n/             /dev/vda4                xfs\n├─/home       /dev/mapper/vg_data-home xfs\n└─/boot       /dev/vda3                xfs\n  └─/boot/efi /dev/vda2                vfat\n",
+   "stderr": "",
+   "combined": "TARGET        SOURCE                   FSTYPE\n/             /dev/vda4                xfs\n├─/home       /dev/mapper/vg_data-home xfs\n└─/boot       /dev/vda3                xfs\n  └─/boot/efi /dev/vda2                vfat\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep -Ev '^(#|$)' /etc/fstab | awk '{print $2, $3, $4}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/ xfs defaults\n/boot xfs defaults\n/boot/efi vfat defaults,uid=0,gid=0,umask=077,shortname=winnt\n/home xfs defaults\nnone swap defaults\n",
+   "stderr": "",
+   "combined": "/ xfs defaults\n/boot xfs defaults\n/boot/efi vfat defaults,uid=0,gid=0,umask=077,shortname=winnt\n/home xfs defaults\nnone swap defaults\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "findmnt --verify 2>&1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "\n0 parse errors, 0 errors, 5 warnings\n/\n   [W] cannot detect on-disk filesystem type\n/boot\n   [W] cannot detect on-disk filesystem type\n/boot/efi\n   [W] cannot detect on-disk filesystem type\n/home\n   [W] cannot detect on-disk filesystem type\nnone\n   [W] cannot detect on-disk filesystem type\n",
+   "stderr": "",
+   "combined": "\n0 parse errors, 0 errors, 5 warnings\n/\n   [W] cannot detect on-disk filesystem type\n/boot\n   [W] cannot detect on-disk filesystem type\n/boot/efi\n   [W] cannot detect on-disk filesystem type\n/home\n   [W] cannot detect on-disk filesystem type\nnone\n   [W] cannot detect on-disk filesystem type\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "df -hT / /boot",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Filesystem     Type  Size  Used Avail Use% Mounted on\n/dev/vda4      xfs    11G  1.9G  8.9G  18% /\n/dev/vda3      xfs   960M  191M  770M  20% /boot\n",
+   "stderr": "",
+   "combined": "Filesystem     Type  Size  Used Avail Use% Mounted on\n/dev/vda4      xfs    11G  1.9G  8.9G  18% /\n/dev/vda3      xfs   960M  191M  770M  20% /boot\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "df -i / /boot",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Filesystem      Inodes IUsed   IFree IUse% Mounted on\n/dev/vda4      5663728 47370 5616358    1% /\n/dev/vda3       524288   317  523971    1% /boot\n",
+   "stderr": "",
+   "combined": "Filesystem      Inodes IUsed   IFree IUse% Mounted on\n/dev/vda4      5663728 47370 5616358    1% /\n/dev/vda3       524288   317  523971    1% /boot\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "unshare -rm bash inodes.sh 2>&1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "touch: cannot touch 'mnt/file11': No space left on device\nstopped at file 11\n Size  Used Avail Use%\n 1.0M     0  1.0M   0%\nInodes IUsed IFree IUse%\n    12    12     0  100%\n",
+   "stderr": "",
+   "combined": "touch: cannot touch 'mnt/file11': No space left on device\nstopped at file 11\n Size  Used Avail Use%\n 1.0M     0  1.0M   0%\nInodes IUsed IFree IUse%\n    12    12     0  100%\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "unshare -rm bash space.sh 2>&1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "dd: error writing 'mnt/big': No space left on device\n Size  Used Avail Use%\n 1.0M  1.0M     0 100%\n",
+   "stderr": "",
+   "combined": "dd: error writing 'mnt/big': No space left on device\n Size  Used Avail Use%\n 1.0M  1.0M     0 100%\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "du -xh --max-depth=1 /usr/lib/systemd 2>/dev/null | sort -rh | head -n 5",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "4.0M\t/usr/lib/systemd\n1.2M\t/usr/lib/systemd/system\n444K\t/usr/lib/systemd/system-generators\n208K\t/usr/lib/systemd/catalog\n140K\t/usr/lib/systemd/user\n",
+   "stderr": "",
+   "combined": "4.0M\t/usr/lib/systemd\n1.2M\t/usr/lib/systemd/system\n444K\t/usr/lib/systemd/system-generators\n208K\t/usr/lib/systemd/catalog\n140K\t/usr/lib/systemd/user\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "unshare -rm bash deleted.sh 2>&1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ls: 0 files\n0\tmnt\n Used Avail\n 600K  424K\nfd 3 -> app.log (deleted)\n Used Avail\n    0  1.0M\n",
+   "stderr": "",
+   "combined": "ls: 0 files\n0\tmnt\n Used Avail\n 600K  424K\nfd 3 -> app.log (deleted)\n Used Avail\n    0  1.0M\n",
+   "ok": true
+  }
+ ],
+ "seconds": 11,
+ "ok": true,
+ "problems": []
+}

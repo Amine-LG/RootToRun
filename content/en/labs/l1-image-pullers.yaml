@@ -1,0 +1,98 @@
+id: lab.image-pullers
+title: "Cross-namespace image access"
+summary: "Pull an image held in another project's ImageStream: see the failure, grant system:image-puller to exactly one ServiceAccount, and audit the grant."
+module: l1-access
+mode: REAL_LAB
+minutes: 30
+level: 3
+supports: "Recorded on OpenShift 4.21.8 with the internal registry and pull-through ImageStreams (reference policy Local)."
+concepts: [sec.rbac, ocp.imagestreams, sec.supplychain]
+prerequisites: [l.image-pullers]
+namespace: academy-img-use
+extra_namespaces: [academy-img-src]
+objective: |
+  Understand that pulling from the internal registry is an RBAC decision, grant it narrowly, and recognise
+  cross-namespace image grants during an access review.
+background: |
+  `academy-img-src` will hold an ImageStream `minimal` that points at a public image with reference policy **Local**:
+  pods reference it through the internal registry, which pulls through on demand. Pulling
+  `image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal` requires the pod's ServiceAccount to hold
+  `system:image-puller` in **academy-img-src** (it grants `get` on `imagestreams/layers`). Pods in `academy-img-use`
+  run as its `default` ServiceAccount, whose internal-registry pull secret OpenShift adds to the pod automatically
+  (when the integrated registry is enabled). This is OpenShift-specific: the integrated registry checks every pull
+  against RBAC.
+
+  **Where everything comes from.** The app creates both projects, `academy-img-use` and `academy-img-src`, as the
+  learner identity; they start empty. Step 1 tags the public image
+  `registry.access.redhat.com/ubi9/ubi-minimal:latest` (no login needed) into an ImageStream of the source project,
+  and the integrated registry pulls it through on demand. Each project's `default` ServiceAccount, and its pull secret
+  for the integrated registry, is created by OpenShift with the project. Clean up deletes both projects and the grant.
+steps:
+  - id: publish
+    title: "Publish an image in the source project"
+    do: "Create the ImageStream tag with a local reference policy."
+    commands:
+      - {cmd: "oc tag registry.access.redhat.com/ubi9/ubi-minimal:latest minimal:latest --reference-policy=local -n academy-img-src", meaning: "ImageStream minimal, pulled through the internal registry"}
+    wait_for: [tag]
+  - id: imported
+    title: "The import finished"
+    do: "The image metadata is imported asynchronously; read the tag once it exists."
+    commands:
+      - {cmd: "oc get istag minimal:latest -n academy-img-src", meaning: "the tag and its digest"}
+    observe: "IMAGE REFERENCE points at the internal registry (`image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal@sha256:…`), not at registry.access.redhat.com: that is what reference policy Local means."
+  - id: denied
+    title: "Pull it from another project"
+    do: "Deploy from the source project's image and watch the pull fail."
+    commands:
+      - {cmd: "oc create deployment consumer --image=image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:latest -n academy-img-use -- sleep infinity", meaning: "uses academy-img-use's default ServiceAccount"}
+    wait_for: [pull-fails]
+  - id: denied-read
+    title: "Read the failure"
+    do: "Look at the pod and its events."
+    commands:
+      - {cmd: "oc get pods -l app=consumer -n academy-img-use", meaning: "ErrImagePull / ImagePullBackOff"}
+      - {cmd: "oc get events -n academy-img-use --field-selector reason=Failed", meaning: "the registry refused the pull"}
+    observe: |
+      `ImagePullBackOff`. The first event says `reading manifest latest in .../academy-img-src/minimal: authentication
+      required`, followed by `Error: ErrImagePull` and `Error: ImagePullBackOff`. Despite the wording, this is an
+      authorization problem: in the next step the pod's credentials stay exactly the same, and only an RBAC grant
+      makes the pull work.
+  - id: grant
+    title: "Grant exactly one ServiceAccount"
+    do: "Grant system:image-puller in the source project to academy-img-use's default ServiceAccount only."
+    commands:
+      - {cmd: "oc policy add-role-to-user system:image-puller system:serviceaccount:academy-img-use:default -n academy-img-src", meaning: "a RoleBinding in academy-img-src naming a ServiceAccount from academy-img-use"}
+      - {cmd: "oc rollout restart deploy/consumer -n academy-img-use", meaning: "retry the pull now"}
+      - {cmd: "oc rollout status deploy/consumer -n academy-img-use --timeout=180s", meaning: "it pulls: `successfully rolled out`", timeout: 200}
+    observe: "The grant names `system:serviceaccount:academy-img-use:default`; after the restart the new pod pulls the image and the rollout completes."
+    wait_for: [consumer-ready]
+  - id: audit
+    title: "What an access review sees"
+    do: "List image-puller bindings in the source project."
+    commands:
+      - {cmd: "oc get rolebindings -n academy-img-src -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name", meaning: "default project bindings plus your cross-namespace grant"}
+    observe: |
+      Besides the defaults (admin, system:deployers, system:image-builders, and system:image-pullers for the
+      project's own ServiceAccounts), one binding, `system:image-puller`, names `default` from `academy-img-use`.
+      Note how close its name is to the default `system:image-pullers`: in a review, read SUBJECT_NS, not the name.
+    why: "Granting `system:image-puller` to `system:serviceaccounts` or to whole groups would let every namespace pull these images; `system:image-builder` (push) across namespaces is worse: it lets another project replace the images that your workloads pull by tag."
+hints: []
+checks:
+  - {id: tag, title: "ImageStreamTag minimal:latest exists", type: exists, kind: istag, name: "minimal:latest", namespace: academy-img-src, final: false, expect_text: "exists"}
+  - {id: pull-fails, title: "The first pull was denied", type: pods, selector: app=consumer, waiting_reason: ImagePullBackOff, final: false, expect_text: "ImagePullBackOff"}
+  - {id: consumer-ready, title: "consumer runs from the source project's image", type: deployment_ready, name: consumer, expect_text: "1/1"}
+  - {id: grant-exists, title: "The image-puller grant names exactly that ServiceAccount", type: count, kind: rolebindings, namespace: academy-img-src, op: eq, value: 1, where: [{path: roleRef.name, op: eq, value: "system:image-puller"}, {path: "subjects[0].kind", op: eq, value: ServiceAccount}, {path: "subjects[0].namespace", op: eq, value: academy-img-use}, {path: "subjects[0].name", op: eq, value: default}, {path: "subjects[1]", op: absent}], expect_text: "1 binding"}
+questions:
+  - q: "Why is pulling from the internal registry an RBAC question?"
+    a: "The kubelet presents the pod ServiceAccount's registry credentials, and the integrated registry asks the API server whether that identity may `get` `imagestreams/layers` in the image's namespace (the permission system:image-puller grants)."
+  - q: "Which cross-namespace image grant is most dangerous, and why?"
+    a: "system:image-builder (push): another namespace could replace the images your workloads run."
+enterprise: |
+  Shared base images usually live in a dedicated project or in Quay with read access for all, while push access is
+  limited to the CI identity of the owning team. An access review lists cross-namespace puller and builder grants so
+  that reviewers can confirm each one is intended.
+references:
+  - {title: "OpenShift 4.21: Allowing pods to reference images across projects", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/managing-images#images-allow-pods-to-reference-images-across-projects_using-image-pull-secrets"}
+  - {title: "Lineage (an open-source project by the author of this site): image puller and builder grants", url: "https://github.com/Amine-LG/lineage/blob/main/docs/image-pullers.md"}
+variations:
+  - "Replace the grant with one for a dedicated ServiceAccount `puller` in `academy-img-use`, run `consumer` as `puller`, and prove that the `default` ServiceAccount can no longer pull. Check: `consumer` runs, and a new pod using `default` stays in ImagePullBackOff."

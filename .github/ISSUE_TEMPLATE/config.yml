@@ -1,0 +1,4 @@
+# Blank issues are off: every report starts from one of the forms in this directory. Security problems are reported
+# privately; GitHub shows the "Report a vulnerability" link (SECURITY.md) on the new-issue page when private
+# vulnerability reporting is enabled for the repository.
+blank_issues_enabled: false

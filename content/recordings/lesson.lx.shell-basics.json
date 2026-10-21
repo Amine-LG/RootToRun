@@ -1,0 +1,101 @@
+{
+ "lab": "lesson.lx.shell-basics",
+ "kind": "lesson",
+ "lab_hash": "147c29bc39344256",
+ "recorded_at": "2026-10-15T19:03:12+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "ls -l notes",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "total 8\n-rw-r--r--. 1 learner learner 51 Oct 15 19:03 todo.txt\n-rw-r--r--. 1 learner learner 72 Oct 15 19:03 welcome.txt\n",
+   "stderr": "",
+   "combined": "total 8\n-rw-r--r--. 1 learner learner 51 Oct 15 19:03 todo.txt\n-rw-r--r--. 1 learner learner 72 Oct 15 19:03 welcome.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "head -n 2 notes/todo.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Find out where I am\nSee what is here\n",
+   "stderr": "",
+   "combined": "Find out where I am\nSee what is here\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls -la",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "total 92\ndrwx------.   3 learner learner    54 Oct 15 19:03 .\ndrwxrwxrwt. 879 root  root  57344 Oct 15 19:03 ..\ndrwxr-xr-x.   2 learner learner    41 Oct 15 19:03 notes\n-rw-r--r--.   1 learner learner    64 Oct 15 19:03 readme.txt\n-rw-r--r--.   1 learner learner    12 Oct 15 19:03 .settings\n",
+   "stderr": "",
+   "combined": "total 92\ndrwx------.   3 learner learner    54 Oct 15 19:03 .\ndrwxrwxrwt. 879 root  root  57344 Oct 15 19:03 ..\ndrwxr-xr-x.   2 learner learner    41 Oct 15 19:03 notes\n-rw-r--r--.   1 learner learner    64 Oct 15 19:03 readme.txt\n-rw-r--r--.   1 learner learner    12 Oct 15 19:03 .settings\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat --help",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Usage: cat [OPTION]... [FILE]...\nConcatenate FILE(s) to standard output.\n\nWith no FILE, or when FILE is -, read standard input.\n\n  -A, --show-all           equivalent to -vET\n  -b, --number-nonblank    number nonempty output lines, overrides -n\n  -e                       equivalent to -vE\n  -E, --show-ends          display $ at end of each line\n  -n, --number             number all output lines\n  -s, --squeeze-blank      suppress repeated empty output lines\n  -t                       equivalent to -vT\n  -T, --show-tabs          display TAB characters as ^I\n  -u                       (ignored)\n  -v, --show-nonprinting   use ^ and M- notation, except for LFD and TAB\n      --help     display this help and exit\n      --version  output version information and exit\n\nExamples:\n  cat f - g  Output f's contents, then standard input, then g's contents.\n  cat        Copy standard input to standard output.\n\nGNU coreutils online help: <https://www.gnu.org/software/coreutils/>\nFull documentation <https://www.gnu.org/software/coreutils/cat>\nor available locally via: info '(coreutils) cat invocation'\n",
+   "stderr": "",
+   "combined": "Usage: cat [OPTION]... [FILE]...\nConcatenate FILE(s) to standard output.\n\nWith no FILE, or when FILE is -, read standard input.\n\n  -A, --show-all           equivalent to -vET\n  -b, --number-nonblank    number nonempty output lines, overrides -n\n  -e                       equivalent to -vE\n  -E, --show-ends          display $ at end of each line\n  -n, --number             number all output lines\n  -s, --squeeze-blank      suppress repeated empty output lines\n  -t                       equivalent to -vT\n  -T, --show-tabs          display TAB characters as ^I\n  -u                       (ignored)\n  -v, --show-nonprinting   use ^ and M- notation, except for LFD and TAB\n      --help     display this help and exit\n      --version  output version information and exit\n\nExamples:\n  cat f - g  Output f's contents, then standard input, then g's contents.\n  cat        Copy standard input to standard output.\n\nGNU coreutils online help: <https://www.gnu.org/software/coreutils/>\nFull documentation <https://www.gnu.org/software/coreutils/cat>\nor available locally via: info '(coreutils) cat invocation'\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat -n notes/todo.txt",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "     1\tFind out where I am\n     2\tSee what is here\n     3\tRead one file\n",
+   "stderr": "",
+   "combined": "     1\tFind out where I am\n     2\tSee what is here\n     3\tRead one file\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "type ls cd pwd",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ls is /usr/bin/ls\ncd is a shell builtin\npwd is a shell builtin\n",
+   "stderr": "",
+   "combined": "ls is /usr/bin/ls\ncd is a shell builtin\npwd is a shell builtin\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "mkdir -parents a/b/c",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "mkdir: invalid option -- 'a'\nTry 'mkdir --help' for more information.\n",
+   "combined": "mkdir: invalid option -- 'a'\nTry 'mkdir --help' for more information.\n",
+   "ok": true
+  }
+ ],
+ "seconds": 0,
+ "ok": true,
+ "problems": []
+}

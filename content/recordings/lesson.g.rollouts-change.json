@@ -1,0 +1,96 @@
+{
+ "lab": "lesson.g.rollouts-change",
+ "kind": "lesson",
+ "lab_hash": "d7dcf303f0009d27",
+ "recorded_at": "2026-10-20T17:03:46+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-g-rollouts-change",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f web.yaml >/dev/null; oc rollout status deployment/web --timeout=180s >/dev/null; oc set env deployment/web RELEASE=2 >/dev/null; oc annotate deployment/web kubernetes.io/change-cause='release 2: RELEASE=2' --overwrite >/dev/null; oc rollout status deployment/web --timeout=180s",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch deployment/web -p '{\"spec\":{\"progressDeadlineSeconds\":30}}' >/dev/null; oc set image deployment/web httpd-24=registry.access.redhat.com/ubi9/httpd-24:no-such-tag >/dev/null; oc annotate deployment/web kubernetes.io/change-cause='release 3: broken tag' --overwrite >/dev/null; sleep 50; oc get replicasets -l app=web; oc get pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             DESIRED   CURRENT   READY   AGE\nweb-54c78f4697   0         0         0       71s\nweb-5c4d686b85   1         1         0       50s\nweb-69cffb69fb   3         3         3       65s\nNAME                   READY   STATUS             RESTARTS   AGE\nweb-5c4d686b85-sc2r4   0/1     ImagePullBackOff   0          50s\nweb-69cffb69fb-tf9ws   1/1     Running            0          65s\nweb-69cffb69fb-vd7kx   1/1     Running            0          56s\nweb-69cffb69fb-z8g4f   1/1     Running            0          61s\n",
+   "stderr": "",
+   "combined": "NAME             DESIRED   CURRENT   READY   AGE\nweb-54c78f4697   0         0         0       71s\nweb-5c4d686b85   1         1         0       50s\nweb-69cffb69fb   3         3         3       65s\nNAME                   READY   STATUS             RESTARTS   AGE\nweb-5c4d686b85-sc2r4   0/1     ImagePullBackOff   0          50s\nweb-69cffb69fb-tf9ws   1/1     Running            0          65s\nweb-69cffb69fb-vd7kx   1/1     Running            0          56s\nweb-69cffb69fb-z8g4f   1/1     Running            0          61s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment/web -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{\"\\n\"}{end}'; oc rollout status deployment/web --timeout=10s",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Available=True MinimumReplicasAvailable\nProgressing=False ProgressDeadlineExceeded\n",
+   "stderr": "error: deployment \"web\" exceeded its progress deadline\n",
+   "combined": "Available=True MinimumReplicasAvailable\nProgressing=False ProgressDeadlineExceeded\nerror: deployment \"web\" exceeded its progress deadline\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout undo deployment/web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web rolled back\n",
+   "stderr": "",
+   "combined": "deployment.apps/web rolled back\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deployment/web --timeout=180s; oc patch deployment/web -p '{\"spec\":{\"progressDeadlineSeconds\":600}}' >/dev/null; oc rollout history deployment/web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment \"web\" successfully rolled out\ndeployment.apps/web \nREVISION  CHANGE-CAUSE\n1         release 1\n3         release 3: broken tag\n4         release 2: RELEASE=2\n\n",
+   "stderr": "",
+   "combined": "deployment \"web\" successfully rolled out\ndeployment.apps/web \nREVISION  CHANGE-CAUSE\n1         release 1\n3         release 3: broken tag\n4         release 2: RELEASE=2\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout pause deployment/web; oc set env deployment/web RELEASE=4 LOG_LEVEL=debug >/dev/null; oc set resources deployment/web --limits=cpu=200m >/dev/null; echo \"ReplicaSets while paused: $(oc get replicasets -l app=web --no-headers | wc -l)\"; oc rollout resume deployment/web; oc rollout status deployment/web --timeout=180s >/dev/null; echo \"ReplicaSets after resume: $(oc get replicasets -l app=web --no-headers | wc -l)\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web paused\nReplicaSets while paused: 3\ndeployment.apps/web resumed\nReplicaSets after resume: 4\n",
+   "stderr": "",
+   "combined": "deployment.apps/web paused\nReplicaSets while paused: 3\ndeployment.apps/web resumed\nReplicaSets after resume: 4\n",
+   "ok": true
+  }
+ ],
+ "seconds": 111,
+ "ok": true,
+ "problems": []
+}

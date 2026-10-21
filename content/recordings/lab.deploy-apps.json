@@ -1,0 +1,321 @@
+{
+ "lab": "lab.deploy-apps",
+ "kind": "lab",
+ "lab_hash": "4ecd463238a269a8",
+ "recorded_at": "2026-10-14T17:39:07+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc create deployment hello --image=registry.access.redhat.com/ubi9/httpd-24:latest --port=8080 -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc expose deployment hello --port=8080 -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc expose service hello -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "create",
+   "cmd": "oc create deployment hello --image=registry.access.redhat.com/ubi9/httpd-24:latest --port=8080 -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "create",
+   "cmd": "oc rollout status deploy/hello -n academy-apps --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"hello\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"hello\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "create",
+   "cmd": "oc get deploy,rs,pods -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/hello   1/1     1            1           7s\n\nNAME                              DESIRED   CURRENT   READY   AGE\nreplicaset.apps/hello-b7845bb7c   1         1         1       7s\n\nNAME                        READY   STATUS    RESTARTS   AGE\npod/hello-b7845bb7c-zc2mw   1/1     Running   0          7s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "content",
+   "cmd": "oc create configmap hello-html --from-literal=index.html='<h1>Hello from OpenShift</h1>' -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/hello-html created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "content",
+   "cmd": "oc set volume deploy/hello --add --name=html --type=configmap --configmap-name=hello-html --mount-path=/var/www/html -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello volume updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "content",
+   "cmd": "oc rollout status deploy/hello -n academy-apps --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"hello\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "expose",
+   "cmd": "oc expose deployment hello --port=8080 -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/hello exposed\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "expose",
+   "cmd": "oc expose service hello -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/hello exposed\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "expose",
+   "cmd": "oc get svc,route -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nservice/hello   ClusterIP   10.217.4.121   <none>        8080/TCP   3s\n\nNAME                             HOST/PORT                             PATH   SERVICES   PORT   TERMINATION   WILDCARD\nroute.route.openshift.io/hello   hello-academy-apps.apps-crc.testing          hello      8080                 None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale deploy/hello --replicas=3 -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc set resources deploy/hello --requests=cpu=20m,memory=32Mi --limits=memory=128Mi -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/hello resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc rollout status deploy/hello -n academy-apps --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"hello\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"hello\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"hello\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc get pods -n academy-apps -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                     READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nhello-69594c9cbc-6pfsn   1/1     Running   0          7s    10.217.1.151   crc    <none>           <none>\nhello-69594c9cbc-k2c8c   1/1     Running   0          16s   10.217.1.149   crc    <none>           <none>\nhello-69594c9cbc-kkh45   1/1     Running   0          12s   10.217.1.150   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "hpa",
+   "cmd": "oc autoscale deploy/hello --min=2 --max=5 --cpu=60% -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "horizontalpodautoscaler.autoscaling/hello autoscaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "hpa-read",
+   "cmd": "oc get hpa -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    REFERENCE          TARGETS              MINPODS   MAXPODS   REPLICAS   AGE\nhello   Deployment/hello   cpu: <unknown>/60%   2         5         3          19s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "hpa-read",
+   "cmd": "oc describe hpa hello -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:                                                  hello\nNamespace:                                             academy-apps\nLabels:                                                <none>\nAnnotations:                                           <none>\nCreationTimestamp:                                     Wed, 14 Oct 2026 17:39:54 +0000\nReference:                                             Deployment/hello\nMetrics:                                               ( current / target )\n  resource cpu on pods  (as a percentage of request):  <unknown> / 60%\nMin replicas:                                          2\nMax replicas:                                          5\nDeployment pods:                                       3 current / 0 desired\nConditions:\n  Type           Status  Reason                   Message\n  ----           ------  ------                   -------\n  AbleToScale    True    SucceededGetScale        the HPA controller was able to get the target's current scale\n  ScalingActive  False   FailedGetResourceMetric  the HPA was unable to compute the replica count: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\nEvents:\n  Type     Reason                        Age   From                       Message\n  ----     ------                        ----  ----                       -------\n  Warning  FailedGetResourceMetric       5s    horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n  Warning  FailedComputeMetricsReplicas  5s    horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "newapp",
+   "cmd": "oc new-app --name=quick --image=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "--> Found container image 346e3db (7 hours old) from registry.access.redhat.com for \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n\n    Apache httpd 2.4 \n    ---------------- \n    Apache httpd 2.4 available as container, is a powerful, efficient, and extensible web server. Apache supports a variety of features, many implemented as compiled modules which extend the core functionality. These can range from server-side programming language support to authentication schemes. Virtual hosting allows one Apache installation to serve many different Web sites.\n\n    Tags: builder, httpd, httpd-24\n\n    * An image stream tag will be created as \"quick:latest\" that will track this image\n\n--> Creating resources ...\n    imagestream.image.openshift.io \"quick\" created\n    deployment.apps \"quick\" created\n    service \"quick\" created\n--> Success\n    Application is not exposed. You can expose services to the outside world by executing one or more of the commands below:\n     'oc expose service/quick' \n    Run 'oc status' to view your app.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "newapp",
+   "cmd": "oc get all -l app=quick -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE\nservice/quick   ClusterIP   10.217.5.150   <none>        8080/TCP,8443/TCP   1s\n\nNAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/quick   0/1     1            0           1s\n\nNAME                                   IMAGE REPOSITORY                                                             TAGS     UPDATED\nimagestream.image.openshift.io/quick   default-route-openshift-image-registry.apps-crc.testing/academy-apps/quick   latest   1 second ago\n",
+   "stderr": "Warning: apps.openshift.io/v1 DeploymentConfig is deprecated in v4.14+, unavailable in v4.10000+\n",
+   "ok": true
+  },
+  {
+   "step": "newapp",
+   "cmd": "oc delete all -l app=quick -n academy-apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service \"quick\" deleted from academy-apps namespace\ndeployment.apps \"quick\" deleted from academy-apps namespace\nimagestream.image.openshift.io \"quick\" deleted from academy-apps namespace\n",
+   "stderr": "Warning: apps.openshift.io/v1 DeploymentConfig is deprecated in v4.14+, unavailable in v4.10000+\n",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "route-ok",
+    "title": "The Route serves the page",
+    "expect": "HTTP 200 'Hello from OpenShift'",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"hello\" not found"
+   },
+   {
+    "id": "ready3",
+    "title": "hello runs 3 ready replicas",
+    "expect": "3/3",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"hello\" not found"
+   },
+   {
+    "id": "sized",
+    "title": "hello has a memory limit of 128Mi",
+    "expect": "128Mi",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"hello\" not found"
+   },
+   {
+    "id": "hpa",
+    "title": "An HPA targets hello",
+    "expect": "HPA hello exists",
+    "status": "fail",
+    "observed": "Error from server (NotFound): horizontalpodautoscalers.autoscaling \"hello\" not found"
+   }
+  ],
+  "at": 1791999552.2240434
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "route-ok",
+    "title": "The Route serves the page",
+    "expect": "HTTP 200 'Hello from OpenShift'",
+    "status": "pass",
+    "observed": "http://hello-academy-apps.apps-crc.testing/ → HTTP 200 · Hello from OpenShift"
+   },
+   {
+    "id": "ready3",
+    "title": "hello runs 3 ready replicas",
+    "expect": "3/3",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "sized",
+    "title": "hello has a memory limit of 128Mi",
+    "expect": "128Mi",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].resources.limits.memory = '128Mi'"
+   },
+   {
+    "id": "hpa",
+    "title": "An HPA targets hello",
+    "expect": "HPA hello exists",
+    "status": "pass",
+    "observed": "spec.scaleTargetRef.name = 'hello'"
+   }
+  ],
+  "at": 1791999621.363537
+ },
+ "seconds": 74,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-apps: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

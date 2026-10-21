@@ -1,0 +1,173 @@
+{
+ "lab": "lesson.a.container-is-a-process",
+ "kind": "lesson",
+ "lab_hash": "6004eefdbbe7f09f",
+ "recorded_at": "2026-10-15T17:10:07+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "podman pull -q quay.io/prometheus/busybox:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "stderr": "",
+   "combined": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run --rm quay.io/prometheus/busybox:latest echo hello from a container",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "hello from a container\n",
+   "stderr": "",
+   "combined": "hello from a container\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name demo quay.io/prometheus/busybox:latest sleep 1000",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "c34445555fb21a509414e87bbab43fa17de2dfdf2b2e78e24dd71084d5b6e78f\n",
+   "stderr": "",
+   "combined": "c34445555fb21a509414e87bbab43fa17de2dfdf2b2e78e24dd71084d5b6e78f\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman ps",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "CONTAINER ID  IMAGE                              COMMAND     CREATED                 STATUS                 PORTS       NAMES\nc34445555fb2  quay.io/prometheus/busybox:latest  sleep 1000  Less than a second ago  Up Less than a second              demo\n",
+   "stderr": "",
+   "combined": "CONTAINER ID  IMAGE                              COMMAND     CREATED                 STATUS                 PORTS       NAMES\nc34445555fb2  quay.io/prometheus/busybox:latest  sleep 1000  Less than a second ago  Up Less than a second              demo\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name second quay.io/prometheus/busybox:latest sleep 1000",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "d32334f7cbbcc58b5985c4e568fcf4a33cb7aa1076cd81114cc4861cb3857af2\n",
+   "stderr": "",
+   "combined": "d32334f7cbbcc58b5985c4e568fcf4a33cb7aa1076cd81114cc4861cb3857af2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman inspect --format '{{.State.Pid}}' demo",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "2236241\n",
+   "stderr": "",
+   "combined": "2236241\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ps -o pid,args -p $(podman inspect --format '{{.State.Pid}}' demo)",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    PID COMMAND\n2236241 sleep 1000\n",
+   "stderr": "",
+   "combined": "    PID COMMAND\n2236241 sleep 1000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman exec demo ps",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "PID   USER     TIME  COMMAND\n    1 root      0:00 sleep 1000\n    2 root      0:00 ps\n",
+   "stderr": "",
+   "combined": "PID   USER     TIME  COMMAND\n    1 root      0:00 sleep 1000\n    2 root      0:00 ps\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "hostname; podman exec demo hostname",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "workstation\nc34445555fb2\n",
+   "stderr": "",
+   "combined": "workstation\nc34445555fb2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman exec demo ls /",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "bin\ndev\netc\nhome\nlib\nproc\nroot\nrun\nsys\ntmp\nusr\nvar\n",
+   "stderr": "",
+   "combined": "bin\ndev\netc\nhome\nlib\nproc\nroot\nrun\nsys\ntmp\nusr\nvar\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "uname -r; podman exec demo uname -r",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "5.14.0-687.52.1.el9_8.x86_64\n5.14.0-687.52.1.el9_8.x86_64\n",
+   "stderr": "",
+   "combined": "5.14.0-687.52.1.el9_8.x86_64\n5.14.0-687.52.1.el9_8.x86_64\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name limited --memory 64m quay.io/prometheus/busybox:latest sleep 1000; podman exec limited cat /sys/fs/cgroup/memory.max",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "c8322425b5de1917c50fd35a7966278ed729130f7a814715edd5fbe8978986f9\n67108864\n",
+   "stderr": "",
+   "combined": "c8322425b5de1917c50fd35a7966278ed729130f7a814715edd5fbe8978986f9\n67108864\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rm -f -t 0 demo second limited",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "demo\nlimited\nsecond\n",
+   "stderr": "",
+   "combined": "demo\nlimited\nsecond\n",
+   "ok": true
+  }
+ ],
+ "seconds": 10,
+ "ok": true,
+ "problems": []
+}

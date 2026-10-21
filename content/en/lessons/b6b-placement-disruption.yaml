@@ -1,0 +1,441 @@
+# Project tolerations and disruption budgets (generated from one command list; edit with care)
+- id: p.project-tolerations-pdb
+  title: Project tolerations and disruption budgets
+  subtitle: Defaults a project gives its pods, and how many may be disrupted at once
+  module: p1-scheduling
+  mode: REAL_LAB
+  minutes: 25
+  level: 3
+  supports: 'OpenShift 4.21 with the PodTolerationRestriction admission plugin (namespace annotations scheduler.alpha.kubernetes.io/defaultTolerations
+    and tolerationsWhitelist) and Kubernetes 1.34 PodDisruptionBudgets (policy/v1) with the eviction API. Every command was run on OpenShift Local
+    4.21 by the cluster administrator kubeadmin and by the ordinary user developer (experiment X-NODE-05). The node was not tainted or drained: OpenShift
+    Local has one node, so the lesson shows admission and the eviction API rather than a drain.'
+  concepts:
+  - k8s.affinity
+  - k8s.scheduler
+  prerequisites:
+  - p.cluster-partitioning
+  record_on: cluster-admin
+  objective: |
+    Give a project default tolerations and limit the tolerations its pods may carry, see them added at
+    admission, and protect a workload from voluntary disruption with a PodDisruptionBudget: a refused eviction,
+    then an allowed one with headroom.
+  flow:
+  - kind: ask
+    id: recall-taints
+    recalls: p.cluster-partitioning
+    prompt: A node carries the taint `dedicated=batch:NoSchedule`. Which pods can the scheduler place on it?
+    choices:
+    - text: Pods with a matching toleration
+      why: A toleration lets a pod ignore the taint; it does not send the pod there (that is a node selector or affinity).
+    - text: Pods with the node selector dedicated=batch
+      why: A selector only restricts where a pod may go; without the toleration the taint still repels it.
+    - text: Any pod, since NoSchedule only affects running pods
+      why: NoSchedule affects new placements; NoExecute is the effect that evicts running pods.
+    answer: 0
+  - kind: teach
+    id: situation
+    title: Two promises a platform makes to a team
+    body: |
+      The batch team gets nodes of its own, tainted so that other teams' pods stay away. Every batch pod then
+      needs the matching toleration, and nobody should have to remember to write it. The team, in turn, wants a
+      promise back: when the platform team drains a node for maintenance, two of its workers stay up.
+
+      OpenShift answers the first with **project default tolerations**, annotations on the project's namespace
+      that an admission plugin applies to every new pod. Kubernetes answers the second with a
+      **PodDisruptionBudget**, which the eviction API respects. Both were run on the lab cluster: the cluster
+      administrator, kubeadmin, prepared the project, changed its annotations and deleted it at the end; developer,
+      who gets the `edit` role in this project only, did the rest, in their own terminal. The prompt in front of each
+      command names who ran it.
+  - kind: show
+    id: project
+    body: 'As the cluster administrator, kubeadmin: create the project, write both annotations and give developer edit rights in it.'
+    run: oc adm new-project lab-batch && oc annotate namespace lab-batch scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"}]'
+      scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"}]'
+      && oc adm policy add-role-to-user edit developer -n lab-batch
+    notice: The project, its two annotations and edit rights for developer. The whitelist names only the team's toleration, as a first attempt
+      usually does.
+  - kind: show
+    id: annotations
+    body: 'Still as kubeadmin, print the full value of each annotation. The dots in the annotation names are escaped with `\.` so that jsonpath reads each name as one key:'
+    run: oc get namespace lab-batch -o jsonpath='defaultTolerations {.metadata.annotations.scheduler\.alpha\.kubernetes\.io/defaultTolerations}{"\n"}tolerationsWhitelist {.metadata.annotations.scheduler\.alpha\.kubernetes\.io/tolerationsWhitelist}{"\n"}'
+    notice: Both annotations hold the JSON list written by the command above. The default toleration and the whitelist
+      name the same single toleration, `lab-dedicated=batch:NoSchedule`, and nothing else.
+  - kind: ask
+    id: who-annotates
+    prompt: developer has edit rights in lab-batch. Could developer remove the toleration whitelist from the project?
+    choices:
+    - text: 'No: changing the namespace needs an administrator'
+      why: Project users can read their project but not change its namespace object, so the defaults are a platform decision the team cannot undo.
+    - text: 'Yes: edit rights include the project itself'
+      why: edit covers objects inside the project, not the namespace object that holds the annotations.
+    - text: Yes, but only with oc annotate project
+      why: The project is a read-only view for its users; the change would be refused either way.
+    answer: 0
+  - kind: teach
+    id: two-annotations
+    title: Default and allowed tolerations
+    body: |
+      `scheduler.alpha.kubernetes.io/defaultTolerations` lists tolerations added to every pod created in the
+      namespace, merged with the pod's own. `scheduler.alpha.kubernetes.io/tolerationsWhitelist` lists the only
+      tolerations a pod there may end up with, after that merge. Both are read by the **PodTolerationRestriction**
+      admission plugin when a pod is created. Pods that carry many tolerations of their own, such as DaemonSet
+      pods, must also fit the whitelist. The values are JSON lists, written exactly as in a pod spec. In their own
+      terminal, developer now deploys two workers, which set no resource requests or limits.
+  - kind: show
+    id: deploy
+    body: 'developer creates the Deployment and lists it twenty seconds later. On this cluster no pod is created: the first whitelist is too narrow, and the next steps show what it misses.'
+    run: oc create deployment worker -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -- sleep infinity &&
+      sleep 20 && oc get deploy,rs -n lab-batch
+    notice: 'The Deployment and its ReplicaSet exist, but `CURRENT 0`: no pod was created.'
+  - kind: show
+    id: refused
+    body: 'developer reads the ReplicaSet''s FailedCreate events, which hold the reason:'
+    run: oc get events -n lab-batch --field-selector reason=FailedCreate -o custom-columns=MESSAGE:.message | sort -u
+    notice: 'Every attempt was refused at admission: `pod tolerations (possibly merged with namespace default tolerations) conflict with its namespace
+      whitelist`. `sort -u` keeps one copy of each line, and sorts the column header `MESSAGE` in with the messages,
+      which is why it comes last.'
+  - kind: ask
+    id: why-conflict
+    prompt: The whitelist contains exactly the project's default toleration, and the Deployment asks for no toleration at all. Which toleration
+      conflicts?
+    choices:
+    - text: The unready and unreachable tolerations
+      why: Another admission plugin, DefaultTolerationSeconds, gives every pod that does not set them `node.kubernetes.io/not-ready` and `node.kubernetes.io/unreachable`
+        (NoExecute, 300 s). The whitelist checks the merged list, so it must allow them too.
+    - text: The project's own default toleration, added twice
+      why: The default is identical to the whitelist entry; a duplicate would not conflict.
+    - text: A toleration stored in the ubi-minimal image
+      why: Images carry no tolerations; they are part of the pod spec only.
+    answer: 0
+  - kind: show
+    id: fix
+    body: 'The cluster administrator, kubeadmin, widens the whitelist to the three tolerations these workers really carry. They set no requests or limits; a whitelist for pods that do would need a fourth entry, `node.kubernetes.io/memory-pressure` (Exists, NoSchedule):'
+    run: oc annotate namespace lab-batch --overwrite scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"},{"key":"node.kubernetes.io/not-ready","operator":"Exists","effect":"NoExecute"},{"key":"node.kubernetes.io/unreachable","operator":"Exists","effect":"NoExecute"}]'
+    notice: '`namespace/lab-batch annotated`. `--overwrite` is needed because the annotation already exists: without it,
+      `oc annotate` refuses to change an existing value.'
+  - kind: show
+    id: recover
+    body: 'Back in developer''s terminal, wait for the workers:'
+    run: oc rollout status deploy/worker -n lab-batch --timeout=240s
+    notice: The ReplicaSet kept retrying; with the wider whitelist both pods were admitted. Nothing in the Deployment changed.
+  - kind: ask
+    id: guess-where
+    guess: true
+    prompt: Where will the toleration `lab-dedicated=batch:NoSchedule` appear now?
+    choices:
+    - text: In each pod, not in the Deployment
+      why: Admission changes the pod objects as they are created; the template stays as written.
+    - text: In the Deployment's pod template
+      why: Nothing rewrites the Deployment; the template is what you applied.
+    - text: 'Nowhere: the annotation only affects the scheduler''s view'
+      why: The plugin writes the toleration into the pod object, where anyone can read it.
+    answer: 0
+  - kind: show
+    id: template
+    run: oc get deploy worker -n lab-batch -o jsonpath='{.spec.template.spec.tolerations}{"\n"}'
+    notice: 'Empty: the template has no tolerations.'
+  - kind: show
+    id: pod-tolerations
+    run: oc get pods -n lab-batch -l app=worker -o jsonpath='{range .items[0].spec.tolerations[*]}{.key}{" "}{.operator}{" "}{.value}{" "}{.effect}{"
+      "}{.tolerationSeconds}{"\n"}{end}'
+    notice: The two every pod receives (stay 300 seconds on an unready or unreachable node before eviction), then the project's own toleration,
+      added at admission. These workers set no requests or limits; a pod that does also receives `node.kubernetes.io/memory-pressure`
+      (Exists, NoSchedule), so a whitelist for such pods must include it too.
+    highlight:
+    - lab-dedicated
+  - kind: show
+    id: stray
+    body: 'A pod that asks for a toleration the project does not allow:'
+    run: oc run stray -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --restart=Never --overrides='{"spec":{"tolerations":[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]}}'
+      -- sleep 60
+    notice: 'Refused with the same message: the team cannot give its pods tolerations for other teams'' taints. Taints steer the scheduler; a
+      pod that names a node directly (`spec.nodeName`) bypasses it, so isolation that must hold also needs a policy on node assignment.'
+  - kind: try
+    id: try-defaults
+    body: As an administrator, make every new pod in the project `ml` tolerate the taint `gpu=true:NoSchedule` by default.
+    accept:
+    - oc annotate namespace ml scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"gpu","operator":"Equal","value":"true","effect":"NoSchedule"}]'
+    - oc annotate ns ml scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"gpu","operator":"Equal","value":"true","effect":"NoSchedule"}]'
+    - oc annotate namespace ml scheduler.alpha.kubernetes.io/defaultTolerations='[{"operator":"Equal","key":"gpu","value":"true","effect":"NoSchedule"}]'
+    - oc annotate namespace ml scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"gpu","value":"true","effect":"NoSchedule"}]'
+    - oc annotate namespace/ml scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"gpu","operator":"Equal","value":"true","effect":"NoSchedule"}]'
+    hints:
+    - match: oc label
+      say: 'Tolerations go in an annotation, not a label: `oc annotate namespace`.'
+    - match: tolerationsWhitelist
+      say: The whitelist only limits what is allowed. The tolerations added to every pod are `defaultTolerations`.
+    - match: oc annotate project
+      say: Annotate the namespace (`oc annotate namespace ml`); the project is a view of it.
+    - match: oc adm taint|taint node
+      say: Tainting the node is the other half. This task is the project's default toleration.
+    hint: '`oc annotate namespace ml scheduler.alpha.kubernetes.io/defaultTolerations=''<JSON list>''` with key gpu, value true, effect NoSchedule.'
+    then: Pods created afterwards get the toleration; existing pods keep the tolerations they were admitted with.
+  - kind: teach
+    id: budget
+    title: A budget for voluntary disruptions
+    body: |
+      Some disruptions are nobody's choice: a node fails. Others are **voluntary**: draining a node before an
+      update, or scaling the cluster down. Those go through the **eviction API**, not a plain delete, and the
+      eviction API asks every PodDisruptionBudget (**PDB**) whose selector matches the pod. A PDB says how many
+      matching pods must stay available (`minAvailable`) or may be missing (`maxUnavailable`). An eviction that
+      would break the budget is refused; `oc adm drain` keeps retrying until it is allowed.
+  - kind: show
+    id: pdb
+    run: oc create poddisruptionbudget worker -n lab-batch --selector=app=worker --min-available=2 && sleep 5 && oc get pdb worker -n lab-batch
+    notice: '`ALLOWED DISRUPTIONS 0`: two pods exist and two must stay available.'
+  - kind: ask
+    id: guess-evict
+    guess: true
+    prompt: developer asks the eviction API to evict one worker pod, as a drain would. What happens?
+    choices:
+    - text: 'Refused with 429: it would violate the budget'
+      why: With zero allowed disruptions the API refuses; a drain would wait and retry.
+    - text: The pod is evicted and a new one starts
+      why: That happens once the budget allows one disruption, two steps later.
+    - text: The pod is evicted, and the PDB is deleted
+      why: The eviction API never changes the budget.
+    answer: 0
+  - kind: show
+    id: evict-refused
+    run: pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"%s","namespace":"lab-batch"}}'
+      "$pod" > eviction.json && oc create --raw "/api/v1/namespaces/lab-batch/pods/$pod/eviction" -f eviction.json
+    notice: '`TooManyRequests` (HTTP status 429): Cannot evict pod as it would violate the pod''s disruption budget. A plain `oc delete pod` would
+      have succeeded: budgets limit evictions only.'
+    understand:
+      purpose: Finds the name of one worker pod, writes an Eviction request for that pod to a file, and posts the file to
+        the pod's `eviction` subresource. That is the API call `oc adm drain` makes for each pod it evicts; no `oc`
+        subcommand evicts a single pod by itself.
+      parts:
+      - text: pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}')
+        means: Saves the name of the first pod labelled `app=worker` in the shell variable `pod`.
+      - text: printf
+        means: Fills the pod's name into the JSON template at `%s`, giving an `Eviction` object of `policy/v1` that names
+          the pod and its namespace.
+      - text: '> eviction.json'
+        means: Writes that object to the file `eviction.json`.
+      - text: oc create --raw "/api/v1/namespaces/lab-batch/pods/$pod/eviction"
+        means: '`--raw` takes a URI and POSTs to it, with the credentials of your kubeconfig. The URI is the eviction
+          subresource of that one pod.'
+      - text: -f eviction.json
+        means: The body of the POST, the Eviction object written just before.
+      output: An error naming `TooManyRequests` when a budget forbids the eviction, or a `Status` object with `Success`
+        when it is allowed; the pod is then deleted gracefully, as a DELETE request would delete it.
+      needs: Permission to create the `pods/eviction` subresource in the namespace; the `edit` role that developer holds
+        in lab-batch includes it.
+      mistakes:
+      - Testing a budget with `oc delete pod`. A plain delete is not an eviction, and budgets do not stop it.
+      - A namespace in the JSON that differs from the one in the URI. Both name the pod's namespace.
+      concepts:
+      - ent.ha
+      - k8s.workloads
+      refs:
+      - title: 'Kubernetes: API-initiated eviction'
+        url: https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/
+      - title: 'kubectl create reference (--raw: raw URI to POST to the server)'
+        url: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/
+      - title: 'Kubernetes: Safely drain a node (drain uses the eviction API)'
+        url: https://kubernetes.io/docs/tasks/administer-cluster/safely-drain-node/
+  - kind: show
+    id: relax
+    run: oc patch pdb worker -n lab-batch --type=merge -p '{"spec":{"minAvailable":1}}' && sleep 5 && oc get pdb worker -n lab-batch
+    notice: '`ALLOWED DISRUPTIONS 1`.'
+  - kind: show
+    id: evict-ok
+    run: pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"%s","namespace":"lab-batch"}}'
+      "$pod" > eviction.json && oc create --raw "/api/v1/namespaces/lab-batch/pods/$pod/eviction" -f eviction.json && echo && echo "evicted $pod"
+    notice: 'The same request, now answered with a `Status` whose `status` is `Success` (code 201: the Eviction was
+      created). The API server then deletes the pod gracefully, as a DELETE request would; the last line names it.'
+  - kind: show
+    id: after
+    run: sleep 3; oc get pdb worker -n lab-batch; oc rollout status deploy/worker -n lab-batch --timeout=120s && oc get pods -n lab-batch -l app=worker
+    notice: 'Right after the eviction `ALLOWED DISRUPTIONS` is 0 again: the evicted pod is still Terminating while its replacement starts, and
+      the Deployment is back to two running pods.'
+  - kind: try
+    id: try-pdb
+    body: Create a PodDisruptionBudget named `api` that keeps at least 2 pods labelled `app=api` available.
+    accept:
+    - oc create poddisruptionbudget api --selector=app=api --min-available=2
+    - oc create pdb api --selector=app=api --min-available=2
+    - oc create pdb api --selector app=api --min-available 2
+    - oc create poddisruptionbudget api --selector app=api --min-available 2
+    - oc create pdb api --min-available=2 --selector=app=api
+    - kubectl create pdb api --selector=app=api --min-available=2
+    hints:
+    - match: --max-unavailable
+      say: Keeping at least 2 available is `--min-available=2`; `--max-unavailable` counts the opposite way.
+    - match: ^(?!.*--selector).*$
+      say: 'A PDB needs a `--selector` matching the pods it protects: `app=api`.'
+    hint: '`oc create poddisruptionbudget` (or `pdb`) named api, with `--selector=app=api` and `--min-available=2`.'
+    then: 'With exactly two pods, such a budget blocks every voluntary eviction: a drain of their node waits forever. Leave headroom (more replicas
+      than minAvailable).'
+  - kind: ask
+    id: drain-stuck
+    prompt: 'A node drain has been waiting for an hour on one pod. Its PDB says `minAvailable: 3` and its Deployment has 3 replicas. What is the
+      fix?'
+    choices:
+    - text: Leave room for one disruption
+      why: With replicas equal to minAvailable, ALLOWED DISRUPTIONS is 0 for ever; the budget needs headroom.
+    - text: Delete the PDB for good, so drains never wait
+      why: That removes the protection the team asked for; adjust it instead.
+    - text: 'Wait longer: drains always finish on their own'
+      why: 'This one cannot: the budget allows no eviction.'
+    answer: 0
+  - kind: show
+    id: clean
+    body: 'The cluster administrator, kubeadmin, deletes the project and everything in it:'
+    run: oc delete project lab-batch
+  - kind: reflect
+    id: explain-promises
+    prompt: Explain to the batch team what the platform has promised them with these two settings, and what it has not.
+    model: |
+      Every pod created in their project receives the toleration for their dedicated nodes, and may carry only
+      tolerations the whitelist covers (theirs and the node-health ones), so the scheduler will not place it on
+      other teams' tainted nodes; direct node assignment needs a separate control. Pinning the pods to their nodes
+      still needs a node selector (or the project's node selector). The budget protects them from voluntary
+      evictions such as drains: the eviction API refuses any eviction that would leave fewer healthy workers
+      than the budget; drains then progress only when there are enough healthy pods and room for replacements. It
+      does not protect against a node failing, a plain delete ignores it, and a Deployment's own rolling update is
+      not limited by it.
+  - kind: teach
+    id: what-next
+    title: What you can do now
+    body: |
+      You can give a project default tolerations and restrict the tolerations its pods may carry, read where
+      admission put them, and protect a workload from voluntary disruption with a PodDisruptionBudget that leaves
+      room for a drain to proceed. Budgets come back in [High availability and failure
+      domains](/lesson/i.ha-architecture), where they decide whether a node update can progress.
+
+      Next, [Corporate identity: LDAP and OIDC](/lesson/p.ldap-oidc) turns from where workloads run to who may
+      change them.
+  sections:
+  - id: reference
+    title: Reference
+    depth: true
+    body: |
+      | Task | Command |
+      |---|---|
+      | default tolerations for a project | `oc annotate namespace <ns> scheduler.alpha.kubernetes.io/defaultTolerations='<JSON list>'` |
+      | tolerations a project's pods may have | `oc annotate namespace <ns> scheduler.alpha.kubernetes.io/tolerationsWhitelist='<JSON list>'` |
+      | default node selector for a project | `oc adm new-project <ns> --node-selector='<key>=<value>'` (annotation `openshift.io/node-selector`) |
+      | keep at least N pods | `oc create poddisruptionbudget <name> --selector=<labels> --min-available=<N>` |
+      | allow at most N missing | `oc create poddisruptionbudget <name> --selector=<labels> --max-unavailable=<N>` |
+      | how many may go now | `oc get pdb <name>` (ALLOWED DISRUPTIONS) |
+
+      A toleration whitelist must include `node.kubernetes.io/not-ready` and `node.kubernetes.io/unreachable` (operator Exists,
+      effect NoExecute), which every pod receives unless it sets them; otherwise every pod in the project is refused. Pods
+      with resource requests (not BestEffort, unlike the workers here) also receive `node.kubernetes.io/memory-pressure`
+      (Exists, NoSchedule): allow it too.
+
+      A budget whose minimum equals the replica count blocks every drain. Set `spec.unhealthyPodEvictionPolicy:
+      AlwaysAllow` when pods that are not ready should not hold up maintenance.
+  review:
+  - q: Which namespace annotation adds a toleration to every new pod in a project?
+    a: scheduler.alpha.kubernetes.io/defaultTolerations, a JSON list of tolerations, applied by the PodTolerationRestriction admission plugin.
+  - q: Does a project default toleration appear in the Deployment?
+    a: No. It is added to each pod at admission; the Deployment's template is unchanged.
+  - q: What does a PodDisruptionBudget limit?
+    a: Voluntary evictions through the eviction API (drains, cluster scale-down). It does not stop node failures, plain pod deletion or a Deployment's
+      rolling update.
+  - q: A project's toleration whitelist lists only the team's toleration and every pod is refused. Why?
+    a: Every pod also receives node.kubernetes.io/not-ready and unreachable (NoExecute) from DefaultTolerationSeconds; the whitelist must allow
+      them too.
+  - q: Why can a drain wait for ever on a PDB?
+    a: When the replicas equal minAvailable, ALLOWED DISRUPTIONS is 0; add replicas or relax the budget.
+  labs: []
+  limits: |
+    With one node, OpenShift Local cannot show tolerated pods landing on dedicated nodes or a real drain; tainting
+    its only node would also affect the platform. The lesson records what admission writes into pods and what the
+    eviction API answers, which is what a drain relies on.
+  enterprise: |
+    Platform teams combine a project node selector, default tolerations and a toleration whitelist to give a team
+    dedicated nodes, and ask application teams for PodDisruptionBudgets with headroom so node updates can proceed.
+  references:
+  - title: 'OpenShift 4.21: Controlling pod placement onto nodes (taints, tolerations and project defaults)'
+    url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/nodes/controlling-pod-placement-onto-nodes-scheduling
+  - title: 'Kubernetes: Admission controllers (PodTolerationRestriction, DefaultTolerationSeconds)'
+    url: https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/
+  - title: 'Kubernetes: Disruptions (voluntary disruptions and PodDisruptionBudgets)'
+    url: https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+  - title: 'Kubernetes: Specifying a disruption budget for your application'
+    url: https://kubernetes.io/docs/tasks/run-application/configure-pdb/
+  - title: 'Kubernetes: API-initiated eviction (the eviction subresource and the 429 answer)'
+    url: https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/
+  - title: 'kubectl annotate reference (--overwrite)'
+    url: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_annotate/
+  commands:
+  - cmd: oc adm new-project lab-batch && oc annotate namespace lab-batch scheduler.alpha.kubernetes.io/defaultTolerations='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"}]'
+      scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"}]'
+      && oc adm policy add-role-to-user edit developer -n lab-batch
+    as: admin
+    meaning: a project whose pods get a toleration by default, and may carry no other
+  - cmd: oc get namespace lab-batch -o jsonpath='defaultTolerations {.metadata.annotations.scheduler\.alpha\.kubernetes\.io/defaultTolerations}{"\n"}tolerationsWhitelist {.metadata.annotations.scheduler\.alpha\.kubernetes\.io/tolerationsWhitelist}{"\n"}'
+    as: admin
+    meaning: the two annotations
+  - cmd: oc create deployment worker -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -- sleep infinity &&
+      sleep 20 && oc get deploy,rs -n lab-batch
+    as: developer
+    meaning: two pods asked for; none created
+  - cmd: oc get events -n lab-batch --field-selector reason=FailedCreate -o custom-columns=MESSAGE:.message | sort -u
+    as: developer
+    meaning: why the ReplicaSet could not create them
+  - cmd: oc annotate namespace lab-batch --overwrite scheduler.alpha.kubernetes.io/tolerationsWhitelist='[{"key":"lab-dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"},{"key":"node.kubernetes.io/not-ready","operator":"Exists","effect":"NoExecute"},{"key":"node.kubernetes.io/unreachable","operator":"Exists","effect":"NoExecute"}]'
+    as: admin
+    meaning: the whitelist also allows the two tolerations every pod receives
+  - cmd: oc rollout status deploy/worker -n lab-batch --timeout=240s
+    as: developer
+    meaning: the ReplicaSet retries and succeeds
+    timeout: 270
+  - cmd: oc get deploy worker -n lab-batch -o jsonpath='{.spec.template.spec.tolerations}{"\n"}'
+    as: developer
+    meaning: 'the template: no tolerations'
+  - cmd: oc get pods -n lab-batch -l app=worker -o jsonpath='{range .items[0].spec.tolerations[*]}{.key}{" "}{.operator}{" "}{.value}{" "}{.effect}{"
+      "}{.tolerationSeconds}{"\n"}{end}'
+    as: developer
+    meaning: 'a running pod: the project''s toleration was added at admission'
+  - cmd: oc run stray -n lab-batch --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --restart=Never --overrides='{"spec":{"tolerations":[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]}}'
+      -- sleep 60
+    as: developer
+    meaning: 'a pod asking for another toleration: refused'
+    expect: fail
+  - cmd: oc create poddisruptionbudget worker -n lab-batch --selector=app=worker --min-available=2 && sleep 5 && oc get pdb worker -n lab-batch
+    as: developer
+    meaning: at least two worker pods must stay available
+  - cmd: pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"%s","namespace":"lab-batch"}}'
+      "$pod" > eviction.json && oc create --raw "/api/v1/namespaces/lab-batch/pods/$pod/eviction" -f eviction.json
+    as: developer
+    meaning: 'the eviction API, as a drain uses it: refused by the budget'
+    expect: fail
+  - cmd: oc patch pdb worker -n lab-batch --type=merge -p '{"spec":{"minAvailable":1}}' && sleep 5 && oc get pdb worker -n lab-batch
+    as: developer
+    meaning: one pod may now be disrupted
+  - cmd: pod=$(oc get pods -n lab-batch -l app=worker -o jsonpath='{.items[0].metadata.name}'); printf '{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"%s","namespace":"lab-batch"}}'
+      "$pod" > eviction.json && oc create --raw "/api/v1/namespaces/lab-batch/pods/$pod/eviction" -f eviction.json && echo && echo "evicted $pod"
+    as: developer
+    meaning: the same request, allowed
+  - cmd: sleep 3; oc get pdb worker -n lab-batch; oc rollout status deploy/worker -n lab-batch --timeout=120s && oc get pods -n lab-batch -l app=worker
+    as: developer
+    meaning: the budget at work, and the replacement pod
+    timeout: 150
+  - cmd: oc delete project lab-batch
+    as: admin
+    meaning: remove the project
+  experiment:
+    id: X-NODE-05
+    objective: The administrator creates project lab-batch with default and allowed tolerations; developer sees the toleration added to pods at
+      admission, a pod with another toleration, a PodDisruptionBudget refusing then allowing an eviction; the project is deleted.
+    changes:
+    - Project lab-batch with two scheduler annotations (the whitelist changed once), a RoleBinding for developer, a Deployment worker (two ubi-minimal
+      pods) and a PodDisruptionBudget (deleted with the project)
+    preflight:
+    - cmd: oc get namespace lab-batch
+      expect: fail
+    snapshot:
+    - oc get namespace lab-batch -o name --ignore-not-found
+    - oc get node crc -o jsonpath='{.spec.taints}'
+    rollback:
+    - oc delete project lab-batch --ignore-not-found --wait=false
+    settle:
+    - for i in $(seq 60); do test -z "$(oc get namespace lab-batch -o name --ignore-not-found)" && exit 0; sleep 5; done; exit 1
+    verify:
+    - cmd: test -z "$(oc get namespace lab-batch -o name --ignore-not-found)"

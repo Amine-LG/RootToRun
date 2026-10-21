@@ -1,0 +1,133 @@
+id: lab.deploy-apps
+title: "Deploy, expose and scale an application"
+summary: "From one command to a scaled, exposed app: create a Deployment, give it content, a Service and a Route, scale it, size it, and try an autoscaler on a cluster without metrics."
+module: a2-apps
+mode: REAL_LAB
+minutes: 35
+level: 1
+supports: "Recorded on OpenShift 4.21.8. HorizontalPodAutoscaler autoscaling/v2; CRC has no metrics API, so the HPA cannot read CPU (shown on purpose)."
+concepts: [k8s.deployment, net.services, net.routes, k8s.requests-limits]
+prerequisites: [o1.cli]
+namespace: academy-apps
+objective: |
+  Deploy an application imperatively, expose it to the outside, scale it and size it, and understand which object
+  each command created.
+background: |
+  `oc create deployment` writes a Deployment; `oc expose deployment` writes a Service selecting its pods;
+  `oc expose service` writes a Route. Each is a separate object you can read, change and delete. `oc new-app` goes
+  further and also creates an ImageStream and labels everything with `app=<name>` so you can manage it as a
+  group.
+
+  **Where everything comes from.** The project `academy-apps` starts empty: you create every object with the commands,
+  from Red Hat's UBI 9 Apache httpd image (`registry.access.redhat.com/ubi9/httpd-24`), which needs no login. The
+  Route's host name is generated from the Route and project names and the cluster's apps domain (`apps-crc.testing` on
+  OpenShift Local). Clean up deletes the project and everything in it.
+commands:
+  - {cmd: "oc create deployment hello --image=registry.access.redhat.com/ubi9/httpd-24:latest --port=8080 -n academy-apps", meaning: "a Deployment from an image"}
+  - {cmd: "oc expose deployment hello --port=8080 -n academy-apps", meaning: "a ClusterIP Service selecting its pods"}
+  - {cmd: "oc expose service hello -n academy-apps", meaning: "a Route to the Service"}
+steps:
+  - id: create
+    title: "Create the Deployment"
+    do: "Create it, then look at what exists."
+    commands:
+      - {cmd: "oc create deployment hello --image=registry.access.redhat.com/ubi9/httpd-24:latest --port=8080 -n academy-apps", meaning: "one replica of httpd"}
+      - {cmd: "oc rollout status deploy/hello -n academy-apps --timeout=180s", meaning: "wait until ready", timeout: 200}
+      - {cmd: "oc get deploy,rs,pods -n academy-apps", meaning: "the three layers"}
+    observe: "`deployment.apps/hello` 1/1, one ReplicaSet `hello-<hash>` (DESIRED 1, READY 1) and one pod `hello-<hash>-<suffix>` Running: one command created the Deployment, and its controllers created the rest."
+    wait_for: [ready1]
+  - id: content
+    title: "Give it something to serve"
+    do: "httpd answers 403 when it has no index page. Add one from a ConfigMap mounted as files."
+    commands:
+      - {cmd: "oc create configmap hello-html --from-literal=index.html='<h1>Hello from OpenShift</h1>' -n academy-apps", meaning: "a ConfigMap with one file"}
+      - {cmd: "oc set volume deploy/hello --add --name=html --type=configmap --configmap-name=hello-html --mount-path=/var/www/html -n academy-apps", meaning: "mount it where httpd serves files"}
+      - {cmd: "oc rollout status deploy/hello -n academy-apps --timeout=180s", meaning: "a new pod with the volume", timeout: 200}
+    why: "Adding a volume changes the pod template, so it rolls out a new ReplicaSet."
+    wait_for: [ready1]
+  - id: expose
+    title: "Expose it"
+    do: "Create a Service and a Route. The lab's check then calls the Route's URL from outside the cluster and expects the page."
+    commands:
+      - {cmd: "oc expose deployment hello --port=8080 -n academy-apps", meaning: "Service hello, selector app=hello"}
+      - {cmd: "oc expose service hello -n academy-apps", meaning: "Route hello"}
+      - {cmd: "oc get svc,route -n academy-apps", meaning: "host name of the Route"}
+    predict:
+      prompt: "`oc expose deployment` created a Service. Which pods does it select?"
+      choices: ["All pods in the project", "Pods with the Deployment's selector labels (app=hello)", "Only the first pod"]
+      answer: 1
+      explain: "It copies the Deployment's selector into the Service."
+      feedback:
+        - "No: a Service never selects by namespace alone; it selects pods by labels. A Service with an empty selector selects nothing automatically."
+        - "Right: `oc expose deployment` reuses the Deployment's selector (`app=hello`), so every pod the Deployment manages, now and after scaling, becomes an endpoint."
+        - "No: a Service load-balances across every ready pod that matches its selector, not just one."
+    observe: "`service/hello` of type ClusterIP on 8080/TCP, and `route/hello` with the generated host `hello-academy-apps.apps-crc.testing` (`<route>-<project>.<apps domain>`) and no TLS termination. The check then got HTTP 200 with `Hello from OpenShift` through that host."
+    checks: [route-ok]
+    wait_for: [route-ok]
+  - id: scale
+    title: "Scale and size"
+    do: "Scale to three replicas and set resource requests and a memory limit."
+    commands:
+      - {cmd: "oc scale deploy/hello --replicas=3 -n academy-apps", meaning: "three replicas"}
+      - {cmd: "oc set resources deploy/hello --requests=cpu=20m,memory=32Mi --limits=memory=128Mi -n academy-apps", meaning: "requests for scheduling, limit enforced by cgroups"}
+      - {cmd: "oc rollout status deploy/hello -n academy-apps --timeout=180s", meaning: "resources are in the template: another rollout", timeout: 200}
+      - {cmd: "oc get pods -n academy-apps -o wide", meaning: "three new pods (old ones may still be Terminating)"}
+    observe: "Three Running pods with a new ReplicaSet hash (setting resources changed the template). In the recording the old pods were already gone; on your cluster some may still be `Terminating`, because `rollout status` reports success once the new pods are available, without waiting for old pods to disappear."
+    why: "Scaling only changes `replicas` and adds pods to the current ReplicaSet; changing resources changes the pod template, so it is a rollout that replaces every pod."
+    checks: [ready3]
+    wait_for: [ready3]
+  - id: hpa
+    title: "An autoscaler without metrics"
+    do: "Create a HorizontalPodAutoscaler and read its status."
+    commands:
+      - {cmd: "oc autoscale deploy/hello --min=2 --max=5 --cpu=60% -n academy-apps", meaning: "target 60% of the CPU request"}
+    wait_for: [hpa, hpa-event]
+  - id: hpa-read
+    title: "Read the autoscaler's status"
+    do: "Read the HPA a little later, once its controller has tried to fetch metrics."
+    commands:
+      - {cmd: "oc get hpa -n academy-apps", meaning: "TARGETS column"}
+      - {cmd: "oc describe hpa hello -n academy-apps", meaning: "conditions and events"}
+    predict:
+      prompt: "CRC has no metrics API. What does the HPA show as its current CPU?"
+      choices: ["0%", "<unknown>, with a FailedGetResourceMetric condition", "It deletes itself"]
+      answer: 1
+      explain: "The HPA controller cannot read pod metrics, so it reports unknown and does not scale on CPU. On a full OpenShift cluster, the monitoring stack serves the resource metrics API."
+      feedback:
+        - "No: 0% would be a real measurement (idle pods). Without a metrics API there is no measurement at all, and showing 0% would hide the problem."
+        - "Right: the controller cannot fetch metrics, so the current value is `<unknown>`, condition ScalingActive=False with reason FailedGetResourceMetric, and the replica count is left alone."
+        - "No: controllers never delete the objects they serve. The HPA keeps retrying and reports the failure in its conditions and events."
+    observe: "`cpu: <unknown>/60%`, REPLICAS 3 (left as it was, within min 2 and max 5). describe shows `ScalingActive False FailedGetResourceMetric` and Warning events `FailedGetResourceMetric` and `FailedComputeMetricsReplicas` (`unable to fetch metrics from resource metrics API`)."
+    why: "The HPA needs requests (to compute a percentage) and a metrics API. Here the second is missing, which is exactly what you would diagnose if an HPA 'does nothing' in production."
+    checks: [hpa]
+  - id: newapp
+    title: "The same in one command: oc new-app"
+    do: "Create a second app with `oc new-app` and list everything it created by its label."
+    commands:
+      - {cmd: "oc new-app --name=quick --image=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-apps", meaning: "Deployment, Service, ImageStream, labelled app=quick"}
+      - {cmd: "oc get all -l app=quick -n academy-apps", meaning: "every object of the app"}
+      - {cmd: "oc delete all -l app=quick -n academy-apps", meaning: "remove them as a group"}
+    observe: "new-app created an ImageStream `quick`, a Deployment and a Service exposing 8080 and 8443 (the ports the image declares), and suggests `oc expose service/quick` because it creates no Route. `oc get all` also prints a warning that DeploymentConfig is deprecated: it still lists that kind. Deleting by label removed the Service, Deployment and ImageStream together."
+    why: "`all` is a category of common resource types, not literally everything: ConfigMaps, Secrets and PersistentVolumeClaims are not in it, so `oc delete all -l ...` leaves them behind."
+hints: []
+checks:
+  - {id: ready1, title: "hello is ready", type: deployment_ready, name: hello, final: false, expect_text: "ready"}
+  - {id: route-ok, title: "The Route serves the page", type: route_http, route: hello, expect_status: 200, contains: "Hello from OpenShift", expect_text: "HTTP 200 'Hello from OpenShift'"}
+  - {id: ready3, title: "hello runs 3 ready replicas", type: deployment_ready, name: hello, replicas: 3, expect_text: "3/3"}
+  - {id: sized, title: "hello has a memory limit of 128Mi", type: field, kind: deployment, name: hello, path: "spec.template.spec.containers[0].resources.limits.memory", op: eq, value: 128Mi, expect_text: "128Mi"}
+  - {id: hpa, title: "An HPA targets hello", type: field, kind: hpa, name: hello, path: spec.scaleTargetRef.name, op: eq, value: hello, expect_text: "HPA hello exists"}
+  - {id: hpa-event, title: "The HPA reported that metrics are unavailable", type: event, reason: FailedGetResourceMetric, final: false, expect_text: "FailedGetResourceMetric event"}
+questions:
+  - q: "Why does the HPA need resource requests?"
+    a: "Its CPU target is a percentage of the pods' requests; without requests it cannot compute utilization."
+  - q: "Which object would you edit to change the external host name?"
+    a: "The Route (spec.host)."
+enterprise: |
+  Imperative commands are perfect for learning and debugging. In production the same objects come from Git
+  (Kustomize, Helm, GitOps): track B1 shows how.
+references:
+  - {title: "OpenShift 4.21: Creating applications using the CLI", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/creating-applications"}
+  - {title: "Kubernetes: Horizontal Pod Autoscaling", url: "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/"}
+variations:
+  - "On your own: deploy a second application `bye` from the same image with its own page (`Goodbye from OpenShift`), expose it through a Route, run 2 replicas and give it a memory limit. Check: the Route answers with your page, its EndpointSlice lists two ready endpoints, and the pods show your limit."
+  - "Delete the Service `hello` (keep the Route) and predict what the Route answers; then recreate the Service. Check: you can explain why the Route recovers without being changed (it names the Service, not the pods)."

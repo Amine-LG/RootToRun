@@ -1,0 +1,117 @@
+{
+ "lab": "lesson.n.logging",
+ "kind": "lesson",
+ "lab_hash": "a1c7989da05cc8a1",
+ "recorded_at": "2026-10-16T18:48:41+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-logging",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc run talker --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --image-pull-policy=IfNotPresent --restart=Never -- sh -c 'echo order 1001 accepted; echo order 1002 failed: payment timeout; sleep 3600' && oc wait pod/talker --for=condition=Ready --timeout=120s && oc logs talker",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/talker created\npod/talker condition met\norder 1001 accepted\norder 1002 failed: payment timeout\n",
+   "stderr": "",
+   "combined": "pod/talker created\npod/talker condition met\norder 1001 accepted\norder 1002 failed: payment timeout\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete pod talker --grace-period=1 && oc logs talker",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "pod \"talker\" deleted from academy-lesson-n-logging namespace\n",
+   "stderr": "error: error from server (NotFound): pods \"talker\" not found in namespace \"academy-lesson-n-logging\"\n",
+   "combined": "pod \"talker\" deleted from academy-lesson-n-logging namespace\nerror: error from server (NotFound): pods \"talker\" not found in namespace \"academy-lesson-n-logging\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm node-logs crc -u crio --tail=3",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Oct 16 18:48:20.339119 crc crio[4374]: time=\"2026-10-16T18:48:20.339058095Z\" level=info msg=\"Stopped pod sandbox: 60c139ea4b78ba3a9c8c85df52b6c368ae57339966d781c3b6728cca593468b8\" id=a3a4cef0-e757-4b85-a0f6-690dd23edf05 name=/runtime.v1.RuntimeService/StopPodSandbox\nOct 16 18:48:21.130105 crc crio[4374]: time=\"2026-10-16T18:48:21.129736008Z\" level=info msg=\"Removing container: 711d7f778858ecfdf486ccff89a7527aab214574a2ea17b6bb177e76606134c8\" id=6276a20b-df4e-444f-837c-653f91daab11 name=/runtime.v1.RuntimeService/RemoveContainer\nOct 16 18:48:21.147874 crc crio[4374]: time=\"2026-10-16T18:48:21.147797893Z\" level=info msg=\"Removed container 711d7f778858ecfdf486ccff89a7527aab214574a2ea17b6bb177e76606134c8: academy-lesson-n-logging/talker/talker\" id=6276a20b-df4e-444f-837c-653f91daab11 name=/runtime.v1.RuntimeService/RemoveContainer\n",
+   "stderr": "",
+   "combined": "Oct 16 18:48:20.339119 crc crio[4374]: time=\"2026-10-16T18:48:20.339058095Z\" level=info msg=\"Stopped pod sandbox: 60c139ea4b78ba3a9c8c85df52b6c368ae57339966d781c3b6728cca593468b8\" id=a3a4cef0-e757-4b85-a0f6-690dd23edf05 name=/runtime.v1.RuntimeService/StopPodSandbox\nOct 16 18:48:21.130105 crc crio[4374]: time=\"2026-10-16T18:48:21.129736008Z\" level=info msg=\"Removing container: 711d7f778858ecfdf486ccff89a7527aab214574a2ea17b6bb177e76606134c8\" id=6276a20b-df4e-444f-837c-653f91daab11 name=/runtime.v1.RuntimeService/RemoveContainer\nOct 16 18:48:21.147874 crc crio[4374]: time=\"2026-10-16T18:48:21.147797893Z\" level=info msg=\"Removed container 711d7f778858ecfdf486ccff89a7527aab214574a2ea17b6bb177e76606134c8: academy-lesson-n-logging/talker/talker\" id=6276a20b-df4e-444f-837c-653f91daab11 name=/runtime.v1.RuntimeService/RemoveContainer\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm node-logs crc --path=kube-apiserver/",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": ".lock\n.terminating\naudit-2026-10-16T08-53-22.739.log\naudit-2026-10-16T09-45-17.043.log\naudit-2026-10-16T10-37-23.010.log\naudit-2026-10-16T11-43-13.978.log\naudit-2026-10-16T12-37-43.065.log\naudit-2026-10-16T13-34-34.740.log\naudit-2026-10-16T14-23-06.757.log\naudit-2026-10-16T15-16-16.275.log\naudit-2026-10-16T16-17-31.997.log\naudit-2026-10-16T17-42-16.746.log\naudit.log\ntermination.log\n",
+   "stderr": "",
+   "combined": ".lock\n.terminating\naudit-2026-10-16T08-53-22.739.log\naudit-2026-10-16T09-45-17.043.log\naudit-2026-10-16T10-37-23.010.log\naudit-2026-10-16T11-43-13.978.log\naudit-2026-10-16T12-37-43.065.log\naudit-2026-10-16T13-34-34.740.log\naudit-2026-10-16T14-23-06.757.log\naudit-2026-10-16T15-16-16.275.log\naudit-2026-10-16T16-17-31.997.log\naudit-2026-10-16T17-42-16.746.log\naudit.log\ntermination.log\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterlogforwarders -A",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: the server doesn't have a resource type \"clusterlogforwarders\"\n",
+   "combined": "error: the server doesn't have a resource type \"clusterlogforwarders\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifests -n openshift-marketplace -l catalog=redhat-operators | grep -E '^(cluster-logging|loki-operator|cluster-observability-operator) '",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cluster-logging                                  Red Hat Operators   200d\nloki-operator                                    Red Hat Operators   200d\ncluster-observability-operator                   Red Hat Operators   200d\n",
+   "stderr": "",
+   "combined": "cluster-logging                                  Red Hat Operators   200d\nloki-operator                                    Red Hat Operators   200d\ncluster-observability-operator                   Red Hat Operators   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest cluster-logging -n openshift-marketplace -o jsonpath='{.status.defaultChannel}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "stable-6.6\n",
+   "stderr": "",
+   "combined": "stable-6.6\n",
+   "ok": true
+  }
+ ],
+ "seconds": 29,
+ "ok": true,
+ "problems": []
+}

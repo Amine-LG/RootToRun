@@ -1,0 +1,321 @@
+{
+ "lab": "lesson.n.cluster-quotas",
+ "kind": "lesson",
+ "lab_hash": "6fcdb04e1a837bed",
+ "recorded_at": "2026-10-16T15:48:04+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-cluster-quotas",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-dev",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Now using project \"lab-dev\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "stderr": "",
+   "combined": "Now using project \"lab-dev\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-test",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Now using project \"lab-test\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "stderr": "",
+   "combined": "Now using project \"lab-test\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project lab-dev lab-test -o custom-columns='NAME:.metadata.name,REQUESTER:.metadata.annotations.openshift\\.io/requester'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME       REQUESTER\nlab-dev    developer\nlab-test   developer\n",
+   "stderr": "",
+   "combined": "NAME       REQUESTER\nlab-dev    developer\nlab-test   developer\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create clusterresourcequota lab-developer --project-annotation-selector=openshift.io/requester=developer --hard=pods=4",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterresourcequota.quota.openshift.io/lab-developer created\n",
+   "stderr": "",
+   "combined": "clusterresourcequota.quota.openshift.io/lab-developer created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait clusterresourcequota/lab-developer --for=jsonpath='{.status.total.hard.pods}'=4 --timeout=60s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterresourcequota.quota.openshift.io/lab-developer condition met\n",
+   "stderr": "",
+   "combined": "clusterresourcequota.quota.openshift.io/lab-developer condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe clusterresourcequota lab-developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\tlab-developer\nCreated:\tLess than a second ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t0\t4\n",
+   "stderr": "",
+   "combined": "Name:\t\tlab-developer\nCreated:\tLess than a second ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t0\t4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterresourcequota lab-developer",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): clusterresourcequotas.quota.openshift.io \"lab-developer\" is forbidden: User \"developer\" cannot get resource \"clusterresourcequotas\" in API group \"quota.openshift.io\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): clusterresourcequotas.quota.openshift.io \"lab-developer\" is forbidden: User \"developer\" cannot get resource \"clusterresourcequotas\" in API group \"quota.openshift.io\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe appliedclusterresourcequota -n lab-dev",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\tlab-developer\nCreated:\t1 second ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t0\t4\n",
+   "stderr": "",
+   "combined": "Name:\t\tlab-developer\nCreated:\t1 second ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t0\t4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=3 -n lab-dev -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/web -n lab-dev --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 0 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 0 of 3 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 0 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 0 of 3 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --replicas=2 -n lab-test -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait deploy/web -n lab-test --for=condition=ReplicaFailure --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web condition met\n",
+   "stderr": "",
+   "combined": "deployment.apps/web condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy web -n lab-test -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pods \"web-779d6bb6cb-nkggv\" is forbidden: exceeded quota: lab-developer, requested: pods=1, used: pods=4, limited: pods=4\n",
+   "stderr": "",
+   "combined": "pods \"web-779d6bb6cb-nkggv\" is forbidden: exceeded quota: lab-developer, requested: pods=1, used: pods=4, limited: pods=4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe appliedclusterresourcequota lab-developer -n lab-test",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\tlab-developer\nCreated:\t7 seconds ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t4\t4\n",
+   "stderr": "",
+   "combined": "Name:\t\tlab-developer\nCreated:\t7 seconds ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t4\t4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterresourcequota lab-developer -o jsonpath='{range .status.namespaces[*]}{.namespace}{\"\\t\"}{.status.used.pods}{\"\\n\"}{end}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "academy-lesson-n-cluster-quotas\t0\nlab-test\t1\nlab-dev\t3\nacademy-ledger-probe\t0\n",
+   "stderr": "",
+   "combined": "academy-lesson-n-cluster-quotas\t0\nlab-test\t1\nlab-dev\t3\nacademy-ledger-probe\t0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deploy/web --replicas=1 -n lab-dev",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web scaled\n",
+   "stderr": "",
+   "combined": "deployment.apps/web scaled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/web -n lab-test --timeout=300s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe appliedclusterresourcequota lab-developer -n lab-test",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\tlab-developer\nCreated:\tAbout a minute ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t3\t4\n",
+   "stderr": "",
+   "combined": "Name:\t\tlab-developer\nCreated:\tAbout a minute ago\nLabels:\t\t<none>\nAnnotations:\t<none>\nNamespace Selector: [\"academy-lesson-n-cluster-quotas\" \"lab-test\" \"lab-dev\" \"academy-ledger-probe\"]\nLabel Selector: \nAnnotationSelector: map[openshift.io/requester:developer]\nResource\tUsed\tHard\n--------\t----\t----\npods\t\t3\t4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete clusterresourcequota lab-developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterresourcequota.quota.openshift.io \"lab-developer\" deleted\n",
+   "stderr": "",
+   "combined": "clusterresourcequota.quota.openshift.io \"lab-developer\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-dev lab-test",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-dev\" deleted\nproject.project.openshift.io \"lab-test\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-dev\" deleted\nproject.project.openshift.io \"lab-test\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 117,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-SELF-02",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete clusterresourcequota lab-developer --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project lab-dev lab-test --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "names=$(oc get clusterresourcequotas -o name) || exit 1\ntest -z \"$names\"",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get clusterresourcequotas -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get namespace lab-dev lab-test -o name --ignore-not-found",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'",
+    "same": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,153 @@
+/* ============================================================================================================
+   Design tokens: the single source for colour, type, spacing, shape and motion.
+   A neutral foundation with one accent (cobalt). Colour means something: accent = action, selection and "you are
+   here"; green = correct or done; amber = caution; red = wrong or failed. Courses are told apart by number and
+   name, not by colour. Figtree for the interface and headings, Source Serif 4 for lesson explanations,
+   JetBrains Mono for anything technical. Loaded first; every other stylesheet uses these names.
+   ============================================================================================================ */
+:root,
+:root[data-theme='light'] {
+  --bg: #f8f8f6;
+  --bg-2: #f0f0ed;
+  --surface: #ffffff;
+  --surface-2: #f6f6f3;
+  --surface-3: #ecece8;
+  --line: rgba(20, 22, 30, 0.1);
+  --line-2: rgba(20, 22, 30, 0.18);
+  --dot: rgba(20, 22, 30, 0.07);
+  --text: #15171c;
+  --text-2: #363a43;
+  --muted: #5d616b; /* 5.9:1 on --bg, 6.3:1 on --surface */
+  --placeholder: #5d616b;
+  --accent: #2b55d0; /* 5.9:1 on white */
+  --accent-strong: #1f42ab;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(43, 85, 208, 0.08);
+  --accent-line: rgba(43, 85, 208, 0.35);
+  --link: #2449bd;
+  --ok: #18763c;
+  --ok-soft: rgba(24, 118, 60, 0.08);
+  --warn: #8d5600;
+  --warn-soft: rgba(176, 108, 0, 0.09);
+  --bad: #b8302a;
+  --bad-soft: rgba(184, 48, 42, 0.07);
+  --info: var(--accent);
+  --violet: #5b4bb7;
+  /* code and terminals: light panels for files, a dark panel for terminal sessions in both themes */
+  --code-bg: #f4f4f1;
+  --code-line: rgba(20, 22, 30, 0.09);
+  --term-bg: #17181c;
+  --term-bar: #1e1f24;
+  --term-text: #e7e8ea;
+  --term-muted: #a2a5ad;
+  --term-placeholder: #a2a5ad;
+  --term-line: rgba(255, 255, 255, 0.09);
+  --term-prompt: #8fd9a1;
+  --shadow-1: 0 1px 2px rgba(20, 22, 30, 0.05);
+  --shadow-2: 0 2px 4px rgba(20, 22, 30, 0.04), 0 12px 32px -12px rgba(20, 22, 30, 0.18);
+  --shadow-3: 0 24px 64px -24px rgba(20, 22, 30, 0.32);
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  --bg: #111214;
+  --bg-2: #161719;
+  --surface: #18191c;
+  --surface-2: #1d1e22;
+  --surface-3: #25262b;
+  --line: rgba(255, 255, 255, 0.085);
+  --line-2: rgba(255, 255, 255, 0.15);
+  --dot: rgba(255, 255, 255, 0.05);
+  --text: #ececee;
+  --text-2: #c8cad0;
+  --muted: #9a9ea8; /* 6.6:1 on --bg */
+  --placeholder: #9a9ea8;
+  --accent: #8eaaff;
+  --accent-strong: #b4c6ff;
+  --accent-ink: #0d1430;
+  --accent-soft: rgba(142, 170, 255, 0.11);
+  --accent-line: rgba(142, 170, 255, 0.42);
+  --link: #9db5ff;
+  --ok: #6dd194;
+  --ok-soft: rgba(109, 209, 148, 0.1);
+  --warn: #efb560;
+  --warn-soft: rgba(239, 181, 96, 0.1);
+  --bad: #ff8f86;
+  --bad-soft: rgba(255, 143, 134, 0.09);
+  --violet: #b8a8ff;
+  --code-bg: #1b1c20;
+  --code-line: rgba(255, 255, 255, 0.07);
+  --term-bg: #0c0d0f;
+  --term-bar: #141518;
+  --term-text: #e4e5e8;
+  --term-muted: #9a9ea8;
+  --term-placeholder: #9a9ea8;
+  --term-line: rgba(255, 255, 255, 0.08);
+  --term-prompt: #8fd9a1;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -14px rgba(0, 0, 0, 0.7);
+  --shadow-3: 0 24px 64px -24px rgba(0, 0, 0, 0.85);
+  color-scheme: dark;
+}
+:root {
+  /* type */
+  --sans: 'Figtree Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --serif: 'Source Serif 4 Variable', 'Iowan Old Style', Charter, Georgia, serif;
+  --display: var(--sans);
+  --mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --fs-xs: 0.8125rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-read: 1.125rem; /* lesson explanations */
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: clamp(1.75rem, 1.2rem + 1.6vw, 2.25rem);
+  --fs-3xl: clamp(2.25rem, 1.4rem + 3vw, 3.4rem);
+  /* layout: one frame, three content widths, measured sticky chrome */
+  --wrap: 1120px; /* the frame: header, section tabs, pages and footer share it (grows on large screens, below) */
+  --gutter: 36px; /* the frame's side padding (16px on phones) */
+  --measure: 68ch; /* reading: running prose, measured in its own font (about 650 px of lesson serif) */
+  --w-text: 47.5rem; /* interface text: questions, tasks, notes, page introductions (760 px) */
+  --w-wide: 66rem; /* things with long lines or two dimensions: models, diagrams, terminals, code, tables (1056 px) */
+  --rail: 232px; /* a page's side navigation (the lesson contents) */
+  --rail-gap: clamp(32px, 3.5vw, 64px);
+  /* sticky chrome, measured at runtime: the site header, the page bar of a detail page while it is sticky (wide
+     screens), and the lesson contents bar on phones. --hdr is what covers the top of the page: anchors, sticky
+     columns and scroll offsets start below it. */
+  --hdr-site: 60px;
+  --page-bar-h: 0px;
+  --outline-bar-h: 0px;
+  --hdr: calc(var(--hdr-site) + var(--page-bar-h) + var(--outline-bar-h));
+  --sticky-top: calc(var(--hdr) + 16px); /* where a sticky column or control rests */
+  /* space (4px grid) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px; --s9: 96px;
+  /* shape */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  /* motion (NN/g: feedback ~100 ms, panels 200-300 ms; enter eases out) */
+  --dur-1: 110ms;
+  --dur-2: 180ms;
+  --dur-3: 280ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  /* activity and territory colours used to vary; they are all the accent now (meaning comes from labels) */
+  --act-learn: var(--accent); --act-predict: var(--accent); --act-check: var(--accent); --act-explore: var(--accent);
+  --act-practise: var(--accent); --act-solve: var(--accent); --act-review: var(--accent);
+  --m-real: var(--ok); --m-sim: var(--violet); --m-guided: var(--accent); --m-ent: var(--warn); --m-ext: var(--muted);
+  --t-amber: var(--accent); --t-teal: var(--accent); --t-blue: var(--accent); --t-coral: var(--accent);
+  --t-violet: var(--accent); --t-slate: var(--accent); --t-green: var(--accent);
+  --t-amber-soft: var(--accent-soft); --t-teal-soft: var(--accent-soft); --t-blue-soft: var(--accent-soft);
+  --t-coral-soft: var(--accent-soft); --t-violet-soft: var(--accent-soft); --t-slate-soft: var(--accent-soft);
+  --t-green-soft: var(--accent-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; }
+}
+
+/* large monitors: the frame grows so that wide content (models, terminals, code) gets the room; reading columns keep
+   their measure, so prose never stretches */
+@media (min-width: 1360px) { :root { --wrap: 1240px; } }
+@media (min-width: 1600px) { :root { --wrap: 1360px; } }
+@media (min-width: 1880px) { :root { --wrap: 1440px; } }
+@media (max-width: 880px) { :root { --gutter: 16px; } }

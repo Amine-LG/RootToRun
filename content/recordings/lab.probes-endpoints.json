@@ -1,0 +1,244 @@
+{
+ "lab": "lab.probes-endpoints",
+ "kind": "lab",
+ "lab_hash": "2da5632dea436aa2",
+ "recorded_at": "2026-10-13T22:13:48+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes -o yaml",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\nitems:\n- addressType: IPv4\n  apiVersion: discovery.k8s.io/v1\n  endpoints:\n  - addresses:\n    - 10.217.1.103\n    conditions:\n      ready: true\n      serving: true\n      terminating: false\n    nodeName: crc\n    targetRef:\n      kind: Pod\n      name: web-7dccfc8867-6wqvz\n      namespace: academy-probes\n      uid: 9f06dae2-6a23-47d3-b1da-76c184af0442\n  - addresses:\n    - 10.217.1.104\n    conditions:\n      ready: true\n      serving: true\n      terminating: false\n    nodeName: crc\n    targetRef:\n      kind: Pod\n      name: web-7dccfc8867-dphlc\n      namespace: academy-probes\n      uid: e746e113-f3db-4ef4-8334-0be95e435a54\n  kind: EndpointSlice\n  metadata:\n    annotations:\n      endpoints.kubernetes.io/last-change-trigger-time: \"2026-10-13T22:13:55Z\"\n    creationTimestamp: \"2026-10-13T22:13:50Z\"\n    generateName: web-\n    generation: 5\n    labels:\n      endpointslice.kubernetes.io/managed-by: endpointslice-controller.k8s.io\n      kubernetes.io/service-name: web\n    name: web-j6lj5\n    namespace: academy-probes\n    ownerReferences:\n    - apiVersion: v1\n      blockOwnerDeletion: true\n      controller: true\n      kind: Service\n      name: web\n      uid: 491cf379-2619-473c-a0f4-17b23d6a33e4\n    resourceVersion: \"133813\"\n    uid: e67a332c-b164-4acb-943f-1734faf072f4\n  ports:\n  - name: \"\"\n    port: 8080\n    protocol: TCP\nkind: List\nmetadata:\n  resourceVersion: \"\"\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc get pods -n academy-probes -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\napi-b6d68fd96-6k76x    1/1     Running   0          8s    10.217.1.105   crc    <none>           <none>\nweb-7dccfc8867-6wqvz   1/1     Running   0          8s    10.217.1.103   crc    <none>           <none>\nweb-7dccfc8867-dphlc   1/1     Running   0          8s    10.217.1.104   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "baseline",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS                   AGE\nweb-j6lj5   IPv4          8080    10.217.1.103,10.217.1.104   8s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "baseline",
+   "cmd": "oc get route web -n academy-probes",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   HOST/PORT                             PATH   SERVICES   PORT   TERMINATION   WILDCARD\nweb    web-academy-probes.apps-crc.testing          web        8080                 None\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drain-one",
+   "cmd": "oc exec <one-web-pod> -n academy-probes -- rm /tmp/ready",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc exec web-7dccfc8867-6wqvz -n academy-probes -- rm /tmp/ready",
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drained",
+   "cmd": "oc get pods -n academy-probes -l app=web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-7dccfc8867-6wqvz   0/1     Running   0          12s\nweb-7dccfc8867-dphlc   1/1     Running   0          12s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drained",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} {.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "web-7dccfc8867-6wqvz 10.217.1.103 ready=false\nweb-7dccfc8867-dphlc 10.217.1.104 ready=true\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "drained",
+   "cmd": "oc get events -n academy-probes --field-selector reason=Unhealthy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON      OBJECT                     MESSAGE\n2s          Warning   Unhealthy   pod/web-7dccfc8867-6wqvz   Readiness probe failed:\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "restore",
+   "cmd": "oc exec <the-same-pod> -n academy-probes -- touch /tmp/ready",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc exec web-7dccfc8867-6wqvz -n academy-probes -- touch /tmp/ready",
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "restore",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS                   AGE\nweb-j6lj5   IPv4          8080    10.217.1.103,10.217.1.104   13s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "api",
+   "cmd": "oc set probe deploy/api -n academy-probes --readiness --get-url=http://:8080/healthz --period-seconds=5",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/api probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "api",
+   "cmd": "oc describe deploy/api -n academy-probes",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:                   api\nNamespace:              academy-probes\nCreationTimestamp:      Tue, 13 Oct 2026 22:13:50 +0000\nLabels:                 app=api\nAnnotations:            deployment.kubernetes.io/revision: 2\nSelector:               app=api\nReplicas:               1 desired | 1 updated | 2 total | 1 available | 1 unavailable\nStrategyType:           RollingUpdate\nMinReadySeconds:        0\nRollingUpdateStrategy:  25% max unavailable, 25% max surge\nPod Template:\n  Labels:  app=api\n  Containers:\n   httpd:\n    Image:      registry.access.redhat.com/ubi9/httpd-24:latest\n    Port:       8080/TCP\n    Host Port:  0/TCP\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:        10m\n      memory:     32Mi\n    Readiness:    http-get http://:8080/healthz delay=0s timeout=1s period=5s #success=1 #failure=3\n    Environment:  <none>\n    Mounts:\n      /var/www/html from content (rw)\n  Volumes:\n   content:\n    Type:          ConfigMap (a volume populated by a ConfigMap)\n    Name:          web-content\n    Optional:      false\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nConditions:\n  Type           Status  Reason\n  ----           ------  ------\n  Available      True    MinimumReplicasAvailable\n  Progressing    True    ReplicaSetUpdated\nOldReplicaSets:  api-b6d68fd96 (1/1 replicas created)\nNewReplicaSet:   api-854df545c8 (1/1 replicas created)\nEvents:\n  Type    Reason             Age   From                   Message\n  ----    ------             ----  ----                   -------\n  Normal  ScalingReplicaSet  17s   deployment-controller  Scaled up replica set api-b6d68fd96 from 0 to 1\n  Normal  ScalingReplicaSet  0s    deployment-controller  Scaled up replica set api-854df545c8 from 0 to 1\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "two-ready",
+    "title": "web has 2 ready endpoints",
+    "expect": "2 ready addresses",
+    "status": "pass",
+    "observed": "2 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "drained",
+    "title": "A readiness failure really happened (kubelet event)",
+    "expect": "an Unhealthy event: Readiness probe failed",
+    "status": "fail",
+    "observed": "0 event(s) · none"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the app",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-probes.apps-crc.testing/ → HTTP 200 · academy probes"
+   },
+   {
+    "id": "api-probe",
+    "title": "api has an httpGet readiness probe on /healthz",
+    "expect": "/healthz",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].readinessProbe.httpGet.path = None"
+   },
+   {
+    "id": "api-ready",
+    "title": "api is ready",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "no-restarts",
+    "title": "No web container was restarted",
+    "expect": "2 pods, 0 restarts",
+    "status": "pass",
+    "observed": "2 of 2 match · web-7dccfc8867-6wqvz: Running [ready, restarts 0], web-7dccfc8867-dphlc: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791929637.9605458
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "two-ready",
+    "title": "web has 2 ready endpoints",
+    "expect": "2 ready addresses",
+    "status": "pass",
+    "observed": "2 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "drained",
+    "title": "A readiness failure really happened (kubelet event)",
+    "expect": "an Unhealthy event: Readiness probe failed",
+    "status": "pass",
+    "observed": "1 event(s) · Readiness probe failed: "
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the app",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-probes.apps-crc.testing/ → HTTP 200 · academy probes"
+   },
+   {
+    "id": "api-probe",
+    "title": "api has an httpGet readiness probe on /healthz",
+    "expect": "/healthz",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].readinessProbe.httpGet.path = '/healthz'"
+   },
+   {
+    "id": "api-ready",
+    "title": "api is ready",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "no-restarts",
+    "title": "No web container was restarted",
+    "expect": "2 pods, 0 restarts",
+    "status": "pass",
+    "observed": "2 of 2 match · web-7dccfc8867-6wqvz: Running [ready, restarts 0], web-7dccfc8867-dphlc: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791929656.2643259
+ },
+ "seconds": 28,
+ "ok": true,
+ "problems": []
+}

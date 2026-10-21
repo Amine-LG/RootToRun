@@ -1,0 +1,92 @@
+/* Page actions (components/Contribute.tsx): "Report a problem" and "Edit on GitHub" at the top right of a page
+   header, a compact copy in the site header once they have scrolled away, and the footer's "Report a problem".
+   Quiet by default (muted text, no border); every control is at least 32px high (24px minimum target, 2.5.8) and
+   44px on touch screens. */
+.pa { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: var(--fs-sm); line-height: 1.3; }
+.pa-wide { display: flex; align-items: center; gap: 2px; }
+.pa-narrow { display: none; }
+@media (max-width: 880px) {
+  .pa-wide { display: none; }
+  .pa-narrow { display: block; }
+}
+
+.pa-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 9px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--text-2); font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer; text-decoration: none !important;
+  transition: background var(--dur-1, 0.15s), color var(--dur-1, 0.15s), border-color var(--dur-1, 0.15s);
+}
+.pa-btn:hover, .pa-btn[aria-expanded='true'] { color: var(--text); background: var(--surface-2); border-color: var(--line); }
+.pa-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pa-btn .icon { flex: none; }
+.pa-caret { flex: none; opacity: 0.7; }
+.pa-btn.pa-icon { justify-content: center; width: 36px; height: 36px; padding: 0; color: var(--text-2); }
+@media (pointer: coarse) { .pa-btn { min-height: 44px; } .pa-btn.pa-icon { width: 44px; height: 44px; } }
+
+.pa-menu { position: relative; }
+.pa-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; width: max-content; min-width: 240px; max-width: min(340px, calc(100vw - 32px));
+  padding: 6px; border: 1px solid var(--line-2); border-radius: var(--radius, 12px); background: var(--surface); box-shadow: var(--shadow-2);
+  text-align: left; white-space: normal;
+  translate: var(--pa-shift, 0) 0; /* set when its button sits too close to the window's edge (Contribute.tsx) */
+}
+.pa-pop[hidden] { display: none; }
+@media (prefers-reduced-motion: no-preference) { .pa-pop:not([hidden]) { animation: pa-in var(--dur-2, 0.18s) var(--ease, ease) both; } }
+@keyframes pa-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.pa-h { margin: 6px 10px 2px; font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pa-h:first-child { margin-top: 2px; }
+.pa-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.pa-item { display: grid; gap: 1px; min-height: 40px; padding: 7px 10px; border-radius: 8px; color: var(--text); text-decoration: none !important; }
+.pa-item:hover { background: var(--surface-2); }
+.pa-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pa-item-t { font-weight: 550; }
+.pa-item-d { font-size: var(--fs-xs, 0.78rem); color: var(--muted); }
+.pa-item-d code { font-family: var(--mono); font-size: 0.95em; background: none; padding: 0; }
+
+/* the compact copy in the sticky site header (Shell: #page-actions-dock), shown once the page's own actions have
+   scrolled away under it */
+#page-actions-dock { display: contents; }
+.pa-dock { display: flex; align-items: center; }
+/* a fade only: a transform on the dock (even its end state, kept by fill-mode) would make it the containing block of the
+   fixed panel below, which then opened from the dock instead of the window's edge (cut off on the left on a phone) */
+@media (prefers-reduced-motion: no-preference) { .pa-dock { animation: pa-fade var(--dur-2, 0.18s) var(--ease, ease) both; } }
+@keyframes pa-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 880px) { #page-actions-dock { display: none; } } /* phones: the menu's "This page" offers them */
+
+/* the docked button sits among the header's icons, not at the edge: its panel keeps to the viewport's right edge */
+.pa-dock .pa-pop { position: fixed; top: auto; right: 12px; margin-top: 6px; }
+.page-bar > .page-actions-slot { margin-left: auto; } /* the slot at the bar's right end, also when nothing grows before it */
+
+/* phones: the actions open as a sheet from the bottom of the screen, over a dimmed page (Contribute.tsx Disclosure) */
+.pa-backdrop {
+  /* the visible area (Contribute.tsx sets --vv-*: with Android's keyboard open, smaller than the layout viewport) */
+  position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-height, 100%); z-index: 70; display: flex; align-items: flex-end; justify-content: center;
+  background: color-mix(in srgb, #000 45%, transparent); overscroll-behavior: contain;
+}
+.pa-sheet {
+  width: 100%; max-width: 560px; max-height: min(85vh, 640px); max-height: min(85%, 640px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 4px max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  border: 1px solid var(--line-2); border-bottom: 0;
+  border-radius: 18px 18px 0 0; background: var(--surface); box-shadow: var(--shadow-2); text-align: left; font-size: 1rem;
+}
+.pa-sheet-h {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 -12px 4px; padding: 10px 8px 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.pa-sheet:focus { outline: none; } /* focused on opening, for screen readers: its title is read */
+.pa-sheet-h h2 { margin: 0; font-size: 1.02rem; line-height: 1.3; font-family: var(--display); }
+.pa-sheet-h .icon-btn { width: 44px; height: 44px; flex: none; }
+.pa-sheet .pa-h { margin: 14px 8px 4px; }
+.pa-sheet .pa-item { min-height: 52px; padding: 9px 10px; align-content: center; }
+.pa-sheet .pa-item-d { font-size: 0.86rem; }
+@media (prefers-reduced-motion: no-preference) {
+  .pa-backdrop { animation: pa-fade var(--dur-2, 0.18s) var(--ease, ease) both; }
+  .pa-sheet { animation: pa-up 0.22s var(--ease, ease) both; }
+}
+@keyframes pa-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.pa-narrow .pa-btn:not(.pa-icon) { min-height: 44px; padding: 6px 12px; border-color: var(--line); background: var(--surface); }
+/* the narrowest phones (under 360px): the flag alone, so the way back keeps its row; its name is still announced, shown
+   as a tooltip, and written out in the menu's "This page" */
+@media (max-width: 359px) {
+  .pa-narrow .pa-btn:not(.pa-icon) { width: 44px; padding: 0; justify-content: center; }
+  .pa-narrow .pa-btn:not(.pa-icon) > span { display: none; }
+}

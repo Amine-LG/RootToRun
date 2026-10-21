@@ -1,0 +1,1555 @@
+{
+ "lab": "ch.ship-web-app",
+ "kind": "challenge",
+ "lab_hash": "6beca43de4691aae",
+ "recorded_at": "2026-10-14T16:53:44+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/shop-content created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop volume updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/shop exposed\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc expose service shop -n academy-ch-ship",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/shop exposed\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "ready",
+    "title": "shop runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "content",
+    "title": "The page comes from ConfigMap shop-content",
+    "expect": "contains the welcome text",
+    "status": "fail",
+    "observed": "Error from server (NotFound): configmaps \"shop-content\" not found"
+   },
+   {
+    "id": "image",
+    "title": "shop runs the approved httpd image",
+    "expect": "a container from ubi9/httpd-24",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "content-mount",
+    "title": "The served directory comes from ConfigMap shop-content",
+    "expect": "shop-content mounted at /var/www/html",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "probe",
+    "title": "An HTTP or TCP readiness probe checks the web port",
+    "expect": "readiness probe on port 8080",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "mem-request",
+    "title": "Every container requests memory",
+    "expect": "a memory request on every container",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "mem-limit",
+    "title": "Every container has a memory limit",
+    "expect": "a memory limit on every container",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"shop\" not found"
+   },
+   {
+    "id": "inside",
+    "title": "http://shop:8080/ answers inside the project",
+    "expect": "the page, from the client pod",
+    "status": "fail",
+    "observed": "command terminated with exit code 6"
+   },
+   {
+    "id": "outside",
+    "title": "Route shop serves the page",
+    "expect": "HTTP 200 with the page",
+    "status": "fail",
+    "observed": "Error from server (NotFound): routes.route.openshift.io \"shop\" not found"
+   }
+  ],
+  "at": 1791996835.215507
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready",
+    "title": "shop runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "content",
+    "title": "The page comes from ConfigMap shop-content",
+    "expect": "contains the welcome text",
+    "status": "pass",
+    "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+   },
+   {
+    "id": "image",
+    "title": "shop runs the approved httpd image",
+    "expect": "a container from ubi9/httpd-24",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "content-mount",
+    "title": "The served directory comes from ConfigMap shop-content",
+    "expect": "shop-content mounted at /var/www/html",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "probe",
+    "title": "An HTTP or TCP readiness probe checks the web port",
+    "expect": "readiness probe on port 8080",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "mem-request",
+    "title": "Every container requests memory",
+    "expect": "a memory request on every container",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "mem-limit",
+    "title": "Every container has a memory limit",
+    "expect": "a memory limit on every container",
+    "status": "pass",
+    "observed": "httpd-24: ok"
+   },
+   {
+    "id": "inside",
+    "title": "http://shop:8080/ answers inside the project",
+    "expect": "the page, from the client pod",
+    "status": "pass",
+    "observed": "<h1>Welcome to the shop</h1>"
+   },
+   {
+    "id": "outside",
+    "title": "Route shop serves the page",
+    "expect": "HTTP 200 with the page",
+    "status": "pass",
+    "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+   }
+  ],
+  "at": 1791996854.3637767
+ },
+ "trials": [
+  {
+   "id": "wrong-selector",
+   "title": "Everything created, but the Service selects a label no pod has",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "fail",
+     "observed": "command terminated with exit code 7"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "fail",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc set resources deploy/shop --requests=memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc apply -f - -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "content-not-mounted",
+   "title": "The ConfigMap exists but is never mounted: httpd serves its default page",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "fail",
+     "observed": "spec.replicas 2, ready 1/2, updated 1, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "fail",
+     "observed": "httpd-24: /var/www/html/index.html does not come from ConfigMap shop-content"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "fail",
+     "observed": "registered trademark of <a href=\"https://apache.org\">the Apache Software Foundation</a> in the United States and/or other countries.\n        <br />\n\t\t<a href=\"https://nginx.com\">NGINX&trade;</a> is a registered trademark of <a href=\"https://www.f5.com\">F5 Networks, Inc.</a>.\n\t</div>\n\t</body>\n</html>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "fail",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 403 · Test Page for the HTTP Server on Red Hat Enterprise Linux /*"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc set resources deploy/shop --requests=memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:content-not-mounted",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "all-yaml",
+   "title": "A correct alternative: every object written as YAML, different volume name, probe on a TCP socket",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<p>Welcome to the shop</p>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "web: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<p>Welcome to the shop</p>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:all-yaml",
+     "cmd": "oc apply -f - -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\ndeployment.apps/shop created\nservice/shop created\nroute.route.openshift.io/shop created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-03-wrong-image",
+   "title": "serving page from unapproved UBI8 image",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "fail",
+     "observed": "no container runs registry.access.redhat.com/ubi9/httpd-24 (images: registry.access.redhat.com/ubi8/httpd-24:latest)"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "fail",
+     "observed": "no container runs registry.access.redhat.com/ubi9/httpd-24 (images: registry.access.redhat.com/ubi8/httpd-24:latest)"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "fail",
+     "observed": "no container runs registry.access.redhat.com/ubi9/httpd-24 (images: registry.access.redhat.com/ubi8/httpd-24:latest)"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<h1>Welcome to the shop</h1>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc set image deploy/shop httpd-24=registry.access.redhat.com/ubi8/httpd-24:latest -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop image updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-wrong-image",
+     "cmd": "oc rollout status deploy/shop --timeout=180s -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-03-shadow-content",
+   "title": "identical page from an unrequired ConfigMap",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "fail",
+     "observed": "httpd-24: /var/www/html/index.html does not come from ConfigMap shop-content"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<h1>Welcome to the shop</h1>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc create configmap shadow --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shadow created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc set volume deploy/shop --add --overwrite --name=html --type=configmap --configmap-name=shadow --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-shadow-content",
+     "cmd": "oc rollout status deploy/shop --timeout=180s -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-03-always-ready",
+   "title": "readiness ignores the web server",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "fail",
+     "observed": "httpd-24: readiness probe exec (needs httpGet or tcpSocket)"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<h1>Welcome to the shop</h1>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc patch deploy/shop --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe\",\"value\":{\"exec\":{\"command\":[\"/bin/true\"]}}}]' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-03-always-ready",
+     "cmd": "oc rollout status deploy/shop --timeout=180s -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-04-helper-first",
+   "title": "valid web container after helper",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "helper: ok; httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "helper: ok; httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<h1>Welcome to the shop</h1>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-ship.apps-crc.testing/ → HTTP 200 · Welcome to the shop"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc expose service shop -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc patch deploy/shop --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0\",\"value\":{\"name\":\"helper\",\"image\":\"registry.access.redhat.com/ubi9/ubi-minimal:latest\",\"command\":[\"sleep\",\"infinity\"],\"resources\":{\"requests\":{\"memory\":\"16Mi\"},\"limits\":{\"memory\":\"32Mi\"}}}}]' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-04-helper-first",
+     "cmd": "oc rollout status deploy/shop --timeout=180s -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-17-shadowed-route",
+   "title": "named Route borrows an older Route host",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "ready",
+     "title": "shop runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "content",
+     "title": "The page comes from ConfigMap shop-content",
+     "expect": "contains the welcome text",
+     "status": "pass",
+     "observed": "data.index\\.html = '<h1>Welcome to the shop</h1>'"
+    },
+    {
+     "id": "image",
+     "title": "shop runs the approved httpd image",
+     "expect": "a container from ubi9/httpd-24",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "content-mount",
+     "title": "The served directory comes from ConfigMap shop-content",
+     "expect": "shop-content mounted at /var/www/html",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "probe",
+     "title": "An HTTP or TCP readiness probe checks the web port",
+     "expect": "readiness probe on port 8080",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-request",
+     "title": "Every container requests memory",
+     "expect": "a memory request on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "mem-limit",
+     "title": "Every container has a memory limit",
+     "expect": "a memory limit on every container",
+     "status": "pass",
+     "observed": "httpd-24: ok"
+    },
+    {
+     "id": "inside",
+     "title": "http://shop:8080/ answers inside the project",
+     "expect": "the page, from the client pod",
+     "status": "pass",
+     "observed": "<h1>Welcome to the shop</h1>"
+    },
+    {
+     "id": "outside",
+     "title": "Route shop serves the page",
+     "expect": "HTTP 200 with the page",
+     "status": "fail",
+     "observed": "Route shop is not admitted by the router: HostAlreadyClaimed route working already exposes working-academy-ch-ship.apps-crc.testing and is older"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/shop-content created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc expose deployment shop --port=8080 -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "service/shop exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc expose service shop --name=working -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/working exposed\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-17-shadowed-route",
+     "cmd": "oc apply -f - -n academy-ch-ship",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "route.route.openshift.io/shop created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 587,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-ship: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

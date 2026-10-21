@@ -1,0 +1,107 @@
+id: lab.access-paths
+title: "Trace a permission to its source"
+summary: "Find why a subject can do something: direct bindings, real groups and virtual groups such as system:authenticated and system:serviceaccounts:<namespace>."
+module: l1-access
+mode: REAL_LAB
+minutes: 35
+level: 3
+supports: "Recorded on OpenShift 4.21.8. Impersonation (`--as`) of ServiceAccounts in your own projects is allowed to project admins; cluster-scoped bindings are read with the reader identity."
+concepts: [sec.rbac, sec.serviceaccounts, ocp.auth]
+prerequisites: [l.access-paths]
+namespace: academy-access
+objective: |
+  Explain any effective permission as a path (subject → group → binding → role → rule), including the virtual groups
+  Kubernetes and OpenShift add automatically, and replace a broad grant with a precise one.
+background: |
+  A permission is never stored on a user. It is the union of every binding that reaches the subject directly or
+  through a group, including **virtual groups** that nobody creates or edits: the authenticator attaches them to
+  each request. Kubernetes itself adds `system:authenticated` (every authenticated identity),
+  `system:serviceaccounts` (every ServiceAccount) and `system:serviceaccounts:<namespace>` (every ServiceAccount of
+  one namespace); OpenShift adds `system:authenticated:oauth` (users authenticated with an OAuth access token).
+  Access-review tools draw these paths automatically; here you trace them by hand. The project has two
+  ServiceAccounts: `scanner` and `builder-bot`.
+
+  **Where everything comes from.** The app creates the project `academy-access` and applies the two ServiceAccounts,
+  `scanner` and `builder-bot`, shown below. The cluster-wide binding `self-provisioners` is part of every OpenShift
+  cluster; the reader identity reads it because a normal user cannot read ClusterRoleBindings. Clean up deletes the
+  project.
+setup:
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: scanner}
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: builder-bot}
+steps:
+  - id: why-projects
+    title: "Why can developer create projects at all?"
+    do: "Follow the path for `create projectrequests` through a cluster binding."
+    commands:
+      - {cmd: "oc auth can-i create projectrequests", meaning: "yes, for developer (plus a harmless warning that projectrequests is not namespace scoped)"}
+      - {cmd: "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef.name}{\" <- \"}{.subjects}'", as: reader, meaning: "the binding's role and its subjects"}
+    observe: "`self-provisioner <- [{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"Group\",\"name\":\"system:authenticated:oauth\"}]`: every user who authenticates with an OAuth token may request projects."
+    why: |
+      Nobody added developer to that group: it is virtual, attached to every request made with an OAuth access
+      token. Disabling self-provisioning means a cluster administrator removes that group from this binding and
+      sets the binding's `rbac.authorization.kubernetes.io/autoupdate` annotation to `"false"` so the API server does
+      not restore it: a cluster-wide decision.
+  - id: broad
+    title: "A broad grant through a virtual group"
+    do: "Grant view to every ServiceAccount of the project at once, then ask about both ServiceAccounts."
+    commands:
+      - {cmd: "oc policy add-role-to-group view system:serviceaccounts:academy-access -n academy-access", meaning: "all ServiceAccounts in the namespace"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-access:scanner -n academy-access", meaning: "yes"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-access:builder-bot -n academy-access", meaning: "yes too: same group"}
+    predict:
+      prompt: "You create a third ServiceAccount tomorrow. Can it list pods?"
+      choices: ["No, it is not named in any binding", "Yes: it is automatically a member of system:serviceaccounts:academy-access"]
+      answer: 1
+      explain: "Virtual group grants apply to subjects that do not exist yet, which is why they are powerful and risky."
+      feedback:
+        - "Bindings can name groups as well as individual subjects. Every ServiceAccount of academy-access is automatically in system:serviceaccounts:academy-access, so the group binding reaches it with no binding naming it."
+        - "Right. Group membership is computed from the account's namespace when it authenticates, so tomorrow's ServiceAccount is covered by today's grant."
+  - id: trace
+    title: "Trace it"
+    do: "List who can list pods here, then read the binding that explains it."
+    commands:
+      - {cmd: "oc adm policy who-can list pods -n academy-access", meaning: "users and groups; scanner and builder-bot appear only through the group system:serviceaccounts:academy-access"}
+      - {cmd: "oc get rolebindings -n academy-access -o wide", meaning: "ROLE and the USERS, GROUPS and SERVICEACCOUNTS columns"}
+    observe: |
+      who-can lists users (developer, kubeadmin, system:admin, the project's `deployer` ServiceAccount, many platform
+      controllers) and groups, among them `system:cluster-readers` and `system:serviceaccounts:academy-access`.
+      scanner and builder-bot are not listed by name: they get the permission only through the group. The output
+      ends with a warning that results may be incomplete (a cluster binding refers to a missing ClusterRole). In the
+      bindings, your `view` binding names the group `system:serviceaccounts:academy-access`, and so does
+      `system:image-pullers`, which OpenShift creates in every project so its pods can pull the project's images.
+    why: "Default bindings are part of every access review. Knowing which ones OpenShift creates (admin for the project requester, image-pullers, image-builders, deployers) lets you spot the ones that were added by hand."
+  - id: precise
+    title: "Replace it with a precise grant"
+    do: "Remove the group grant and give view to scanner only."
+    commands:
+      - {cmd: "oc policy remove-role-from-group view system:serviceaccounts:academy-access -n academy-access", meaning: "remove the broad grant"}
+      - {cmd: "oc policy add-role-to-user view -z scanner -n academy-access", meaning: "-z names a ServiceAccount of this project"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-access:scanner -n academy-access", meaning: "yes"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-access:builder-bot -n academy-access", meaning: "no", expect: fail}
+    wait_for: [scanner-yes, bot-no, no-group]
+hints: []
+checks:
+  - {id: scanner-yes, title: "scanner can list pods", type: can_i, as: scanner, verb: list, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: bot-no, title: "builder-bot cannot list pods", type: can_i, as: builder-bot, verb: list, resource: pods, expect: "no", expect_text: "no"}
+  - {id: no-group, title: "No view binding to the namespace's ServiceAccount group remains", type: count, kind: rolebindings, op: eq, value: 0, where: [{path: "subjects[0].name", op: eq, value: "system:serviceaccounts:academy-access"}, {path: roleRef.name, op: eq, value: view}], expect_text: "0 bindings"}
+questions:
+  - q: "Name four virtual groups OpenShift adds automatically."
+    a: "system:authenticated, system:serviceaccounts and system:serviceaccounts:<namespace> come from Kubernetes; system:authenticated:oauth is added by OpenShift for OAuth tokens. (system:unauthenticated covers anonymous requests.)"
+  - q: "Why are virtual-group grants a common audit finding?"
+    a: "They silently apply to every current and future member, including ServiceAccounts created later, so the effective audience is much larger than it looks."
+enterprise: |
+  An access review answers, for each sensitive permission: who has it, through which binding, since when, and who
+  approved it. Doing that by hand across hundreds of namespaces is why access-review tools exist.
+references:
+  - {title: "Kubernetes: Using RBAC (default roles and groups)", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#default-roles-and-role-bindings"}
+  - {title: "OpenShift 4.21: Groups and virtual groups", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-authentication#rbac-groups_understanding-authentication"}
+  - {title: "OpenShift 4.21: Disabling project self-provisioning", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects#disabling-project-self-provisioning_configuring-project-creation"}
+  - {title: "Lineage, an open-source access explainer by the author of this site", url: "https://github.com/Amine-LG/lineage"}
+variations:
+  - "Trace why `developer` may list pods in this project: name the binding, the role and the rule. Check: the path ends at the `admin` RoleBinding that was created with the project."

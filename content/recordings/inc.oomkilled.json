@@ -1,0 +1,151 @@
+{
+ "lab": "inc.oomkilled",
+ "kind": "incident",
+ "lab_hash": "2bb7173eba407a14",
+ "recorded_at": "2026-10-14T17:23:04+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -n academy-inc-oom",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                      READY   STATUS      RESTARTS      AGE\nworker-6b66fffc98-h9m52   0/1     OOMKilled   2 (21s ago)   29s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get pod <pod> -n academy-inc-oom -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc get pod worker-6b66fffc98-h9m52 -n academy-inc-oom -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}{\"\\n\"}'",
+   "code": 0,
+   "stdout": "OOMKilled exit=137\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc describe pod <pod> -n academy-inc-oom",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc describe pod worker-6b66fffc98-h9m52 -n academy-inc-oom",
+   "code": 0,
+   "stdout": "Name:             worker-6b66fffc98-h9m52\nNamespace:        academy-inc-oom\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Wed, 14 Oct 2026 17:23:08 +0000\nLabels:           app=worker\n                  pod-template-hash=6b66fffc98\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.1.122/23\"],\"mac_address\":\"0a:58:0a:d9:01:7a\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0....\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.1.122\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:01:7a\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.1.122\nIPs:\n  IP:           10.217.1.122\nControlled By:  ReplicaSet/worker-6b66fffc98\nContainers:\n  worker:\n    Container ID:  cri-o://ab7de48e5a7abd2b1aff166dd5801a4cc3be4e3aaf18b19704174d5b53e615d8\n    Image:         registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Image ID:      registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n    Port:          <none>\n    Host Port:     <none>\n    Command:\n      /bin/sh\n      -c\n      echo 'warming cache (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'cache warm, serving'; exec sleep infinity\n    State:          Terminated\n      Reason:       OOMKilled\n      Exit Code:    137\n      Started:      Wed, 14 Oct 2026 17:23:35 +0000\n      Finished:     Wed, 14 Oct 2026 17:23:35 +0000\n    Last State:     Terminated\n      Reason:       OOMKilled\n      Exit Code:    137\n      Started:      Wed, 14 Oct 2026 17:23:15 +0000\n      Finished:     Wed, 14 Oct 2026 17:23:16 +0000\n    Ready:          False\n    Restart Count:  2\n    Limits:\n      memory:  32Mi\n    Requests:\n      cpu:        10m\n      memory:     32Mi\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-sbbtt (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       False \n  ContainersReady             False \n  PodScheduled                True \nVolumes:\n  kube-api-access-sbbtt:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age               From               Message\n  ----     ------          ----              ----               -------\n  Normal   Scheduled       31s               default-scheduler  Successfully assigned academy-inc-oom/worker-6b66fffc98-h9m52 to crc\n  Normal   AddedInterface  30s               multus             Add eth0 [10.217.1.122/23] from ovn-kubernetes\n  Normal   Pulled          27s               kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 2.88s (2.88s including waiting). Image size: 108819904 bytes.\n  Normal   Pulled          24s               kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 2.633s (2.633s including waiting). Image size: 108819904 bytes.\n  Normal   Pulling         7s (x3 over 30s)  kubelet            Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n  Normal   Created         4s (x3 over 27s)  kubelet            Created container: worker\n  Normal   Started         4s (x3 over 27s)  kubelet            Started container worker\n  Normal   Pulled          4s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 2.876s (2.876s including waiting). Image size: 108819904 bytes.\n  Warning  BackOff         3s (x3 over 22s)  kubelet            Back-off restarting failed container worker in pod worker-6b66fffc98-h9m52_academy-inc-oom(b0d6e10d-62f4-4606-97d2-cb0ee489af96)\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc logs deploy/worker --previous -n academy-inc-oom",
+   "as": "learner",
+   "expect": "any",
+   "run": null,
+   "code": 0,
+   "stdout": "unable to retrieve container logs for cri-o://685c39b74127209840a8b7654dbb1ee2240734f420c5d28587c721c9cc400d94",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy worker -n academy-inc-oom -o jsonpath='{.spec.template.spec.containers[0].resources}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"limits\":{\"memory\":\"32Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/worker -n academy-inc-oom --requests=memory=96Mi --limits=memory=160Mi",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/worker resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/worker -n academy-inc-oom --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"worker\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"worker\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"worker\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"worker\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc logs deploy/worker -n academy-inc-oom",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "warming cache (about 64 MiB)\ncache warm, serving\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "worker-ready",
+    "title": "worker is available",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "stable",
+    "title": "The running worker has not restarted",
+    "expect": "Ready, 0 restarts",
+    "status": "fail",
+    "observed": "0 of 1 match · worker-6b66fffc98-h9m52: Running [CrashLoopBackOff, restarts 1]"
+   }
+  ],
+  "at": 1791998615.691446
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "worker-ready",
+    "title": "worker is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "stable",
+    "title": "The running worker has not restarted",
+    "expect": "Ready, 0 restarts",
+    "status": "pass",
+    "observed": "1 of 1 match · worker-759f449cbd-swxcv: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791998628.6857827
+ },
+ "seconds": 44,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-oom: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

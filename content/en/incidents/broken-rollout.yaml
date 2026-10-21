@@ -1,0 +1,140 @@
+id: inc.broken-rollout
+kind: incident
+title: "A rollout that never finishes"
+summary: "Release 2.3 is stuck: the pipeline's rollout status times out, while users still see release 2.2."
+module: a6-images-updates
+minutes: 15
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (RollingUpdate with default maxSurge 25% and maxUnavailable 25%)."
+concepts: [k8s.rollout, deploy.strategies, k8s.deployment]
+prerequisites: [g.rollouts-change]
+namespace: academy-inc-rollout
+objective: |
+  Find out from evidence whether users are affected and why release 2.3 never finishes, then bring the Deployment
+  back to a clean, completed state and prove it.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`; its Deployment records the release in the `kubernetes.io/change-cause` annotation. The app
+  creates the project `academy-inc-rollout` as your learner identity when you start the incident, with everything
+  listed here in the state the symptom describes; how it got into that state is part of the investigation and is shown
+  in the debrief. The images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login.
+  Clean up deletes the project. In the browser you replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The deployment pipeline failed at `oc rollout status` with "exceeded its progress deadline". The portal still
+  answers. The release manager asks: are we down, and how do we get back to a clean state?
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal 2.2</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web
+      labels: {app: web}
+      annotations: {kubernetes.io/change-cause: "release 2.2"}
+    spec:
+      replicas: 1
+      progressDeadlineSeconds: 60
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web
+      labels: {app: web}
+      annotations: {kubernetes.io/change-cause: "release 2.3"}
+    spec:
+      replicas: 1
+      progressDeadlineSeconds: 60
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:2.3-release
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc rollout status deploy/web -n academy-inc-rollout --timeout=10s", meaning: "fails after 10 s (\"1 old replicas are pending termination\", then \"timed out waiting for the condition\"): the new pod never becomes ready. This is the client-side timeout; once the 60 s progress deadline has passed the same command fails at once with \"exceeded its progress deadline\"", expect: fail}
+  - {cmd: "oc get rs -l app=web -n academy-inc-rollout", meaning: "old ReplicaSet 1 ready, new one 0 ready"}
+  - {cmd: "oc get pods -l app=web -n academy-inc-rollout", meaning: "the old pod Running 1/1, the new one 0/1 ErrImagePull (it alternates with ImagePullBackOff as the kubelet backs off)"}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-rollout -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} {.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'", meaning: "two endpoints: the new pod (web-9889cfbb-…) is listed but ready=false, because it has an IP but never became ready; the old pod (web-7ddfddcc56-…) is ready=true. Only ready endpoints receive traffic, so every request still reaches release 2.2"}
+  - {cmd: "oc get deploy web -n academy-inc-rollout -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{\"\\n\"}{end}'", meaning: "Available=True (users are served) and, while the deadline has not passed yet, Progressing=True ReplicaSetUpdated (recorded about 44 s after the release was applied)"}
+  - {cmd: "oc rollout history deploy/web -n academy-inc-rollout", meaning: "revision 1 release 2.2, revision 2 release 2.3"}
+  - {cmd: "oc wait deploy/web --for=condition=Progressing=False --timeout=90s -n academy-inc-rollout", timeout: 120, meaning: "blocks until the Deployment controller sets Progressing=False, which it does once progressDeadlineSeconds (60 s) pass without progress, then prints deployment.apps/web condition met. A pipeline can wait for a condition this way instead of polling"}
+  - {cmd: "oc get deploy web -n academy-inc-rollout -o jsonpath='{.status.conditions[?(@.type==\"Progressing\")].reason}: {.status.conditions[?(@.type==\"Progressing\")].message}{\"\\n\"}'", meaning: "ProgressDeadlineExceeded: ReplicaSet \"web-9889cfbb\" has timed out progressing. The failure is now recorded in the Deployment's status"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-rollout --timeout=15s", expect: fail, meaning: "fails at once (exit code 1) with error: deployment \"web\" exceeded its progress deadline: the message the pipeline reported. rollout status reads the condition the controller wrote; it does not roll anything back"}
+hints:
+  - "Is the portal down? Check which pods back the Service right now."
+  - "The new ReplicaSet cannot become ready; the old one is still serving because maxUnavailable rounds down to 0 with 1 replica."
+  - "Go back to the revision that last worked with the rollout tool and check that the Route answers again; then correct the image tag where the release comes from, the pipeline, not only in the cluster."
+fix:
+  - {cmd: "oc rollout undo deploy/web -n academy-inc-rollout", meaning: "back to the previous template (a new revision 3)"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-rollout --timeout=120s", meaning: "successfully rolled out", timeout: 140}
+  - {cmd: "oc rollout history deploy/web -n academy-inc-rollout", meaning: "revision 2 and revision 3 (= the old 1)"}
+fix_wait: [image, progressing, route-ok]
+checks:
+  - {id: image, title: "web runs the last good image", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].image", op: eq, value: "registry.access.redhat.com/ubi9/httpd-24:latest", expect_text: "httpd-24:latest"}
+  - {id: progressing, title: "The Deployment's rollout is complete", type: field, kind: deployment, name: web, path: "status.conditions[?type=Progressing].reason", op: eq, value: NewReplicaSetAvailable, expect_text: "NewReplicaSetAvailable"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  Release 2.3 referenced an image tag that does not exist. The new ReplicaSet's pod could not pull it. With one replica,
+  25% maxUnavailable rounds down to 0 and maxSurge rounds up to 1, so the Deployment kept the old pod serving while it
+  waited for the new one. Once `progressDeadlineSeconds` (60 s here) passes without progress, the Deployment
+  controller sets `Progressing=False` with reason `ProgressDeadlineExceeded` (message `ReplicaSet "web-9889cfbb" has
+  timed out progressing.`); before that it reads `Progressing=True ReplicaSetUpdated`. The recording shows both
+  states. Nothing was down (`Available=True`, the old pod was the only ready endpoint in the Service's EndpointSlice,
+  and the Route kept returning release 2.2), but the Deployment was stuck half-way.
+alternatives: |
+  - Fix forward: `oc set image` to the correct tag, if it is known and tested.
+  - Pin images by digest in releases, and gate promotion on the image existing in the target registry.
+sre: |
+  A RollingUpdate with readiness probes is what kept users safe here. Pipelines should treat a failed
+  `rollout status` as a failed deployment and roll back automatically, and alerts should fire on
+  `ProgressDeadlineExceeded`. Note that `rollout undo` does not go back in time: it copies the old template forward
+  as a new revision, so revision 1 disappears from the history and reappears as revision 3.
+questions:
+  - q: "Why did users keep seeing release 2.2?"
+    a: "The old ReplicaSet was not scaled down because the new pod never became ready (maxUnavailable 0 for one replica)."
+  - q: "What does progressDeadlineSeconds do, and what does it not do?"
+    a: "It marks the rollout as failed (Progressing=False, reason ProgressDeadlineExceeded) after the deadline, and `oc rollout status` then exits with an error; it does not roll back or stop the rollout."
+  - q: "Your `rollout status --timeout=10s` said 'timed out waiting for the condition', while the pipeline reported 'exceeded its progress deadline'. Why the difference?"
+    a: "The first run hit its own client-side `--timeout` before the Deployment's 60 s progress deadline. After the deadline (once `oc wait` returned), the controller had set Progressing=False ProgressDeadlineExceeded, and the same command failed at once with 'exceeded its progress deadline', as it did in the pipeline. Both mean the new pods are not becoming ready; only the second is recorded in the Deployment's status."
+references:
+  - {title: "Kubernetes: Deployments (failed deployment, rolling back)", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#failed-deployment"}
+  - {title: "Kubernetes: Rolling back a Deployment", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment"}
+symptom_checks: [progressing, route-ok]  # monitoring-level evidence shown before the answer

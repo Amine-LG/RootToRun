@@ -1,0 +1,3 @@
+#!/bin/sh
+# A stand-in `oc` for tests that only need one to exist on PATH; it never contacts anything.
+exit 0

@@ -1,0 +1,175 @@
+- id: rb.route-503
+  title: "A Route answers 503 or times out"
+  when: "Users get 'Application is not available', a 502/503, or a timeout on an application URL."
+  severity_guide: |
+    Customer-facing and all replicas affected: high, start an incident. One of several Routes, or a test
+    environment: normal. A 503 page from the router means it had no ready endpoint it could reach; a 5xx with the
+    application's own error page means the application answered.
+  concepts: [net.routes, net.services, net.endpointslices, k8s.probes, net.policy]
+  labs: [inc.service-selector-503, inc.wrong-targetport, inc.readiness-503, inc.networkpolicy-block, lab.request-path]
+  steps:
+    - title: "1. Is it the router's page or the application's?"
+      body: |
+        The router's 503 page says "Application is not available". Anything else came from the application.
+        Check the Route itself: `oc get route <name> -n <ns>` (host, Service, port, TLS termination).
+    - title: "2. Does the Service have ready endpoints?"
+      body: |
+        `oc get endpointslices -l kubernetes.io/service-name=<svc> -n <ns>`. No endpoints: compare the Service
+        selector (`oc describe svc <svc> -n <ns>`) with the pod labels (`oc get pods --show-labels -n <ns>`), then
+        check readiness (`oc get pods -n <ns>`, READY column, and `Unhealthy` events).
+    - title: "3. Endpoints exist: does the port match?"
+      body: |
+        Compare the Service `targetPort` with the port the container listens on. Test from inside the cluster:
+        `oc exec deploy/<client> -n <ns> -- curl -sS -m 3 http://<svc>:<port>/`. *Connection refused* (curl exit 7)
+        points to a wrong port; a *timeout* (exit 28) points to a NetworkPolicy or an overloaded pod.
+    - title: "4. Timeouts: is traffic allowed?"
+      body: |
+        `oc get networkpolicy -n <ns>` and `oc describe networkpolicy <name> -n <ns>`: is the source (the router,
+        client pods) allowed? Once a policy selects a pod, only what some policy allows gets in. Traffic from the router
+        is allowed with a namespace selector on the label `policy-group.network.openshift.io/ingress: ""`, which works
+        whatever the router's publishing strategy.
+    - title: "5. Fix one thing, verify, write it down"
+      body: |
+        Apply the smallest fix (selector, targetPort, probe, policy rule), check endpoints and the URL again, and
+        record the cause in the incident ticket with the evidence.
+  decision_tree:
+    - {question: "Router page 'Application is not available'?", yes: "Go to step 2 (endpoints)", no: "The application answered: read its logs"}
+    - {question: "Endpoints empty?", yes: "Selector or readiness", no: "Port, NetworkPolicy or application"}
+    - {question: "curl exit 7 (refused)?", yes: "targetPort / containerPort mismatch", no: "Timeout: NetworkPolicy or overload"}
+  escalate:
+    - "Every Route on the cluster fails: the IngressController or the load balancer in front of it (platform team)."
+    - "TLS errors only: certificate expiry or a changed CA (platform or security team)."
+
+- id: rb.pod-not-running
+  title: "A pod is not running"
+  when: "A pod shows Pending, ContainerCreating, CreateContainerConfigError, ImagePullBackOff, CrashLoopBackOff or OOMKilled, or a Deployment shows fewer available replicas than desired."
+  severity_guide: |
+    Production with no ready replica left: high. A rollout stuck while old replicas still serve: normal, but
+    act before the next change. One replica of many restarting: normal, look for a pattern.
+  concepts: [k8s.pod-lifecycle, k8s.scheduler, k8s.requests-limits, container.images, storage.pvc, sec.scc]
+  labs: [inc.pending-resources, inc.pvc-pending, inc.configmap-missing, inc.imagepull, inc.crashloop-config, inc.oomkilled, inc.scc-root, inc.broken-rollout, lab.troubleshooting-tools]
+  steps:
+    - title: "Read the status, then the events"
+      body: |
+        `oc get pods -n <ns>` gives the STATUS; the events tell why: `oc get events -n <ns> --sort-by=.lastTimestamp`
+        or `oc describe pod <pod> -n <ns>`. No pod at all? Read the ReplicaSet's `FailedCreate` events: admission
+        (SCC, quota, LimitRange) rejected it. Events expire after a few hours, so capture them early.
+    - title: "Status → most likely cause"
+      body: |
+        | Status | First suspects | Where the evidence is |
+        |---|---|---|
+        | (no pod) | quota exceeded, LimitRange min/max, no SCC admits the spec | `FailedCreate` event of the ReplicaSet |
+        | Pending | requests too big, node selector/taints, unbound PVC | `FailedScheduling` event |
+        | ContainerCreating (long) | volume mount, missing Secret/ConfigMap volume | `FailedMount` event |
+        | CreateContainerConfigError | missing ConfigMap/Secret used as env | `Failed` event |
+        | ErrImagePull / ImagePullBackOff | name or tag, credentials, registry reachability | `Failed` event |
+        | CrashLoopBackOff | the application exits: config, dependency, command | `oc logs <pod> --previous` |
+        | OOMKilled (exit 137) | memory limit below real use | last state of the container |
+        | Running, not Ready | readiness probe path/port, dependency down | `Unhealthy` events |
+    - title: "Fix the cause, not the symptom"
+      body: |
+        Deleting the pod rarely helps: the controller recreates the same spec. Change the spec (`oc set resources`,
+        `oc set image`, `oc set probe`, `oc set env`), or the missing object, then watch
+        `oc rollout status deploy/<name> -n <ns>`. If a release caused it, `oc rollout undo deploy/<name> -n <ns>`
+        first, investigate after.
+  escalate:
+    - "Pods fail on one node only: node problem (platform team)."
+    - "Pulls fail for every image from one registry: registry, proxy or pull secret (platform team)."
+
+- id: rb.access-denied
+  title: "Forbidden (403) or unexpected access"
+  when: "A user or workload gets 'forbidden', or an access review asks why someone can do something."
+  severity_guide: |
+    A workload blocked in production: high. Someone has access they should not have (cluster-admin, Secrets,
+    privileged SCC): treat as a security incident and involve the security team.
+  concepts: [sec.rbac, sec.serviceaccounts, ocp.auth, sec.audit]
+  labs: [inc.rbac-denied, lab.rbac, lab.access-paths, lab.access-can-come-back, lab.groups]
+  steps:
+    - title: "Name the exact subject"
+      body: |
+        The 403 message names the identity (`system:serviceaccount:<ns>:<name>` or a user) and the verb and resource
+        it was denied. Use exactly that name. A pod creation refused with "unable to validate against any security
+        context constraint" is an SCC decision, not RBAC: see the SCC lab instead.
+    - title: "Ask the API"
+      body: |
+        `oc auth can-i <verb> <resource> --as=<subject> -n <ns>` (exit code 0 for yes, 1 for no), everything it can
+        do with `oc auth can-i --list --as=<subject> -n <ns>`, and who can with
+        `oc adm policy who-can <verb> <resource> -n <ns>`. For access through a group, add `--as-group=<group>`.
+    - title: "Find the path"
+      body: |
+        Read the bindings in the namespace (`oc get rolebindings -n <ns> -o wide`) and the cluster bindings for the
+        subject and its groups, including virtual groups such as `system:authenticated`. Check spelling of subjects:
+        RBAC accepts bindings to names that do not exist.
+    - title: "Grant narrowly, then verify"
+      body: |
+        Prefer a built-in or custom Role in one namespace over a ClusterRoleBinding. For a workload, grant to its own
+        ServiceAccount, not to a group such as `system:serviceaccounts:<ns>`; for people, grant to their team's group
+        rather than to individual users. Re-run `oc auth can-i` for the subject. Remove bindings that name subjects
+        which no longer exist.
+  escalate:
+    - "The access needs a cluster-scoped grant or a privileged SCC: security review."
+
+- id: rb.clusteroperator-degraded
+  title: "A ClusterOperator is Degraded or not Available"
+  when: "`oc get clusteroperators` shows AVAILABLE=False or DEGRADED=True, an update is stuck, or the console reports a platform alert."
+  severity_guide: |
+    authentication, ingress, kube-apiserver, etcd, network or dns not Available: critical (cluster-wide impact).
+    Degraded but Available: important, investigate before any change or update.
+  concepts: [ocp.clusteroperators, ocp.upgrades, ocp.mco]
+  labs: [lab.cluster-health]
+  steps:
+    - title: "Read the operator's own explanation"
+      body: |
+        `oc get clusteroperators` (as a cluster reader), then `oc describe clusteroperator <name>`: the
+        `Available`, `Progressing`, `Degraded` and `Upgradeable` conditions carry a reason and a message, and
+        *relatedObjects* lists the namespaces and resources the operator manages.
+    - title: "Look at the operand"
+      body: |
+        Pods and events in the related namespaces (`oc get pods -n openshift-<component>`,
+        `oc get events -n openshift-<component> --sort-by=.lastTimestamp`), and the operator's own pod, usually in
+        `openshift-<component>-operator`. Many degradations are a symptom of another one: a node not ready, a
+        certificate, DNS.
+    - title: "Updates and machine configuration"
+      body: |
+        During an update, check `oc get clusterversion` and `oc adm upgrade` (it also reports `Upgradeable=False` and
+        its reason), and the machine config pools (`oc get mcp`). The pools update in parallel; inside each pool the
+        nodes are drained and rebooted a few at a time (`maxUnavailable`, 1 by default). A pool that stays UPDATING or
+        turns DEGRADED, for example because a drain waits on a PodDisruptionBudget, keeps the update from finishing. A
+        paused pool keeps its nodes on the old version and blocks the next minor update until it is unpaused.
+    - title: "Collect, then escalate"
+      body: |
+        Do not edit operator-managed resources by hand: the operator reverts them, or the cluster becomes
+        unsupported. Collect a `oc adm must-gather` archive (an administrator task, not run in the app) and open
+        a support case with the operator's conditions.
+  escalate:
+    - "Always for core operators (etcd, kube-apiserver, authentication, network): platform team and vendor support."
+
+- id: rb.node-notready
+  title: "A node is NotReady or under pressure"
+  when: "`oc get nodes` shows NotReady, or pods are evicted with DiskPressure, MemoryPressure or PIDPressure."
+  severity_guide: |
+    A control-plane node NotReady: critical. One worker in a pool with spare capacity: important; pods of
+    Deployments are evicted and recreated elsewhere after about five minutes (the default toleration for
+    not-ready and unreachable nodes). Several workers: critical.
+  concepts: [k8s.architecture, k8s.scheduler, k8s.qos]
+  labs: [lab.cluster-health, lab.scheduling]
+  steps:
+    - title: "Conditions first"
+      body: |
+        `oc get nodes -o wide`, then `oc describe node <name>`: the Conditions table (Ready, MemoryPressure,
+        DiskPressure, PIDPressure) and the taints the node controller added (`node.kubernetes.io/not-ready`,
+        `node.kubernetes.io/unreachable`, `node.kubernetes.io/disk-pressure`). Lease renewals
+        (`oc get lease -n kube-node-lease`) show whether the kubelet still reports. After a node was down for a long
+        time, pending certificate signing requests can keep it NotReady until an administrator approves them.
+    - title: "Pressure"
+      body: |
+        Disk pressure: images and logs filling the node (the kubelet first removes dead containers and unused images,
+        then evicts pods). Memory pressure: pods using more than they requested are evicted first (a BestEffort pod
+        requested nothing, so it is always in that group), ordered by priority, which is why requests matter. On a single-node cluster you can see a
+        transient disk-pressure taint at start-up that clears by itself after the eviction transition period.
+    - title: "Kubelet and runtime"
+      body: |
+        An administrator reads the node's journal with `oc adm node-logs <node> -u kubelet` or `-u crio` (not run in
+        the app). The Machine API replaces unhealthy machines automatically when a MachineHealthCheck exists.
+  escalate:
+    - "Control-plane node, or more than one worker: platform team immediately."

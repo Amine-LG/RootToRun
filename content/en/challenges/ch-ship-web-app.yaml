@@ -1,0 +1,269 @@
+id: ch.ship-web-app
+kind: challenge
+title: "Ship a web app"
+summary: "From an empty project to a configured, probed, sized and reachable application, built your own way."
+module: r1-app-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Any cluster with Routes and the UBI images works."
+concepts: [k8s.deployment, net.services, net.routes, k8s.probes, k8s.requests-limits]
+prerequisites: [o1.deploy-apps, o1.config-secrets, b.pod-lifecycle, b.health-probes, d.routes-tls]
+namespace: academy-ch-ship
+objective: |
+  Deploy a small web shop so that it serves its own page, only receives traffic when it can answer, has a memory
+  budget, and is reachable from inside the project and from outside the cluster.
+background: |
+  **Where everything comes from.** The project starts with only the `client` pod (`sleep` in the UBI 9 minimal image)
+  for tests from inside; everything else is yours. The app creates the project `academy-ch-ship` as your learner
+  identity when you start the challenge and applies the starting objects; everything else is yours to create. The
+  images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login. Grading runs on your
+  cluster when you press Grade, as the app's own identities; Clean up deletes the project.
+symptom: |
+  The project is empty except for a `client` pod that you (and the grader) can use to test connections from inside
+  the project. Use any method you like: `oc create` and `oc set`, YAML you write, or the console.
+requirements:
+  - "A Deployment named `shop` runs **2 replicas** of `registry.access.redhat.com/ubi9/httpd-24:latest`, and both are Ready."
+  - "The page it serves comes from a ConfigMap named `shop-content` and contains the text `Welcome to the shop`. (httpd serves files from `/var/www/html` on port 8080.)"
+  - "An HTTP or TCP readiness probe on port 8080 decides when a pod receives traffic."
+  - "Every `shop` container requests memory and has a memory limit."
+  - "Inside the project, `http://shop:8080/` answers with the page."
+  - "Outside the cluster, a Route named `shop` answers with the page."
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: client, labels: {app: client}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: client}}
+      template:
+        metadata: {labels: {app: client}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+hints:
+  - "Work outwards: a Deployment that runs, then its content, then a Service in front of it, then a Route in front of the Service."
+  - "`oc set volume`, `oc set probe` and `oc set resources` change a Deployment's pod template; each change starts a rollout."
+  - "If `http://shop:8080/` fails from the client pod, compare the Service's selector and target port with the pods' labels and container port."
+fix:
+  - {cmd: "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship", meaning: "the page, as a file named index.html"}
+  - {cmd: "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship", meaning: "two replicas of httpd"}
+  - {cmd: "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship", meaning: "mount the page where httpd serves files"}
+  - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship", meaning: "Ready only when the page answers"}
+  - {cmd: "oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship", meaning: "a memory budget"}
+  - {cmd: "oc expose deployment shop --port=8080 -n academy-ch-ship", meaning: "Service shop, selecting the Deployment's pods"}
+  - {cmd: "oc expose service shop -n academy-ch-ship", meaning: "Route shop"}
+  - {cmd: "oc rollout status deploy/shop -n academy-ch-ship --timeout=180s", meaning: "wait for the last rollout", timeout: 200}
+checks:
+  - {id: ready, title: "shop runs 2 Ready replicas", type: deployment_ready, name: shop, replicas: 2, expect_text: "2/2 ready"}
+  - {id: content, title: "The page comes from ConfigMap shop-content", type: field, kind: configmap, name: shop-content, path: data.index\.html, op: contains, value: "Welcome to the shop", expect_text: "contains the welcome text"}
+  - {id: image, title: "shop runs the approved httpd image", type: container, name: shop, image_prefix: "registry.access.redhat.com/ubi9/httpd-24", expect_text: "a container from ubi9/httpd-24"}
+  - {id: content-mount, title: "The served directory comes from ConfigMap shop-content", type: container, name: shop, image_prefix: "registry.access.redhat.com/ubi9/httpd-24", configmap_mount: {name: shop-content, path: /var/www/html}, expect_text: "shop-content mounted at /var/www/html"}
+  - {id: probe, title: "An HTTP or TCP readiness probe checks the web port", type: container, name: shop, image_prefix: "registry.access.redhat.com/ubi9/httpd-24", probe: [httpGet, tcpSocket], port: 8080, expect_text: "readiness probe on port 8080"}
+  - {id: mem-request, title: "Every container requests memory", type: container, name: shop, all: true, requires: [resources.requests.memory], expect_text: "a memory request on every container"}
+  - {id: mem-limit, title: "Every container has a memory limit", type: container, name: shop, all: true, requires: [resources.limits.memory], expect_text: "a memory limit on every container"}
+  - {id: inside, title: "http://shop:8080/ answers inside the project", type: exec, from: app=client, command: ["/usr/bin/curl", "-s", "-m", "5", "http://shop:8080/"], trusted: true, expect_output: "Welcome to the shop", expect_text: "the page, from the client pod"}
+  - {id: outside, title: "Route shop serves the page", type: route_http, route: shop, expect_status: 200, contains: "Welcome to the shop", expect_text: "HTTP 200 with the page"}
+trials:
+  - id: wrong-selector
+    title: "Everything created, but the Service selects a label no pod has"
+    kind: wrong
+    expect: partial
+    expect_checks: {ready: pass, inside: fail, outside: fail}
+    commands:
+      - {cmd: "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship"}
+      - {cmd: "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship"}
+      - {cmd: "oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship"}
+      - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ -n academy-ch-ship"}
+      - {cmd: "oc set resources deploy/shop --requests=memory=32Mi --limits=memory=128Mi -n academy-ch-ship"}
+      - cmd: "oc apply -f - -n academy-ch-ship"
+        stdin: |
+          apiVersion: v1
+          kind: Service
+          metadata: {name: shop}
+          spec:
+            selector: {app: store}
+            ports: [{port: 8080, targetPort: 8080}]
+      - {cmd: "oc expose service shop -n academy-ch-ship"}
+  - id: content-not-mounted
+    title: "The ConfigMap exists but is never mounted: httpd serves its default page"
+    kind: wrong
+    expect: partial
+    expect_checks: {content: pass, inside: fail, outside: fail}
+    commands:
+      - {cmd: "oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship"}
+      - {cmd: "oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship"}
+      - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ -n academy-ch-ship"}
+      - {cmd: "oc set resources deploy/shop --requests=memory=32Mi --limits=memory=128Mi -n academy-ch-ship"}
+      - {cmd: "oc expose deployment shop --port=8080 -n academy-ch-ship"}
+      - {cmd: "oc expose service shop -n academy-ch-ship"}
+  - id: all-yaml
+    title: "A correct alternative: every object written as YAML, different volume name, probe on a TCP socket"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-ship"
+        stdin: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: shop-content}
+          data: {index.html: "<p>Welcome to the shop</p>"}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: shop}
+          spec:
+            replicas: 2
+            selector: {matchLabels: {tier: storefront}}
+            template:
+              metadata: {labels: {tier: storefront}}
+              spec:
+                containers:
+                - name: web
+                  image: registry.access.redhat.com/ubi9/httpd-24:latest
+                  ports: [{containerPort: 8080}]
+                  readinessProbe: {tcpSocket: {port: 8080}, periodSeconds: 5}
+                  resources: {requests: {memory: 48Mi}, limits: {memory: 96Mi}}
+                  volumeMounts: [{name: pages, mountPath: /var/www/html}]
+                volumes: [{name: pages, configMap: {name: shop-content}}]
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: {name: shop}
+          spec:
+            selector: {tier: storefront}
+            ports: [{port: 8080, targetPort: 8080}]
+          ---
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata: {name: shop}
+          spec:
+            to: {kind: Service, name: shop}
+            port: {targetPort: 8080}
+  - id: v2-03-wrong-image
+    title: "The page served from an image other than the approved one"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+    - cmd: oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship
+    - cmd: oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship
+    - cmd: oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship
+    - cmd: oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship
+    - cmd: oc expose deployment shop --port=8080 -n academy-ch-ship
+    - cmd: oc expose service shop -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop -n academy-ch-ship --timeout=180s
+      timeout: 200
+    - cmd: oc set image deploy/shop httpd-24=registry.access.redhat.com/ubi8/httpd-24:latest -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop --timeout=180s -n academy-ch-ship
+      timeout: 200
+    expect_checks:
+      image: fail
+  - id: v2-03-shadow-content
+    title: "The same page, mounted from a different ConfigMap"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+    - cmd: oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship
+    - cmd: oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship
+    - cmd: oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship
+    - cmd: oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship
+    - cmd: oc expose deployment shop --port=8080 -n academy-ch-ship
+    - cmd: oc expose service shop -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop -n academy-ch-ship --timeout=180s
+      timeout: 200
+    - cmd: oc create configmap shadow --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+    - cmd: oc set volume deploy/shop --add --overwrite --name=html --type=configmap --configmap-name=shadow --mount-path=/var/www/html -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop --timeout=180s -n academy-ch-ship
+      timeout: 200
+    expect_checks:
+      content-mount: fail
+  - id: v2-03-always-ready
+    title: "A readiness probe that always succeeds"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+    - cmd: oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship
+    - cmd: oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship
+    - cmd: oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship
+    - cmd: oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship
+    - cmd: oc expose deployment shop --port=8080 -n academy-ch-ship
+    - cmd: oc expose service shop -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop -n academy-ch-ship --timeout=180s
+      timeout: 200
+    - cmd: oc patch deploy/shop --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe","value":{"exec":{"command":["/bin/true"]}}}]' -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop --timeout=180s -n academy-ch-ship
+      timeout: 200
+    expect_checks:
+      probe: fail
+  - id: v2-04-helper-first
+    title: "A correct alternative: a helper container listed before the web container"
+    kind: alternative
+    expect: verified
+    commands:
+    - cmd: oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+    - cmd: oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship
+    - cmd: oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship
+    - cmd: oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship
+    - cmd: oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship
+    - cmd: oc expose deployment shop --port=8080 -n academy-ch-ship
+    - cmd: oc expose service shop -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop -n academy-ch-ship --timeout=180s
+      timeout: 200
+    - cmd: oc patch deploy/shop --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0","value":{"name":"helper","image":"registry.access.redhat.com/ubi9/ubi-minimal:latest","command":["sleep","infinity"],"resources":{"requests":{"memory":"16Mi"},"limits":{"memory":"32Mi"}}}}]'
+        -n academy-ch-ship
+    - cmd: oc rollout status deploy/shop --timeout=180s -n academy-ch-ship
+      timeout: 200
+  - id: v2-17-shadowed-route
+    title: "Route shop given another Route's host and a Service that does not exist"
+    kind: wrong
+    expect: partial
+    expect_checks:
+      outside: fail
+    commands:
+    - cmd: oc create configmap shop-content --from-literal=index.html='<h1>Welcome to the shop</h1>' -n academy-ch-ship
+      meaning: the page, as a file named index.html
+    - cmd: oc create deployment shop --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2 --port=8080 -n academy-ch-ship
+      meaning: two replicas of httpd
+    - cmd: oc set volume deploy/shop --add --name=html --type=configmap --configmap-name=shop-content --mount-path=/var/www/html -n academy-ch-ship
+      meaning: mount the page where httpd serves files
+    - cmd: oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-ship
+      meaning: Ready only when the page answers
+    - cmd: oc set resources deploy/shop --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-ship
+      meaning: a memory budget
+    - cmd: oc expose deployment shop --port=8080 -n academy-ch-ship
+      meaning: Service shop, selecting the Deployment's pods
+    - cmd: oc rollout status deploy/shop -n academy-ch-ship --timeout=180s
+      meaning: wait for the last rollout
+      timeout: 200
+    - cmd: oc expose service shop --name=working -n academy-ch-ship
+    - cmd: oc apply -f - -n academy-ch-ship
+      stdin: "apiVersion: route.openshift.io/v1\nkind: Route\nmetadata: {name: shop}\nspec:\n  host: \"{route-host:working}\"\n  to: {kind: Service, name: missing-service}\n  port: {targetPort: 8080}\n"
+root_cause: |
+  Four objects, each with one job: the **Deployment** keeps two pods running from the pod template; the
+  **ConfigMap** holds the page and becomes a file through a volume; the **Service** selects Ready pods by label and
+  gives them one stable name and port; the **Route** gives the Service a host name on the router. The readiness probe
+  decides which pods the Service sends traffic to, and the memory request and limit tell the scheduler what to
+  reserve and the kernel when to stop the container.
+alternatives: |
+  Any method that reaches the same state passes: the grader reads what exists and tests the connections, not your
+  commands. Names inside the pod template (labels, container and volume names) are yours to choose, as long as the
+  Service selects the pods. An HTTP or TCP readiness probe both satisfy the requirement; HTTP is the stronger choice
+  for a web server because it proves the page answers, not only that the port is open.
+sre: |
+  In a review, a reviewer would ask what happens during a rollout (the readiness probe keeps traffic on old pods
+  until new ones answer), what the memory limit is based on (measure, then add headroom), and who owns the page
+  content (a ConfigMap change does not restart pods; the mounted file updates after a delay, and only new pods see an
+  environment-variable change).
+questions:
+  - q: "You changed the ConfigMap's text. When do the running pods serve the new page?"
+    a: "A mounted ConfigMap file is updated in place after a short delay (the kubelet's sync period), without a restart. Values injected as environment variables would only change in new pods."
+  - q: "The Route returns 503 but both pods are Ready. What do you check first?"
+    a: "The Service's endpoints (`oc get endpointslices -l kubernetes.io/service-name=shop`): a selector that matches no pod, or a target port the container does not listen on."
+references:
+  - {title: "Kubernetes: Deployments", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"}
+  - {title: "Kubernetes: Configure a Pod to use a ConfigMap", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/"}
+  - {title: "Kubernetes: Liveness, readiness and startup probes", url: "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/"}

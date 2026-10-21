@@ -1,0 +1,130 @@
+{
+ "lab": "lesson.gx.argocd-ops",
+ "kind": "lesson",
+ "lab_hash": "33d8ab6e89d15d31",
+ "recorded_at": "2026-10-20T15:04:39+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-gx-argocd-ops",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken/widget.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: resource mapping not found for name: \"demo\" namespace: \"\" from \"broken/widget.yaml\": no matches for kind \"Widget\" in version \"example.com/v1\"\nensure CRDs are installed first\n",
+   "combined": "error: resource mapping not found for name: \"demo\" namespace: \"\" from \"broken/widget.yaml\": no matches for kind \"Widget\" in version \"example.com/v1\"\nensure CRDs are installed first\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken/configmap.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): error when retrieving current configuration of:\nResource: \"/v1, Resource=configmaps\", GroupVersionKind: \"/v1, Kind=ConfigMap\"\nName: \"settings\", Namespace: \"no-such-namespace\"\nfrom server for: \"broken/configmap.yaml\": configmaps \"settings\" is forbidden: User \"developer\" cannot get resource \"configmaps\" in API group \"\" in the namespace \"no-such-namespace\"\n",
+   "combined": "Error from server (Forbidden): error when retrieving current configuration of:\nResource: \"/v1, Resource=configmaps\", GroupVersionKind: \"/v1, Kind=ConfigMap\"\nName: \"settings\", Namespace: \"no-such-namespace\"\nfrom server for: \"broken/configmap.yaml\": configmaps \"settings\" is forbidden: User \"developer\" cannot get resource \"configmaps\" in API group \"\" in the namespace \"no-such-namespace\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken/configmap.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): error when creating \"broken/configmap.yaml\": namespaces \"no-such-namespace\" not found\n",
+   "combined": "Error from server (NotFound): error when creating \"broken/configmap.yaml\": namespaces \"no-such-namespace\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken/clusterrole.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): error when creating \"broken/clusterrole.yaml\": clusterroles.rbac.authorization.k8s.io is forbidden: User \"developer\" cannot create resource \"clusterroles\" in API group \"rbac.authorization.k8s.io\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): error when creating \"broken/clusterrole.yaml\": clusterroles.rbac.authorization.k8s.io is forbidden: User \"developer\" cannot create resource \"clusterroles\" in API group \"rbac.authorization.k8s.io\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cd repo && git init -q && git -c user.name=Learner -c user.email=learner@example.com add . && git -c user.name=Learner -c user.email=learner@example.com commit -qm 'web: image 1.4' && sed -i 's/1.4/1.5-broken/' deployment.yaml && git -c user.name=Learner -c user.email=learner@example.com commit -qam 'web: image 1.5' && git config user.name Learner && git config user.email learner@example.com",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cd repo && echo '== before: the bad commit' && git show --format='%h %s' HEAD -- deployment.yaml && git revert --no-edit HEAD >/dev/null && echo '== after: the history' && git log --oneline && echo '== the revert commit' && git show --format='%h %s' HEAD -- deployment.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "== before: the bad commit\n6e77973 web: image 1.5\n\ndiff --git a/deployment.yaml b/deployment.yaml\nindex fb405e5..4d52e3d 100644\n--- a/deployment.yaml\n+++ b/deployment.yaml\n@@ -14,4 +14,4 @@ spec:\n     spec:\n       containers:\n         - name: web\n-          image: registry.example.com/team/web:1.4\n+          image: registry.example.com/team/web:1.5-broken\n== after: the history\nefe87f5 Revert \"web: image 1.5\"\n6e77973 web: image 1.5\n75fa0c0 web: image 1.4\n== the revert commit\nefe87f5 Revert \"web: image 1.5\"\n\ndiff --git a/deployment.yaml b/deployment.yaml\nindex 4d52e3d..fb405e5 100644\n--- a/deployment.yaml\n+++ b/deployment.yaml\n@@ -14,4 +14,4 @@ spec:\n     spec:\n       containers:\n         - name: web\n-          image: registry.example.com/team/web:1.5-broken\n+          image: registry.example.com/team/web:1.4\n",
+   "stderr": "",
+   "combined": "== before: the bad commit\n6e77973 web: image 1.5\n\ndiff --git a/deployment.yaml b/deployment.yaml\nindex fb405e5..4d52e3d 100644\n--- a/deployment.yaml\n+++ b/deployment.yaml\n@@ -14,4 +14,4 @@ spec:\n     spec:\n       containers:\n         - name: web\n-          image: registry.example.com/team/web:1.4\n+          image: registry.example.com/team/web:1.5-broken\n== after: the history\nefe87f5 Revert \"web: image 1.5\"\n6e77973 web: image 1.5\n75fa0c0 web: image 1.4\n== the revert commit\nefe87f5 Revert \"web: image 1.5\"\n\ndiff --git a/deployment.yaml b/deployment.yaml\nindex 4d52e3d..fb405e5 100644\n--- a/deployment.yaml\n+++ b/deployment.yaml\n@@ -14,4 +14,4 @@ spec:\n     spec:\n       containers:\n         - name: web\n-          image: registry.example.com/team/web:1.5-broken\n+          image: registry.example.com/team/web:1.4\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl create secret generic db --from-literal=password=s3cr3t --dry-run=client -o yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\ndata:\n  password: czNjcjN0\nkind: Secret\nmetadata:\n  name: db\n",
+   "stderr": "",
+   "combined": "apiVersion: v1\ndata:\n  password: czNjcjN0\nkind: Secret\nmetadata:\n  name: db\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo czNjcjN0 | base64 -d; echo",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "s3cr3t\n",
+   "stderr": "",
+   "combined": "s3cr3t\n",
+   "ok": true
+  }
+ ],
+ "seconds": 19,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,141 @@
+id: lab.statefulset-identity
+title: "Stable pod identities"
+subtitle: "StatefulSet names, per-pod DNS, ordering, and what an emptyDir does not keep"
+summary: "Run a three-pod StatefulSet behind a headless Service, reach each pod by name, watch the ordering rules, and see why durable per-pod data needs claim templates."
+module: a2-apps
+mode: REAL_LAB
+minutes: 25
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (single node). Uses no persistent storage, so cleanup leaves nothing behind."
+concepts: [k8s.workloads, net.dns, k8s.controllers]
+prerequisites: [f0.statefulsets, d.services-dns]
+namespace: academy-sts-id
+objective: |
+  Create a StatefulSet with a headless Service, then show that each pod has a stable name and DNS record, that pods
+  are created, removed and updated in a defined order, and that a replacement pod keeps its name but not the
+  contents of an emptyDir volume.
+background: |
+  The pods only run `sleep`, so the lab is about identity, not an application. It deliberately uses an `emptyDir`
+  volume instead of a claim template: the course cluster's storage class keeps every volume after its claim is
+  deleted (`reclaimPolicy: Retain`), which would leave volumes behind that only an administrator can remove. The
+  lesson explains the claim-template behaviour you would see on a cluster with a `Delete` storage class.
+
+  **Where everything comes from.** The project `academy-sts-id` starts empty; step 1 creates the headless Service and
+  the StatefulSet from the YAML shown with its command, running `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed). Clean up deletes the project; nothing is left
+  behind because no claim is created.
+setup: []
+steps:
+  - id: create
+    title: "Create the StatefulSet"
+    do: "Apply a headless Service (`clusterIP: None`) and a StatefulSet with three replicas that names it, then wait until all three pods are Ready."
+    commands:
+      - cmd: "oc apply -f - -n academy-sts-id"
+        meaning: "a headless Service and the StatefulSet that names it in serviceName"
+        stdin: |
+          apiVersion: v1
+          kind: Service
+          metadata: {name: web, labels: {app: web}}
+          spec:
+            clusterIP: None
+            selector: {app: web}
+            ports: [{port: 8080, name: web}]
+          ---
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata: {name: web}
+          spec:
+            serviceName: web
+            replicas: 3
+            selector: {matchLabels: {app: web}}
+            template:
+              metadata: {labels: {app: web}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                containers:
+                - name: app
+                  image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                  command: ["sleep", "infinity"]
+                  resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+                  volumeMounts: [{name: scratch, mountPath: /data}]
+                volumes:
+                - {name: scratch, emptyDir: {}}
+      - {cmd: "oc rollout status statefulset/web -n academy-sts-id --timeout=240s", meaning: "web-0, then web-1, then web-2", timeout: 260}
+      - {cmd: "oc get pods -l app=web -o wide -n academy-sts-id", meaning: "names by ordinal, each with its own IP"}
+      - {cmd: "oc describe statefulset web -n academy-sts-id", meaning: "the events at the end list the creations in ordinal order"}
+    observe: "Pods `web-0`, `web-1` and `web-2`, not random suffixes. The StatefulSet's events show `create Pod web-0`, then `web-1`, then `web-2`: with the default `OrderedReady` policy, each pod is created only after the previous one is Running and Ready."
+    why: "A Deployment's pods are interchangeable and get random names from their ReplicaSet. A StatefulSet gives each pod an ordinal that it keeps for life, which is what clustered software (databases, brokers) uses to tell members apart."
+    predict:
+      prompt: "In what order does a StatefulSet with the default pod management policy create three pods?"
+      choices: ["All three at once", "web-0, then web-1 once web-0 is Ready, then web-2", "In any order the scheduler chooses"]
+      answer: 1
+      explain: "With podManagementPolicy OrderedReady (the default), creation follows the ordinals and waits for each pod to be Running and Ready."
+    checks: [ready3]
+    wait_for: [ready3]
+  - id: names
+    title: "Reach a pod by its stable name"
+    do: "From web-0, resolve the per-pod name of web-1, then the Service name itself."
+    commands:
+      - {cmd: "oc exec web-0 -n academy-sts-id -- getent hosts web-1.web", meaning: "one address: web-1's pod IP"}
+      - {cmd: "oc exec web-0 -n academy-sts-id -- getent ahostsv4 web", meaning: "the headless Service name: every Ready pod's IP, no virtual IP"}
+      - {cmd: "oc get svc web -n academy-sts-id", meaning: "CLUSTER-IP None"}
+    observe: "`web-1.web` resolves to exactly web-1's IP from the previous step. The name `web` returns the IPs of the pods themselves, because a headless Service has no virtual IP for DNS to return."
+    why: "Each pod of a StatefulSet whose `serviceName` is a headless Service gets the record `<pod>.<service>.<namespace>.svc.cluster.local`. A ClusterIP Service gives one address and load-balances; it cannot target a specific member."
+    predict:
+      prompt: "What does `getent hosts web` return for a headless Service with three Ready pods?"
+      choices: ["One virtual IP", "The three pod IPs", "Nothing: headless Services have no DNS name"]
+      answer: 1
+      explain: "Headless means no ClusterIP; DNS answers with the Ready pods' own addresses."
+  - id: replace
+    title: "Delete a pod: same name, empty scratch space"
+    do: "Write a file into web-1's emptyDir volume, delete the pod, and look for the file in its replacement."
+    commands:
+      - {cmd: "oc exec web-1 -n academy-sts-id -- sh -c 'echo i-am-web-1 > /data/id; cat /data/id'", meaning: "the file exists in this pod"}
+      - {cmd: "oc delete pod web-1 -n academy-sts-id", meaning: "the controller recreates a pod with the same name"}
+      - {cmd: "oc rollout status statefulset/web -n academy-sts-id --timeout=240s", meaning: "web-1 is back", timeout: 260}
+      - {cmd: "oc get pods -l app=web -o wide -n academy-sts-id", meaning: "web-1 again, with a new age and possibly a new IP"}
+      - {cmd: "oc exec web-1 -n academy-sts-id -- cat /data/id", meaning: "the file is gone", expect: fail}
+    observe: "The replacement is called `web-1` again and `web-1.web` points to it, but `cat` fails with `No such file or directory`: an emptyDir is created with the pod and deleted with it."
+    why: "A StatefulSet guarantees the **name** and, with claim templates, the **claim**. The pod itself is new. Durable per-pod data needs `volumeClaimTemplates`: the replacement `web-1` would mount the same claim `data-web-1` again. Do not confuse identity with storage."
+    predict:
+      prompt: "web-1 is deleted and recreated. Its volume is an emptyDir. What does the new web-1 find in /data?"
+      choices: ["The old file: StatefulSets keep pod data", "An empty directory: the emptyDir belonged to the old pod", "web-0's files"]
+      answer: 1
+      explain: "Only claims created from volumeClaimTemplates follow the ordinal. An emptyDir lives and dies with one pod."
+    checks: [ready3, web1-new]
+    wait_for: [ready3]
+  - id: scale
+    title: "Scale down, then update: the order is reversed"
+    do: "Scale to one replica, then back to three, then change the pod template and watch which pod is replaced first."
+    commands:
+      - {cmd: "oc scale statefulset/web --replicas=1 -n academy-sts-id", meaning: "removes web-2 first, then web-1"}
+      - {cmd: "oc wait pod/web-1 --for=delete --timeout=120s -n academy-sts-id", meaning: "web-1 is gone", timeout: 140}
+      - {cmd: "oc get pods -l app=web -n academy-sts-id", meaning: "only web-0 is left: the lowest ordinal stays"}
+      - {cmd: "oc scale statefulset/web --replicas=3 -n academy-sts-id", meaning: "web-1, then web-2 come back"}
+      - {cmd: "oc rollout status statefulset/web -n academy-sts-id --timeout=240s", meaning: "three Ready pods again", timeout: 260}
+      - {cmd: "oc set env statefulset/web COLOR=blue -n academy-sts-id", meaning: "a template change starts a rolling update"}
+      - {cmd: "oc rollout status statefulset/web -n academy-sts-id --timeout=300s", meaning: "web-2 is replaced first, web-0 last", timeout: 320}
+      - {cmd: "oc describe statefulset web -n academy-sts-id", meaning: "events with the same message are merged (x2 = twice): web-2 and web-1 were each deleted twice (the scale-down, then the update), web-0 once and last"}
+    observe: "Scaling down removes the highest ordinal first and keeps web-0. The rolling update also goes from web-2 down to web-0, one pod at a time, each waiting for the previous one to be Ready again."
+    why: "Clustered software usually treats the lowest ordinals as the most important (web-0 is often the first member to start a cluster), so the controller removes and replaces from the top down. A `partition` in `updateStrategy.rollingUpdate` lets you update only the ordinals at or above a number: a canary for StatefulSets."
+    checks: [ready3, updated]
+    wait_for: [ready3, updated]
+hints: []
+checks:
+  - {id: ready3, title: "StatefulSet web has 3 ready pods", type: field, kind: statefulset, name: web, path: status.readyReplicas, op: eq, value: 3, expect_text: "3 ready"}
+  - {id: web1-new, title: "web-1 exists again, Ready", type: pods, selector: statefulset.kubernetes.io/pod-name=web-1, ready: true, min: 1, max: 1, expect_text: "1 of 1 match"}
+  - {id: updated, title: "every pod runs the updated template", type: field, kind: statefulset, name: web, path: status.updatedReplicas, op: eq, value: 3, expect_text: "3 updated"}
+questions:
+  - q: "Why does a StatefulSet need a headless Service?"
+    a: "It gives each pod a stable DNS name (<pod>.<service>), so peers can address a specific member instead of a load-balanced virtual IP."
+  - q: "A replacement web-1 has the same name. What else would it keep with a claim template, and what would it not keep?"
+    a: "It would mount the same claim (data-web-1) and therefore the same data. It gets a new pod UID, usually a new IP, and a fresh emptyDir."
+  - q: "You scale a StatefulSet from 3 to 1. Which pods are removed, in what order?"
+    a: "web-2 first, then web-1; web-0 stays. With OrderedReady, each removal waits for the previous pod to be fully terminated."
+references:
+  - {title: "Kubernetes: StatefulSets", url: "https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/"}
+  - {title: "Kubernetes: StatefulSet Basics (tutorial)", url: "https://kubernetes.io/docs/tutorials/stateful-application/basic-stateful-set/"}
+  - {title: "Kubernetes: DNS for Services and Pods", url: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"}
+variations:
+  - "Create a second StatefulSet with `podManagementPolicy: Parallel` (the field cannot be changed on an existing one) and compare the creation events with step 1. Check: all pods are created without waiting for the previous one to be Ready."
+  - "Set `updateStrategy.rollingUpdate.partition` to 2 on `web`, then change the template again. Check: only web-2 is replaced; web-0 and web-1 keep the old template until you lower the partition."

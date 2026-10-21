@@ -1,0 +1,364 @@
+{
+ "lab": "lab.placement-rules",
+ "kind": "lab",
+ "lab_hash": "49e3f32efad59308",
+ "recorded_at": "2026-10-20T18:20:06+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "selector",
+   "cmd": "oc apply -f - -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/picky created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "selector",
+   "cmd": "oc wait pod -l app=picky --for=condition=PodScheduled=false --timeout=60s -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/picky-59f69dcd48-mb44p condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "selector",
+   "cmd": "oc get events --field-selector reason=FailedScheduling -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT                       MESSAGE\n3s          Warning   FailedScheduling   pod/picky-59f69dcd48-mb44p   0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "selector",
+   "cmd": "oc get nodes --show-labels",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION   LABELS\ncrc    Ready    control-plane,master,worker   204d   v1.34.5   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=crc,kubernetes.io/os=linux,node-role.kubernetes.io/control-plane=,node-role.kubernetes.io/master=,node-role.kubernetes.io/worker=,node.openshift.io/os_id=rhel,topology.hostpath.csi/node=crc\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "selector",
+   "cmd": "oc patch deploy/picky -n academy-placement --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/nodeSelector\",\"value\":{\"kubernetes.io/os\":\"linux\"}}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/picky patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "selector",
+   "cmd": "oc rollout status deploy/picky -n academy-placement --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"picky\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"picky\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"picky\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"picky\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc apply -f - -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/spread created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc rollout status deploy/spread --timeout=30s -n academy-placement",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Waiting for deployment \"spread\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 1 of 2 updated replicas are available...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc get pods -l app=spread -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                      READY   STATUS    RESTARTS   AGE\nspread-5fdd9b7c9b-fl2wt   0/1     Pending   0          34s\nspread-5fdd9b7c9b-h72kk   1/1     Running   0          34s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc describe pods -l app=spread -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:             spread-5fdd9b7c9b-fl2wt\nNamespace:        academy-placement\nPriority:         0\nService Account:  default\nNode:             <none>\nLabels:           app=spread\n                  pod-template-hash=5fdd9b7c9b\nAnnotations:      openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Pending\nSeccompProfile:   RuntimeDefault\nIP:               \nIPs:              <none>\nControlled By:    ReplicaSet/spread-5fdd9b7c9b\nContainers:\n  app:\n    Image:      registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  32Mi\n    Requests:\n      cpu:        5m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-4b4lc (ro)\nConditions:\n  Type           Status\n  PodScheduled   False \nVolumes:\n  kube-api-access-4b4lc:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason            Age   From               Message\n  ----     ------            ----  ----               -------\n  Warning  FailedScheduling  35s   default-scheduler  0/1 nodes are available: 1 node(s) didn't match pod anti-affinity rules. no new claims to deallocate, preemption: 0/1 nodes are available: 1 No preemption victims found for incoming pod.\n\n\nName:             spread-5fdd9b7c9b-h72kk\nNamespace:        academy-placement\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Tue, 20 Oct 2026 18:20:33 +0000\nLabels:           app=spread\n                  pod-template-hash=5fdd9b7c9b\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.0.241/23\"],\"mac_address\":\"0a:58:0a:d9:00:f1\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0....\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.0.241\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:00:f1\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.0.241\nIPs:\n  IP:           10.217.0.241\nControlled By:  ReplicaSet/spread-5fdd9b7c9b\nContainers:\n  app:\n    Container ID:  cri-o://871203edef929500de835f6b2dad2aea432aefa756951e20df3eb3a37f22262e\n    Image:         registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Image ID:      image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n    Port:          <none>\n    Host Port:     <none>\n    Command:\n      sleep\n      infinity\n    State:          Running\n      Started:      Tue, 20 Oct 2026 18:20:37 +0000\n    Ready:          True\n    Restart Count:  0\n    Limits:\n      memory:  32Mi\n    Requests:\n      cpu:        5m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-f44hx (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  kube-api-access-f44hx:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type    Reason          Age   From               Message\n  ----    ------          ----  ----               -------\n  Normal  Scheduled       35s   default-scheduler  Successfully assigned academy-placement/spread-5fdd9b7c9b-h72kk to crc\n  Normal  AddedInterface  34s   multus             Add eth0 [10.217.0.241/23] from ovn-kubernetes\n  Normal  Pulling         34s   kubelet            Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n  Normal  Pulled          31s   kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 2.754s (2.754s including waiting). Image size: 108819904 bytes.\n  Normal  Created         31s   kubelet            Created container: app\n  Normal  Started         31s   kubelet            Started container app\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc apply -f - -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/spread configured\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "anti-affinity",
+   "cmd": "oc rollout status deploy/spread -n academy-placement --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"spread\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"spread\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"spread\" rollout to finish: 0 out of 2 new replicas have been updated...\nWaiting for deployment \"spread\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"spread\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "topology",
+   "cmd": "oc apply -f - -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/zoned created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "topology",
+   "cmd": "oc wait pod -l app=zoned --for=condition=PodScheduled=false --timeout=60s -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/zoned-6c9f9588f8-f9qc9 condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "topology",
+   "cmd": "oc get events --field-selector reason=FailedScheduling -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT                        MESSAGE\n65s         Warning   FailedScheduling   pod/picky-59f69dcd48-mb44p    0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n50s         Warning   FailedScheduling   pod/spread-5fdd9b7c9b-fl2wt   0/1 nodes are available: 1 node(s) didn't match pod anti-affinity rules. no new claims to deallocate, preemption: 0/1 nodes are available: 1 No preemption victims found for incoming pod.\n3s          Warning   FailedScheduling   pod/zoned-6c9f9588f8-f9qc9    0/1 nodes are available: 1 node(s) didn't match pod topology spread constraints (missing required label). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "topology",
+   "cmd": "oc patch deploy/zoned -n academy-placement --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/topologySpreadConstraints/0/whenUnsatisfiable\",\"value\":\"ScheduleAnyway\"}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/zoned patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "topology",
+   "cmd": "oc rollout status deploy/zoned -n academy-placement --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"zoned\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"zoned\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"zoned\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"zoned\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pdb",
+   "cmd": "oc apply -f - -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "poddisruptionbudget.policy/spread created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pdb",
+   "cmd": "oc get pdb spread -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nspread   2               N/A               0                     2s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pdb",
+   "cmd": "oc patch pdb/spread -n academy-placement --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/minAvailable\"},{\"op\":\"add\",\"path\":\"/spec/maxUnavailable\",\"value\":1}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "poddisruptionbudget.policy/spread patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pdb",
+   "cmd": "oc get pdb spread -n academy-placement",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nspread   N/A             1                 1                     4s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "picky-selector",
+    "title": "picky no longer requires disktype",
+    "expect": "no disktype in the nodeSelector",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"picky\" not found"
+   },
+   {
+    "id": "spread-preferred",
+    "title": "spread keeps its anti-affinity as a preference, per node, against its own pods",
+    "expect": "preferred anti-affinity on kubernetes.io/hostname for app=spread",
+    "status": "fail",
+    "observed": "0 matching deployment"
+   },
+   {
+    "id": "zoned-anyway",
+    "title": "zoned keeps its spread constraint with ScheduleAnyway",
+    "expect": "ScheduleAnyway",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"zoned\" not found"
+   },
+   {
+    "id": "picky-ready",
+    "title": "picky is scheduled and Ready",
+    "expect": "1/1 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"picky\" not found"
+   },
+   {
+    "id": "spread-ready",
+    "title": "spread runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"spread\" not found"
+   },
+   {
+    "id": "zoned-ready",
+    "title": "zoned is scheduled and Ready",
+    "expect": "1/1 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"zoned\" not found"
+   },
+   {
+    "id": "pdb-allows",
+    "title": "the budget allows one disruption",
+    "expect": "disruptionsAllowed = 1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): poddisruptionbudgets.policy \"spread\" not found"
+   }
+  ],
+  "at": 1792520417.033907
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "picky-selector",
+    "title": "picky no longer requires disktype",
+    "expect": "no disktype in the nodeSelector",
+    "status": "pass",
+    "observed": "spec.template.spec.nodeSelector.disktype = None"
+   },
+   {
+    "id": "spread-preferred",
+    "title": "spread keeps its anti-affinity as a preference, per node, against its own pods",
+    "expect": "preferred anti-affinity on kubernetes.io/hostname for app=spread",
+    "status": "pass",
+    "observed": "1 matching deployment"
+   },
+   {
+    "id": "zoned-anyway",
+    "title": "zoned keeps its spread constraint with ScheduleAnyway",
+    "expect": "ScheduleAnyway",
+    "status": "pass",
+    "observed": "spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable = 'ScheduleAnyway'"
+   },
+   {
+    "id": "picky-ready",
+    "title": "picky is scheduled and Ready",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "spread-ready",
+    "title": "spread runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "zoned-ready",
+    "title": "zoned is scheduled and Ready",
+    "expect": "1/1 ready",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "pdb-allows",
+    "title": "the budget allows one disruption",
+    "expect": "disruptionsAllowed = 1",
+    "status": "pass",
+    "observed": "status.disruptionsAllowed = 1"
+   }
+  ],
+  "at": 1792520497.8312013
+ },
+ "seconds": 91,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-placement: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

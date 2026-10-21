@@ -1,0 +1,154 @@
+{
+ "lab": "inc.liveness-restarts",
+ "kind": "incident",
+ "lab_hash": "d3ab5d6068684bda",
+ "recorded_at": "2026-10-14T17:20:33+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -n academy-inc-live",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS      AGE\nweb-77ddf8c459-wz5pk   1/1     Running   1 (13s ago)   28s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-live --field-selector reason=Unhealthy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON      OBJECT                     MESSAGE\n25s         Warning   Unhealthy   pod/web-77ddf8c459-wz5pk   Readiness probe failed: Get \"http://10.217.1.118:8080/healthz\": dial tcp 10.217.1.118:8080: connect: connection refused\n4s          Warning   Unhealthy   pod/web-77ddf8c459-wz5pk   Liveness probe failed: Get \"http://10.217.1.118:8081/healthz\": dial tcp 10.217.1.118:8081: connect: connection refused\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-live --field-selector reason=Killing",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE     REASON    OBJECT                     MESSAGE\n0s          Normal   Killing   pod/web-77ddf8c459-wz5pk   Container httpd failed liveness probe, will be restarted\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc describe pod <pod> -n academy-inc-live",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc describe pod web-77ddf8c459-wz5pk -n academy-inc-live",
+   "code": 0,
+   "stdout": "Name:             web-77ddf8c459-wz5pk\nNamespace:        academy-inc-live\nPriority:         0\nService Account:  default\nNode:             crc/192.168.126.11\nStart Time:       Wed, 14 Oct 2026 17:20:36 +0000\nLabels:           app=web\n                  pod-template-hash=77ddf8c459\nAnnotations:      k8s.ovn.org/pod-networks:\n                    {\"default\":{\"ip_addresses\":[\"10.217.1.118/23\"],\"mac_address\":\"0a:58:0a:d9:01:76\",\"gateway_ips\":[\"10.217.0.1\"],\"routes\":[{\"dest\":\"10.217.0....\n                  k8s.v1.cni.cncf.io/network-status:\n                    [{\n                        \"name\": \"ovn-kubernetes\",\n                        \"interface\": \"eth0\",\n                        \"ips\": [\n                            \"10.217.1.118\"\n                        ],\n                        \"mac\": \"0a:58:0a:d9:01:76\",\n                        \"default\": true,\n                        \"dns\": {}\n                    }]\n                  openshift.io/scc: restricted-v2\n                  seccomp.security.alpha.kubernetes.io/pod: runtime/default\n                  security.openshift.io/validated-scc-subject-type: user\nStatus:           Running\nSeccompProfile:   RuntimeDefault\nIP:               10.217.1.118\nIPs:\n  IP:           10.217.1.118\nControlled By:  ReplicaSet/web-77ddf8c459\nContainers:\n  httpd:\n    Container ID:   cri-o://fb6c5aa52b9efc1e43b27644dfe9e55f39f96e60f5c56ec18b2b0110bc011c79\n    Image:          registry.access.redhat.com/ubi9/httpd-24:latest\n    Image ID:       registry.access.redhat.com/ubi9/httpd-24@sha256:b48d56ee57fa35ea7412f086fec5135e6db0ef50edddc40dfb0c46dc967fbd0d\n    Port:           8080/TCP\n    Host Port:      0/TCP\n    State:          Running\n      Started:      Wed, 14 Oct 2026 17:20:54 +0000\n    Last State:     Terminated\n      Reason:       Completed\n      Exit Code:    0\n      Started:      Wed, 14 Oct 2026 17:20:40 +0000\n      Finished:     Wed, 14 Oct 2026 17:20:51 +0000\n    Ready:          True\n    Restart Count:  1\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:        10m\n      memory:     32Mi\n    Liveness:     http-get http://:8081/healthz delay=5s timeout=1s period=5s #success=1 #failure=2\n    Readiness:    http-get http://:8080/healthz delay=0s timeout=1s period=5s #success=1 #failure=3\n    Environment:  <none>\n    Mounts:\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-d22f7 (ro)\n      /var/www/html from content (rw)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  content:\n    Type:      ConfigMap (a volume populated by a ConfigMap)\n    Name:      web-content\n    Optional:  false\n  kube-api-access-d22f7:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\n    ConfigMapName:           openshift-service-ca.crt\n    Optional:                false\nQoS Class:                   Burstable\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type     Reason          Age                From               Message\n  ----     ------          ----               ----               -------\n  Normal   Scheduled       31s                default-scheduler  Successfully assigned academy-inc-live/web-77ddf8c459-wz5pk to crc\n  Normal   AddedInterface  32s                multus             Add eth0 [10.217.1.118/23] from ovn-kubernetes\n  Normal   Pulled          28s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 3.324s (3.324s including waiting). Image size: 309803777 bytes.\n  Warning  Unhealthy       28s                kubelet            Readiness probe failed: Get \"http://10.217.1.118:8080/healthz\": dial tcp 10.217.1.118:8080: connect: connection refused\n  Normal   Created         14s (x2 over 28s)  kubelet            Created container: httpd\n  Normal   Started         14s (x2 over 28s)  kubelet            Started container httpd\n  Normal   Pulled          14s                kubelet            Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 2.975s (2.975s including waiting). Image size: 309803777 bytes.\n  Normal   Pulling         2s (x3 over 31s)   kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n  Warning  Unhealthy       2s (x4 over 22s)   kubelet            Liveness probe failed: Get \"http://10.217.1.118:8081/healthz\": dial tcp 10.217.1.118:8081: connect: connection refused\n  Normal   Killing         2s (x2 over 17s)   kubelet            Container httpd failed liveness probe, will be restarted\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy web -n academy-inc-live -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"path\":\"/healthz\",\"port\":8081,\"scheme\":\"HTTP\"}\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/web -n academy-inc-live --liveness --get-url=http://:8080/healthz --initial-delay-seconds=5 --period-seconds=10",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-live --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "probe-port",
+    "title": "The liveness probe targets port 8080",
+    "expect": "8080",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].livenessProbe.httpGet.port = 8081"
+   },
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "stable",
+    "title": "The running pod has not restarted",
+    "expect": "Ready, 0 restarts",
+    "status": "fail",
+    "observed": "0 of 1 match · web-77ddf8c459-wz5pk: Running [ready, restarts 1]"
+   }
+  ],
+  "at": 1791998463.364039
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "probe-port",
+    "title": "The liveness probe targets port 8080",
+    "expect": "8080",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].livenessProbe.httpGet.port = 8080"
+   },
+   {
+    "id": "web-ready",
+    "title": "web is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "stable",
+    "title": "The running pod has not restarted",
+    "expect": "Ready, 0 restarts",
+    "status": "pass",
+    "observed": "1 of 1 match · web-5d587d8b64-k5c9q: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791998476.8843887
+ },
+ "seconds": 44,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-live: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

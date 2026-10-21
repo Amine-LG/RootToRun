@@ -1,0 +1,113 @@
+- id: case.enterprise-onboarding
+  title: "Onboarding forty application teams onto a shared cluster"
+  context: |
+    The platform team of a large regulated organisation runs OpenShift for internal applications. Forty teams will move
+    from virtual machines over two quarters. Security insists on segregation between business units; auditors want to
+    know, at any time, who can change what.
+  situation: |
+    The first three teams were onboarded by hand: projects created on request, admin granted to individual users,
+    no quotas, no network policies. One team already consumed half the cluster's memory requests, and an access
+    review found a developer with admin rights in a project of another business unit.
+  ownership:
+    application team: ["their manifests, images and probes", "requests and limits that reflect real usage", "who in the team is admin of their projects (through a group)"]
+    platform team: ["the project request template: quota, LimitRange, default-deny NetworkPolicies, group bindings", "cluster capacity and node pools", "group sync from the directory"]
+    security: ["which SCCs and cluster roles exist and who may use them", "the access review process and its evidence"]
+    infrastructure: ["load balancers, DNS and certificates in front of the cluster", "storage classes and backups"]
+    coordinate: ["naming and labelling conventions", "how a team requests an exception (anyuid, extra quota)"]
+  evidence:
+    - "Per project: ResourceQuota usage (`oc describe quota`) against what was requested."
+    - "Bindings that name users instead of groups; bindings to subjects that no longer exist."
+    - "Projects without a default-deny NetworkPolicy, and namespaces created directly (they bypass the project template)."
+  approvals:
+    - "The project template change (affects every new project): platform and security."
+    - "Removing self-provisioning from `system:authenticated:oauth` (with the binding's autoupdate annotation set to false so it is not restored): platform, communicated to all teams."
+    - "Each SCC exception: security, with an expiry date."
+  automate:
+    - "Projects created from Git (a request becomes a pull request) by GitOps, with the same guardrails as the template."
+    - "Group sync from LDAP/AD on a schedule, with pruning of removed groups; access through groups only."
+    - "A weekly access report (who can do what, and why), with stale grants flagged."
+  discussion:
+    - q: "Why bind roles to groups rather than users, even for a team of three?"
+      a: "Joiners and leavers then change in one place (the directory); bindings never need to be edited, and reviews read one group instead of many users."
+    - q: "What should the default project template contain for a regulated environment?"
+      a: "A ResourceQuota and LimitRange, default-deny ingress plus policies allowing the same namespace, the router and monitoring, and admin bound to the requesting team's group."
+    - q: "The template is fixed. Are the first three teams now covered?"
+      a: "No. The template only shapes projects requested after the change; existing projects need the same objects added, for example by GitOps."
+    - q: "A team asks for anyuid for a vendor image. What do you ask before approving?"
+      a: "Whether a non-root image exists, which ServiceAccount needs it (never default), for how long, and who owns the risk; then grant to that ServiceAccount only, with an expiry."
+  concepts: [ocp.projects, k8s.quota, sec.rbac, net.policy, ent.governance]
+  references:
+    - {title: "OpenShift 4.21: Configuring project creation", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects#configuring-project-creation"}
+    - {title: "OpenShift 4.21: Syncing LDAP groups", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/ldap-syncing"}
+    - {title: "OpenShift 4.21: Network policy", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy"}
+
+- id: case.friday-release
+  title: "A Friday release, a 503, and a rollback"
+  context: |
+    A payments API is deployed by a pipeline that applies manifests and waits for `oc rollout status`. Releases are
+    allowed until 16:00 on Fridays.
+  situation: |
+    At 15:40 a release changes the container port from 8080 to 8443 to enable TLS inside the pod, but the Service
+    still forwards to 8080. The readiness probe was updated to 8443, so new pods become Ready and old ones are
+    removed: every request through the Service is refused. The pipeline reports success.
+  ownership:
+    application team: ["the port change and its Service", "readiness probes that test the path users take"]
+    platform team: ["router and monitoring alerts on 5xx rates per Route", "guidance for named ports"]
+    security: ["the requirement for TLS to the pod, and the certificates (service CA)"]
+    infrastructure: []
+    coordinate: ["the incident call, the decision to roll back, the post-incident review"]
+  evidence:
+    - "Router 503 rate for the Route; endpoints present but connections refused (`curl` exit 7 from a client pod)."
+    - "`oc rollout history deploy/<name> --revision=<n>`: the pod template of each revision, so which one changed the port."
+    - "The Service's targetPort against the container's port."
+  approvals:
+    - "Rolling back during an incident: the incident commander, without waiting for a change board."
+  automate:
+    - "Named ports (`targetPort: http`) so a port number change cannot desynchronise Service and pod."
+    - "A post-deployment smoke test through the Service or Route, not just `rollout status`."
+    - "Automatic rollback when the 5xx rate rises after a release."
+  discussion:
+    - q: "Why did `oc rollout status` report success?"
+      a: "It only waits for new pods to be Ready; readiness was probed on the new port directly, not through the Service."
+    - q: "Roll back or fix forward?"
+      a: "Roll back first (`oc rollout undo`) to restore service in seconds, then fix the Service properly in a normal release."
+    - q: "Is correcting the Service's targetPort to 8443 enough for the fix-forward?"
+      a: "Not if the Route is edge-terminated or plain HTTP: the router would then send plain HTTP to a port that expects TLS. The Route must become re-encrypt (or passthrough), which is why TLS to the pod is a change to plan, not a port edit."
+  concepts: [k8s.rollout, net.services, k8s.probes, change.control, obs.incident]
+  references:
+    - {title: "Kubernetes: Deployments (rolling back)", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment"}
+    - {title: "OpenShift 4.21: Routes", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes"}
+
+- id: case.access-review
+  title: "The yearly access review, done in an afternoon"
+  context: |
+    Auditors ask the platform team to show, for the production cluster, every subject with cluster-admin, with
+    access to Secrets, with privileged SCCs, or able to exec into pods, and to justify each one.
+  situation: |
+    The last review took three weeks of spreadsheets. It missed a ClusterRoleBinding to a ServiceAccount of a
+    decommissioned project: the binding survived, and anyone able to recreate that project and ServiceAccount name
+    (with default self-provisioning, any logged-in user) would have had cluster-wide read access.
+  ownership:
+    application team: ["justify grants in their projects", "remove ServiceAccounts and bindings they no longer use"]
+    platform team: ["produce the report", "remove stale and resurrectable grants"]
+    security: ["define the sensitive permissions", "accept or reject justifications"]
+    infrastructure: []
+    coordinate: ["the review calendar and the evidence format auditors accept"]
+  evidence:
+    - "For each sensitive permission: subject, path (group → binding → role), binding age, owner."
+    - "Bindings whose subjects do not exist (stale) and which someone could recreate (resurrectable)."
+    - "Virtual-group grants (`system:authenticated`, `system:serviceaccounts`) beyond the defaults."
+  approvals:
+    - "Removing a grant in use: the owner of the workload, with a test of the narrower grant."
+  automate:
+    - "A read-only access explainer run on a schedule, its report archived."
+    - "Policy as code: bindings come from Git, so every grant has an author and a review."
+    - "A decommissioning checklist that removes cluster-scoped and cross-namespace grants before the project is deleted."
+  discussion:
+    - q: "Why are bindings to deleted ServiceAccounts a finding, not just clutter?"
+      a: "RBAC matches names; recreating the name reactivates the grant without any approval."
+    - q: "Which built-in tools answer part of the auditors' question, and what is missing?"
+      a: "`oc adm policy who-can` and `oc auth can-i --list` answer who and what; neither explains the path or flags stale grants."
+  concepts: [sec.audit, sec.rbac, sec.serviceaccounts, ent.governance]
+  references:
+    - {title: "Kubernetes: RBAC good practices", url: "https://kubernetes.io/docs/concepts/security/rbac-good-practices/"}

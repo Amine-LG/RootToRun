@@ -1,0 +1,10 @@
+# OpenShift only. On other Kubernetes distributions use an Ingress instead.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: static-site
+  labels: {app.kubernetes.io/name: static-site}
+spec:
+  to: {kind: Service, name: static-site}
+  port: {targetPort: http}
+  tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}

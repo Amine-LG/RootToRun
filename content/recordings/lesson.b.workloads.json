@@ -1,0 +1,144 @@
+{
+ "lab": "lesson.b.workloads",
+ "kind": "lesson",
+ "lab_hash": "a44dd756744444fe",
+ "recorded_at": "2026-10-15T17:24:18+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-b-workloads",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "kubectl create job report --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo report: 42 orders processed' >/dev/null; kubectl wait --for=condition=Complete job/report --timeout=180s >/dev/null; kubectl get jobs; kubectl get pods -l job-name=report",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     STATUS     COMPLETIONS   DURATION   AGE\nreport   Complete   1/1           9s         9s\nNAME           READY   STATUS      RESTARTS   AGE\nreport-dcdc9   0/1     Completed   0          9s\n",
+   "stderr": "",
+   "combined": "NAME     STATUS     COMPLETIONS   DURATION   AGE\nreport   Complete   1/1           9s         9s\nNAME           READY   STATUS      RESTARTS   AGE\nreport-dcdc9   0/1     Completed   0          9s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl logs $(kubectl get pods -l job-name=report -o name)",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "report: 42 orders processed\n",
+   "stderr": "",
+   "combined": "report: 42 orders processed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl logs job/report",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "report: 42 orders processed\n",
+   "stderr": "",
+   "combined": "report: 42 orders processed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl create job audit --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo audit: 7 findings' >/dev/null; kubectl wait --for=condition=Complete job/audit --timeout=180s >/dev/null; kubectl get jobs audit",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    STATUS     COMPLETIONS   DURATION   AGE\naudit   Complete   1/1           7s         8s\n",
+   "stderr": "",
+   "combined": "NAME    STATUS     COMPLETIONS   DURATION   AGE\naudit   Complete   1/1           7s         8s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl logs job/audit",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "audit: 7 findings\n",
+   "stderr": "",
+   "combined": "audit: 7 findings\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl create cronjob tick --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --schedule='*/1 * * * *' -- date >/dev/null; sleep 75; kubectl get cronjobs; kubectl get jobs",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   SCHEDULE      TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE\ntick   */1 * * * *   <none>     False     0        56s             75s\nNAME            STATUS     COMPLETIONS   DURATION   AGE\naudit           Complete   1/1           7s         84s\nreport          Complete   1/1           9s         95s\ntick-29868083   Complete   1/1           7s         56s\n",
+   "stderr": "",
+   "combined": "NAME   SCHEDULE      TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE\ntick   */1 * * * *   <none>     False     0        56s             75s\nNAME            STATUS     COMPLETIONS   DURATION   AGE\naudit           Complete   1/1           7s         84s\nreport          Complete   1/1           9s         95s\ntick-29868083   Complete   1/1           7s         56s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f daemonset.yaml >/dev/null; kubectl rollout status daemonset/agent --timeout=180s >/dev/null; kubectl get daemonset agent",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE\nagent   1         1         1       1            1           <none>          5s\n",
+   "stderr": "",
+   "combined": "NAME    DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE\nagent   1         1         1       1            1           <none>          5s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat statefulset.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\nkind: Service\nmetadata:\n  name: db\nspec:\n  clusterIP: None\n  selector:\n    app: db\n  ports:\n    - port: 8080\n---\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: db\nspec:\n  serviceName: db\n  replicas: 2\n  selector:\n    matchLabels:\n      app: db\n  template:\n    metadata:\n      labels:\n        app: db\n    spec:\n      containers:\n        - name: db\n          image: registry.access.redhat.com/ubi9/httpd-24:latest\n",
+   "stderr": "",
+   "combined": "apiVersion: v1\nkind: Service\nmetadata:\n  name: db\nspec:\n  clusterIP: None\n  selector:\n    app: db\n  ports:\n    - port: 8080\n---\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: db\nspec:\n  serviceName: db\n  replicas: 2\n  selector:\n    matchLabels:\n      app: db\n  template:\n    metadata:\n      labels:\n        app: db\n    spec:\n      containers:\n        - name: db\n          image: registry.access.redhat.com/ubi9/httpd-24:latest\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f statefulset.yaml >/dev/null; kubectl rollout status statefulset/db --timeout=180s >/dev/null; kubectl get pods -l app=db",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   STATUS    RESTARTS   AGE\ndb-0   1/1     Running   0          9s\ndb-1   1/1     Running   0          5s\n",
+   "stderr": "",
+   "combined": "NAME   READY   STATUS    RESTARTS   AGE\ndb-0   1/1     Running   0          9s\ndb-1   1/1     Running   0          5s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl delete pod db-0 >/dev/null; sleep 3; kubectl wait --for=condition=Ready pod/db-0 --timeout=180s >/dev/null; kubectl get pods -l app=db",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   STATUS    RESTARTS   AGE\ndb-0   1/1     Running   0          5s\ndb-1   1/1     Running   0          12s\n",
+   "stderr": "",
+   "combined": "NAME   READY   STATUS    RESTARTS   AGE\ndb-0   1/1     Running   0          5s\ndb-1   1/1     Running   0          12s\n",
+   "ok": true
+  }
+ ],
+ "seconds": 118,
+ "ok": true,
+ "problems": []
+}

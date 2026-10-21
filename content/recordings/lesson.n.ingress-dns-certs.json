@@ -1,0 +1,263 @@
+{
+ "lab": "lesson.n.ingress-dns-certs",
+ "kind": "lesson",
+ "lab_hash": "422643b8bbde9a3c",
+ "recorded_at": "2026-10-16T16:52:02+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-ingress-dns-certs",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get clusteroperators ingress dns network service-ca",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME         VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE\ningress      4.21.8    True        False         False      200d    \ndns          4.21.8    True        False         False      5h10m   \nnetwork      4.21.8    True        False         False      200d    \nservice-ca   4.21.8    True        False         False      200d    \n",
+   "stderr": "",
+   "combined": "NAME         VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE\ningress      4.21.8    True        False         False      200d    \ndns          4.21.8    True        False         False      5h10m   \nnetwork      4.21.8    True        False         False      200d    \nservice-ca   4.21.8    True        False         False      200d    \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller -n openshift-ingress-operator",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      AGE\ndefault   200d\n",
+   "stderr": "",
+   "combined": "NAME      AGE\ndefault   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o yaml | sed -n '/^spec:/,/^status:/p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "spec:\n  clientTLS:\n    clientCA:\n      name: \"\"\n    clientCertificatePolicy: \"\"\n  closedClientConnectionPolicy: Continue\n  httpCompression: {}\n  httpEmptyRequestsPolicy: Respond\n  httpErrorCodePages:\n    name: \"\"\n  idleConnectionTerminationPolicy: Immediate\n  replicas: 1\n  tuningOptions:\n    reloadInterval: 0s\n  unsupportedConfigOverrides: null\nstatus:\n",
+   "stderr": "",
+   "combined": "spec:\n  clientTLS:\n    clientCA:\n      name: \"\"\n    clientCertificatePolicy: \"\"\n  closedClientConnectionPolicy: Continue\n  httpCompression: {}\n  httpEmptyRequestsPolicy: Respond\n  httpErrorCodePages:\n    name: \"\"\n  idleConnectionTerminationPolicy: Immediate\n  replicas: 1\n  tuningOptions:\n    reloadInterval: 0s\n  unsupportedConfigOverrides: null\nstatus:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingress.config.openshift.io cluster -o jsonpath='{.spec.domain}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apps-crc.testing\n",
+   "stderr": "",
+   "combined": "apps-crc.testing\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n openshift-ingress -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                 READY   STATUS    RESTARTS        AGE    IP               NODE   NOMINATED NODE   READINESS GATES\nrouter-default-78b77bfd47-txw5v      1/1     Running   12 (5h7m ago)   4d3h   192.168.126.11   crc    <none>           <none>\nroutes-controller-867bd6f755-kcn6d   1/1     Running   2               4d3h   10.217.0.25      crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME                                 READY   STATUS    RESTARTS        AGE    IP               NODE   NOMINATED NODE   READINESS GATES\nrouter-default-78b77bfd47-txw5v      1/1     Running   12 (5h7m ago)   4d3h   192.168.126.11   crc    <none>           <none>\nroutes-controller-867bd6f755-kcn6d   1/1     Running   2               4d3h   10.217.0.25      crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.labels}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"ingresscontroller.operator.openshift.io/owning-ingresscontroller\":\"default\"}\n",
+   "stderr": "",
+   "combined": "{\"ingresscontroller.operator.openshift.io/owning-ingresscontroller\":\"default\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get dns.operator/default -o yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: operator.openshift.io/v1\nkind: DNS\nmetadata:\n  creationTimestamp: \"2026-03-30T12:21:17Z\"\n  finalizers:\n  - dns.operator.openshift.io/dns-controller\n  generation: 1\n  name: default\n  resourceVersion: \"564209\"\n  uid: aa728063-6fde-4763-b449-e51dadbdbb50\nspec:\n  cache:\n    negativeTTL: 0s\n    positiveTTL: 0s\n  logLevel: Normal\n  nodePlacement: {}\n  operatorLogLevel: Normal\n  upstreamResolvers:\n    policy: Sequential\n    protocolStrategy: \"\"\n    transportConfig: {}\n    upstreams:\n    - port: 53\n      type: SystemResolvConf\nstatus:\n  clusterDomain: cluster.local\n  clusterIP: 10.217.4.10\n  conditions:\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: Enough DNS pods are available, and the DNS service has a cluster IP address.\n    reason: AsExpected\n    status: \"False\"\n    type: Degraded\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: All DNS and node-resolver pods are available, and the DNS service has\n      a cluster IP address.\n    reason: AsExpected\n    status: \"False\"\n    type: Progressing\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: The DNS daemonset has available pods, and the DNS service has a cluster\n      IP address.\n    reason: AsExpected\n    status: \"True\"\n    type: Available\n  - lastTransitionTime: \"2026-03-30T12:21:24Z\"\n    message: DNS Operator can be upgraded\n    reason: AsExpected\n    status: \"True\"\n    type: Upgradeable\n",
+   "stderr": "",
+   "combined": "apiVersion: operator.openshift.io/v1\nkind: DNS\nmetadata:\n  creationTimestamp: \"2026-03-30T12:21:17Z\"\n  finalizers:\n  - dns.operator.openshift.io/dns-controller\n  generation: 1\n  name: default\n  resourceVersion: \"564209\"\n  uid: aa728063-6fde-4763-b449-e51dadbdbb50\nspec:\n  cache:\n    negativeTTL: 0s\n    positiveTTL: 0s\n  logLevel: Normal\n  nodePlacement: {}\n  operatorLogLevel: Normal\n  upstreamResolvers:\n    policy: Sequential\n    protocolStrategy: \"\"\n    transportConfig: {}\n    upstreams:\n    - port: 53\n      type: SystemResolvConf\nstatus:\n  clusterDomain: cluster.local\n  clusterIP: 10.217.4.10\n  conditions:\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: Enough DNS pods are available, and the DNS service has a cluster IP address.\n    reason: AsExpected\n    status: \"False\"\n    type: Degraded\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: All DNS and node-resolver pods are available, and the DNS service has\n      a cluster IP address.\n    reason: AsExpected\n    status: \"False\"\n    type: Progressing\n  - lastTransitionTime: \"2026-10-16T11:41:20Z\"\n    message: The DNS daemonset has available pods, and the DNS service has a cluster\n      IP address.\n    reason: AsExpected\n    status: \"True\"\n    type: Available\n  - lastTransitionTime: \"2026-03-30T12:21:24Z\"\n    message: DNS Operator can be upgraded\n    reason: AsExpected\n    status: \"True\"\n    type: Upgradeable\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get daemonsets -n openshift-dns",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE\ndns-default     1         1         1       1            1           kubernetes.io/os=linux   200d\nnode-resolver   1         1         1       1            1           kubernetes.io/os=linux   200d\n",
+   "stderr": "",
+   "combined": "NAME            DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE\ndns-default     1         1         1       1            1           kubernetes.io/os=linux   200d\nnode-resolver   1         1         1       1            1           kubernetes.io/os=linux   200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": ".:5353 {\n    bufsize 1232\n    errors\n    log . {\n        class error\n    }\n    health {\n        lameduck 20s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n    }\n    prometheus 127.0.0.1:9153\n    forward . /etc/resolv.conf {\n        policy sequential\n    }\n    cache 900 {\n        denial 9984 30\n    }\n    reload\n}\nhostname.bind:5353 {\n    chaos\n}\n",
+   "stderr": "",
+   "combined": ".:5353 {\n    bufsize 1232\n    errors\n    log . {\n        class error\n    }\n    health {\n        lameduck 20s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n    }\n    prometheus 127.0.0.1:9153\n    forward . /etc/resolv.conf {\n        policy sequential\n    }\n    cache 900 {\n        denial 9984 30\n    }\n    reload\n}\nhostname.bind:5353 {\n    chaos\n}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch dns.operator/default --type=merge -p '{\"spec\":{\"servers\":[{\"name\":\"corporate\",\"zones\":[\"corp.example\"],\"forwardPlugin\":{\"policy\":\"Random\",\"upstreams\":[\"10.1.1.53\"]}}]}}' --dry-run=server -o jsonpath='{.spec.servers}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[{\"forwardPlugin\":{\"policy\":\"Random\",\"upstreams\":[\"10.1.1.53\"]},\"name\":\"corporate\",\"zones\":[\"corp.example\"]}]\n",
+   "stderr": "",
+   "combined": "[{\"forwardPlugin\":{\"policy\":\"Random\",\"upstreams\":[\"10.1.1.53\"]},\"name\":\"corporate\",\"zones\":[\"corp.example\"]}]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get dns.operator/default -o jsonpath='{.metadata.generation} servers={.spec.servers}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1 servers=\n",
+   "stderr": "",
+   "combined": "1 servers=\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -startdate -enddate",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "subject=CN=*.apps-crc.testing\nissuer=CN=ingress-operator@1774874284\nnotBefore=Mar 30 12:38:04 2026 GMT\nnotAfter=Mar 29 12:38:05 2028 GMT\n",
+   "stderr": "",
+   "combined": "subject=CN=*.apps-crc.testing\nissuer=CN=ingress-operator@1774874284\nnotBefore=Mar 30 12:38:04 2026 GMT\nnotAfter=Mar 29 12:38:05 2028 GMT\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get secret signing-key -n openshift-service-ca -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -startdate -enddate",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "subject=CN=openshift-service-serving-signer@1774873251\nnotBefore=Mar 30 12:20:50 2026 GMT\nnotAfter=May 28 12:20:51 2028 GMT\n",
+   "stderr": "",
+   "combined": "subject=CN=openshift-service-serving-signer@1774873251\nnotBefore=Mar 30 12:20:50 2026 GMT\nnotAfter=May 28 12:20:51 2028 GMT\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch ingresscontroller default -n openshift-ingress-operator --type=merge -p '{\"spec\":{\"defaultCertificate\":{\"name\":\"lab-wildcard\"}}}' --dry-run=server -o jsonpath='{.spec.defaultCertificate}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"name\":\"lab-wildcard\"}\n",
+   "stderr": "",
+   "combined": "{\"name\":\"lab-wildcard\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get secret lab-wildcard -n openshift-ingress",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): secrets \"lab-wildcard\" not found\n",
+   "combined": "Error from server (NotFound): secrets \"lab-wildcard\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get apiserver cluster -o jsonpath='{.spec}{\"\\n\"}' && oc get proxy cluster -o jsonpath='{.spec}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"audit\":{\"profile\":\"Default\"}}\n{\"trustedCA\":{\"name\":\"\"}}\n",
+   "stderr": "",
+   "combined": "{\"audit\":{\"profile\":\"Default\"}}\n{\"trustedCA\":{\"name\":\"\"}}\n",
+   "ok": true
+  }
+ ],
+ "seconds": 21,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NET-07",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "echo 'nothing to undo: no change was stored'",
+    "code": 0
+   }
+  ],
+  "verify": [],
+  "snapshot": [
+   {
+    "cmd": "oc get dns.operator default -o jsonpath='{.metadata.generation} {.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation} {.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}' | sha256sum",
+    "same": true
+   },
+   {
+    "cmd": "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.generation}'",
+    "same": true
+   }
+  ]
+ }
+}

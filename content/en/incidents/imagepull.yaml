@@ -1,0 +1,101 @@
+id: inc.imagepull
+kind: incident
+title: "ImagePullBackOff on a new deployment"
+summary: "A freshly deployed service never starts: its pod waits in ImagePullBackOff."
+module: a3-troubleshoot
+minutes: 10
+level: 1
+supports: "Recorded on OpenShift 4.21.8 pulling from registry.access.redhat.com."
+concepts: [container.images, container.registries, k8s.pod-lifecycle]
+prerequisites: [o1.troubleshooting]
+namespace: academy-inc-pull
+objective: |
+  Use the registry's answer in the pod's events to tell a wrong image reference from a credential or network problem,
+  then repair the cause and confirm that the service runs.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`; the Deployment was created from the pipeline's variable. The app creates the project
+  `academy-inc-pull` as your learner identity when you start the incident, with everything listed here in the state
+  the symptom describes; how it got into that state is part of the investigation and is shown in the debrief. The
+  images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login. Clean up deletes the
+  project. In the browser you replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The portal was deployed from a pipeline variable that someone typed by hand. Ten minutes later it is still not
+  running and the pod status alternates between ErrImagePull and ImagePullBackOff.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/htpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get pods -n academy-inc-pull", meaning: "0/1 ImagePullBackOff (it alternates with ErrImagePull), 0 restarts: the container was never created"}
+  - {cmd: "oc get events -n academy-inc-pull --field-selector reason=Failed", meaning: "the registry's exact answer: reading manifest latest in registry.access.redhat.com/ubi9/htpd-24: name unknown: Repo not found, then Error: ErrImagePull and Error: ImagePullBackOff"}
+  - {cmd: "oc get deploy web -n academy-inc-pull -o jsonpath='{.spec.template.spec.containers[0].image}{\"\\n\"}'", meaning: "the image reference the pod asks for: ubi9/htpd-24 (one t short of httpd)"}
+hints:
+  - "Pull errors are reported as events on the pod: read the message, it quotes the registry."
+  - "Read the image name letter by letter."
+  - "Set the Deployment's image to a registry path that really exists (compare it character by character with the one in the event), then watch the rollout finish."
+fix:
+  - {cmd: "oc set image deploy/web httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-inc-pull", meaning: "the correct repository name"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-pull --timeout=180s", meaning: "the new pod pulls and starts; the old, never-started pod is removed", timeout: 200}
+fix_wait: [web-ready, route-ok]
+checks:
+  - {id: image, title: "web uses the correct image", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].image", op: eq, value: "registry.access.redhat.com/ubi9/httpd-24:latest", expect_text: "ubi9/httpd-24"}
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The repository name was misspelt (`htpd-24`). The registry answered that the repository does not exist
+  (`name unknown: Repo not found`). Other registries answer `unauthorized` for the same mistake, because they do not
+  reveal whether a repository exists to a client that is not allowed to see it. The kubelet retried with an increasing
+  back-off (up to 5 minutes between attempts): ImagePullBackOff.
+alternatives: |
+  - Reference images by **digest** from the pipeline output rather than by a typed tag.
+  - In OpenShift, deploy from an ImageStream tag, so a missing image is visible on the ImageStream (import errors)
+    before any pod is created.
+sre: |
+  Typical pull failures and their messages: wrong name or tag (`name unknown`, `manifest unknown`, `not found`, or
+  `unauthorized`), missing pull secret
+  (`unauthorized: authentication required`), registry blocked by a proxy or firewall (timeouts), and rate limits on
+  public registries (`toomanyrequests`). Disconnected clusters mirror images and redirect pulls with
+  ImageDigestMirrorSet / ImageTagMirrorSet.
+questions:
+  - q: "Name three different causes of ImagePullBackOff and how their messages differ."
+    a: "Wrong name or tag (name unknown / manifest unknown / not found, as recorded here), missing credentials (authentication required / unauthorized), network or proxy (timeout / connection refused), registry rate limit (toomanyrequests)."
+references:
+  - {title: "Kubernetes: Images (ImagePullBackOff)", url: "https://kubernetes.io/docs/concepts/containers/images/#imagepullbackoff"}
+symptom_checks: [web-ready, route-ok]  # monitoring-level evidence shown before the answer

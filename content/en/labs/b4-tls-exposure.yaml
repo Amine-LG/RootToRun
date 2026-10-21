@@ -1,0 +1,188 @@
+id: lab.tls-exposure
+title: "TLS three ways, and non-HTTP exposure"
+summary: "Get a certificate from the service CA, serve it from the pod, see which certificate clients get through edge, re-encrypt and passthrough Routes, then try NodePort and LoadBalancer Services."
+module: b4-network-security
+mode: REAL_LAB
+minutes: 45
+level: 3
+supports: "Recorded on OpenShift 4.21.8: service CA operator (service.beta.openshift.io/serving-cert-secret-name), HAProxy router, NodePort range 30000-32767; CRC has no LoadBalancer provider."
+concepts: [net.routes, sec.certs, net.services]
+prerequisites: [o2.tls-exposure]
+namespace: academy-tls
+objective: |
+  Issue a service CA certificate, serve it from the pod, verify it from inside the cluster, expose the app through
+  edge, re-encrypt and passthrough Routes, prove which certificate a client receives through each (and so where
+  TLS terminates), and understand what NodePort and LoadBalancer Services need from the infrastructure.
+background: |
+  The `web` httpd image already serves HTTPS on 8443 with a self-signed certificate. You will replace it with a
+  certificate issued by OpenShift's **service CA** for the Service name `web.academy-tls.svc`, then expose it three
+  ways: **passthrough** (TLS goes untouched to the pod, the client sees the pod's certificate), **re-encrypt** (the
+  router terminates the client's TLS with its own certificate, then opens a new TLS connection to the pod, which it
+  trusts because the service CA signed it) and **edge** (the router terminates TLS and sends plain HTTP to the pod's
+  port 8080). The service CA, Routes and the router are OpenShift features; NodePort and LoadBalancer Services are
+  plain Kubernetes.
+
+  **Where everything comes from.** The app creates the project `academy-tls` and applies the objects shown below:
+  `web` runs Red Hat's UBI 9 Apache httpd image (`registry.access.redhat.com/ubi9/httpd-24`), whose image already
+  serves HTTPS on port 8443 with a self-signed certificate; `client` runs `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` for tests from inside the cluster. Both images come from Red Hat's
+  public registry, which needs no login. The serving certificate is issued by OpenShift's service CA operator, which
+  is part of every OpenShift cluster. Clean up deletes the project with its certificate Secret.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>academy tls</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}, {containerPort: 8443}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{name: https, port: 8443, targetPort: 8443}, {name: http, port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: client, labels: {app: client}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: client}}
+      template:
+        metadata: {labels: {app: client}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+steps:
+  - id: cert
+    title: "Ask the service CA for a certificate"
+    do: "Annotate the Service; the service CA operator creates a TLS Secret for `web.academy-tls.svc`."
+    commands:
+      - {cmd: "oc annotate service web service.beta.openshift.io/serving-cert-secret-name=web-tls -n academy-tls", meaning: "request a serving certificate"}
+    wait_for: [secret]
+  - id: secret
+    title: "Look at the issued Secret"
+    do: "Read the Secret the operator created."
+    commands:
+      - {cmd: "oc get secret web-tls -n academy-tls", meaning: "type kubernetes.io/tls, DATA 2 (tls.crt and tls.key)"}
+      - {cmd: "oc get secret web-tls -n academy-tls -o jsonpath='{.metadata.annotations}'", meaning: "which Service it was issued for, and when it expires"}
+    observe: "Type `kubernetes.io/tls` with 2 data keys. The annotations name the originating Service (`web`), the host name `web.academy-tls.svc`, and an expiry two years ahead (`service.beta.openshift.io/expiry`)."
+    why: "The service CA operator watches Services with this annotation and replaces the certificate and key automatically when they get close to expiry. Running pods do not pick that up by themselves here: the next step mounts the files with `subPath`, which never receives Secret updates, and httpd reads its certificate only at start-up, so a rotation needs a restart."
+  - id: mount
+    title: "Serve it from the pod"
+    do: "Mount the certificate and key over the image's default ones."
+    commands:
+      - {cmd: "oc set volume deploy/web --add --name=tls --type=secret --secret-name=web-tls --mount-path=/etc/httpd/tls/localhost.crt --sub-path=tls.crt -n academy-tls", meaning: "the certificate"}
+      - {cmd: "oc set volume deploy/web --add --name=tls-key --type=secret --secret-name=web-tls --mount-path=/etc/httpd/tls/localhost.key --sub-path=tls.key -n academy-tls", meaning: "the key"}
+      - {cmd: "oc rollout status deploy/web -n academy-tls --timeout=180s", meaning: "new pod with the certificate", timeout: 200}
+    wait_for: [web-ready]
+  - id: inside
+    title: "Trust it from inside the cluster"
+    do: "Pods that mount their ServiceAccount token (the default) also get the service CA bundle; call the Service over HTTPS while verifying the certificate."
+    commands:
+      - {cmd: "oc exec deploy/client -n academy-tls -- curl -s -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web.academy-tls.svc:8443/", meaning: "verified TLS by Service name"}
+    observe: "The page, with full certificate verification: the name matches and the service CA is trusted."
+    why: "OpenShift adds the service CA bundle to the projected ServiceAccount volume at /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt (unless token automounting is disabled), so in-cluster clients can verify certificates issued for `<service>.<namespace>.svc` names. Without `--cacert`, curl would reject the certificate: the service CA is not in the image's default trust store."
+  - id: routes
+    title: "Passthrough, re-encrypt and edge"
+    do: "Create the three Route types on the same Service."
+    commands:
+      - {cmd: "oc create route passthrough web-pass --service=web --port=https -n academy-tls", meaning: "TLS straight to the pod"}
+      - {cmd: "oc create route reencrypt web-reen --service=web --port=https -n academy-tls", meaning: "router terminates, then re-encrypts"}
+      - {cmd: "oc create route edge web-edge --service=web --port=http -n academy-tls", meaning: "router terminates; plain HTTP to the pod's port 8080"}
+      - {cmd: "oc get routes -n academy-tls", meaning: "three hosts, three terminations"}
+    observe: "Three Routes on the same Service: TERMINATION `edge` on its `http` port (8080), `passthrough` and `reencrypt` on its `https` port (8443). All three answer 200 in the lab's checks, which do not verify certificates."
+    why: "Pick the termination by who must hold the key and which hops must be encrypted: edge when plain HTTP between the router and the pod is acceptable; re-encrypt when the router may see the traffic but the hop to the pod must stay encrypted; passthrough when the application must terminate TLS itself (client certificates, end-to-end requirements), with a certificate valid for the public name."
+    wait_for: [pass-ok, reen-ok, edge-ok]
+  - id: certs
+    title: "Which certificate does a client get?"
+    do: |
+      From the client pod, open a TLS connection to each Route's host name and print the certificate the server
+      presents (`curl -v` writes it to stderr; `-k` lets curl continue without trusting it). Replace
+      `<edge-route-host>` and the others with the HOST/PORT values from `oc get routes`. Then try to verify the
+      passthrough Route with the service CA.
+    commands:
+      - {cmd: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://<edge-route-host>/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", run: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://{route-host:web-edge}/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", meaning: "subject CN=*.apps-crc.testing, issuer CN=ingress-operator@…: the router's default wildcard certificate; HTTP/1.1 200 OK"}
+      - {cmd: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://<reencrypt-route-host>/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", run: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://{route-host:web-reen}/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", meaning: "the same router certificate: a client cannot tell edge from re-encrypt; the difference is the router's own TLS connection to the pod"}
+      - {cmd: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://<passthrough-route-host>/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", run: "oc exec deploy/client -n academy-tls -- sh -c 'curl -skv -m 5 -o /dev/null https://{route-host:web-pass}/ 2>&1 | grep -E \"subject:|issuer:|< HTTP\"'", meaning: "subject CN=web.academy-tls.svc, issuer CN=openshift-service-serving-signer@…: the pod's own service CA certificate, passed through by the router untouched"}
+      - {cmd: "oc exec deploy/client -n academy-tls -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://<passthrough-route-host>/", run: "oc exec deploy/client -n academy-tls -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://{route-host:web-pass}/", expect: fail, meaning: "exit code 60, SSL: no alternative certificate subject name matches target host name 'web-pass-academy-tls.apps-crc.testing': the client trusts the service CA, but the certificate names web.academy-tls.svc, not the Route host"}
+    predict:
+      prompt: "Which certificate does a client see with the passthrough Route?"
+      choices: ["The router's wildcard certificate", "The pod's certificate (CN web.academy-tls.svc), signed by the service CA"]
+      answer: 1
+      explain: "The router only reads the SNI host name and forwards encrypted bytes; the pod terminates TLS."
+      feedback:
+        - "That is what edge and re-encrypt Routes show. With passthrough the router never decrypts, so it cannot present its own certificate."
+        - "Right: the router routes on the SNI name and passes the encrypted stream to the pod, which presents its service CA certificate."
+    observe: "Edge and re-encrypt present the same certificate, `subject: CN=*.apps-crc.testing` with `issuer: CN=ingress-operator@…`: the router's default wildcard certificate, signed on CRC by the cluster's own ingress CA (so a browser warns unless that CA is trusted). Passthrough presents the pod's certificate, `subject: CN=web.academy-tls.svc` with `issuer: CN=openshift-service-serving-signer@…`. All three answer `HTTP/1.1 200 OK` because `-k` skips verification. With verification against the service CA, the passthrough Route fails with exit code 60: the CA is trusted, but the name does not match the Route host."
+    why: "A client always sees the certificate of whoever terminates its TLS connection: the router for edge and re-encrypt, the pod for passthrough. The client pod resolves the Route host names and connects through the router, as an external client would. Re-encrypt differs from edge only behind the router: it opens a second TLS connection to the pod and verifies the pod's service CA certificate, while edge sends plain HTTP to port 8080."
+  - id: services
+    title: "NodePort and LoadBalancer"
+    do: "Expose the `web` Deployment's HTTPS port again, this time as a NodePort and as a LoadBalancer Service, and read what the cluster gives you. `oc expose deployment` copies the Deployment's pod selector (`app=web`) into each Service, so both send traffic to the httpd pod."
+    commands:
+      - {cmd: "oc expose deployment web --type=NodePort --name=web-np --port=8443 -n academy-tls", meaning: "a Service that selects the web pods and opens a port on every node, 30000-32767"}
+      - {cmd: "oc expose deployment web --type=LoadBalancer --name=web-lb --port=8443 -n academy-tls", meaning: "the same, and asks the infrastructure for a load balancer"}
+      - {cmd: "oc get svc -o wide -n academy-tls", meaning: "PORT(S), EXTERNAL-IP and SELECTOR"}
+    predict:
+      prompt: "What EXTERNAL-IP does the LoadBalancer Service get on CRC?"
+      choices: ["A public IP", "<pending>: nothing on CRC provides load balancers", "127.0.0.1"]
+      answer: 1
+      explain: "A LoadBalancer Service needs a cloud provider integration or MetalLB. Without one it stays pending (it still gets a NodePort)."
+      feedback:
+        - "Nothing on CRC can allocate one. An external address is provided by a load balancer implementation (cloud provider or MetalLB), not by Kubernetes itself."
+        - "Right: the Service object is created, but no controller fulfils it, so EXTERNAL-IP stays `<pending>`."
+        - "Kubernetes never invents an address. Until a load balancer implementation fills in `status.loadBalancer`, the field is `<pending>`."
+    observe: "`web-np` gets a node port in 30000-32767 and EXTERNAL-IP `<none>`; `web-lb` shows EXTERNAL-IP `<pending>` and also a node port (`8443:<node port>/TCP`): a LoadBalancer Service is built on top of a NodePort by default. The SELECTOR column shows `app=web` for all three Services, so each has the httpd pod as its endpoint. (`oc create service nodeport web-np` would set the selector `app=web-np`, match no pod, and leave the node port with nothing behind it.)"
+    checks: [nodeport, np-endpoints]
+    wait_for: [nodeport, np-endpoints]
+hints:
+  - "The service CA issues a certificate when a Service carries `service.beta.openshift.io/serving-cert-secret-name`."
+  - "In-cluster clients trust the service CA through /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt."
+  - "The passthrough and re-encrypt Routes must target the Service's `https` port (the router must reach TLS on 8443); the edge Route targets `http` (8080)."
+checks:
+  - {id: secret, title: "Secret web-tls was issued", type: field, kind: secret, name: web-tls, path: type, op: eq, value: kubernetes.io/tls, expect_text: "kubernetes.io/tls"}
+  - {id: web-ready, title: "web is ready", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: mounted, title: "The pod mounts the service CA certificate", type: field, kind: deployment, name: web, path: "spec.template.spec.volumes[?name=tls].secret.secretName", op: eq, value: web-tls, expect_text: "web-tls mounted"}
+  - {id: pass-ok, title: "Passthrough Route reaches the pod over TLS", type: route_http, route: web-pass, expect_status: 200, contains: "academy tls", expect_text: "HTTP 200"}
+  - {id: reen-ok, title: "Re-encrypt Route works with the service CA", type: route_http, route: web-reen, expect_status: 200, contains: "academy tls", expect_text: "HTTP 200"}
+  - {id: edge-ok, title: "Edge Route serves the app over HTTPS", type: route_http, route: web-edge, expect_status: 200, contains: "academy tls", expect_text: "HTTP 200"}
+  - {id: nodeport, title: "web-np has a node port", type: field, kind: service, name: web-np, path: "spec.ports[0].nodePort", op: gte, value: 30000, expect_text: "30000-32767"}
+  - {id: np-endpoints, title: "web-np sends traffic to the web pod", type: endpoints, service: web-np, value: 1, port: 8443, expect_text: "1 ready endpoint on port 8443"}
+questions:
+  - q: "Why does a re-encrypt Route need no destinationCACertificate here?"
+    a: "The backend certificate is signed by the service CA. When a re-encrypt Route has no destinationCACertificate, the router uses the service CA to verify the backend."
+  - q: "What would a passthrough Route need to be trusted by browsers?"
+    a: "The pod would have to serve a certificate valid for the Route's public host name, signed by a CA the clients trust (for example the corporate PKI), because the router never replaces it."
+  - q: "What does a LoadBalancer Service need that CRC does not have?"
+    a: "A load balancer implementation: a cloud provider integration or MetalLB on bare metal."
+enterprise: |
+  Regulated organisations often require TLS end to end (re-encrypt or passthrough), certificates from the corporate
+  PKI for external names, and the service CA for internal ones. Non-HTTP protocols (databases, message brokers) are
+  usually exposed with LoadBalancer Services backed by MetalLB or the cloud rather than NodePorts, which open the same
+  port on every node and tie clients to node addresses.
+references:
+  - {title: "OpenShift 4.21: Securing service traffic using service serving certificate secrets", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/configuring-certificates#add-service-serving"}
+  - {title: "OpenShift 4.21: Creating advanced routes (edge, passthrough, re-encrypt)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes#creating-advanced-routes"}
+  - {title: "Kubernetes: Service types", url: "https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types"}
+variations:
+  - "Make the edge Route redirect plain HTTP to HTTPS, then test both schemes from the client pod. Check: `http://` returns a 302 whose location starts with `https://`, and HTTPS still answers 200."
+  - "Create a fourth Route, re-encrypt, that targets the Service's `http` port instead of `https`, and find out what the router answers and why. Check: you can explain the result from where TLS is spoken on each hop."

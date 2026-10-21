@@ -1,0 +1,542 @@
+track: linux
+title: "Linux: find your gaps"
+intro: >-
+  Twenty-four questions on finding your way around, the shell, files and text, users and permissions, SSH and SELinux, processes and signals,
+  services and the journal, networking and storage, scripts, software packages and scheduled jobs. Most show the kind of output you meet on a RHEL machine or
+  inside a pod, and ask what it means or what to do next. Give a confidence with each answer; "I don't know yet" is
+  a good answer, and more useful than a guess. Allow about 30 minutes. This is a self-assessment: nothing is graded
+  and nothing is marked done. The results only suggest where to start in this territory.
+minutes: 30
+items:
+  # ---------- lx.shell-basics ----------
+  - id: exec-glob-without-shell
+    targets: [lx.shell-expansion]
+    prompt: "The first command lists two YAML files. Why does the second one fail?"
+    evidence: |
+      $ oc exec deploy/web -- ls /app/conf
+      app.yaml
+      logging.yaml
+      $ oc exec deploy/web -- ls /app/conf/*.yaml
+      ls: cannot access '/app/conf/*.yaml': No such file or directory
+      command terminated with exit code 2
+    choices:
+      - "No shell runs in the container, so nothing expands the * and ls looks for *.yaml"
+      - "The pattern must be in double quotes for oc exec to pass it on to the container"
+      - "Files mounted from a ConfigMap are symbolic links, and a glob never matches symbolic links"
+      - "ls can list the directory but lacks permission to read the files, and reports them as missing"
+    answer: 0
+    feedback:
+      - "Your laptop's shell found no /app/conf/*.yaml locally and passed the pattern through unchanged; oc exec then ran ls directly. Use `oc exec deploy/web -- sh -c 'ls /app/conf/*.yaml'`."
+      - "Double quotes only stop your local shell from expanding the pattern. The container still runs ls without a shell, so the * still arrives literally."
+      - "Globs match symbolic links like any other name. And the first command shows the files are there."
+      - "A permission problem is reported as 'Permission denied', never as 'No such file or directory'. Listing names needs no access to the files themselves."
+    explain: "Globs, variables and pipes are shell features. `oc exec`, exec probes and exec-form commands run the program directly, so wrap anything that needs a shell in `sh -c '…'` with single quotes."
+
+  - id: pipeline-hides-failure
+    targets: [lx.exit-status, b.health-probes]
+    prompt: "A readiness probe runs `sh -c 'check-db | tee /tmp/last-check'`. The database is down, yet the pod stays Ready. You run the commands below inside the container. Why does the probe pass?"
+    evidence: |
+      $ check-db; echo "exit=$?"
+      ERROR: cannot connect to db:5432
+      exit=2
+      $ check-db | tee /tmp/last-check; echo "exit=$?"
+      ERROR: cannot connect to db:5432
+      exit=0
+    choices:
+      - "Exit status 2 means a warning in the shell; only status 1 counts as a failure"
+      - "A probe judges the output it captures, and the text ERROR alone is not a failure"
+      - "A pipeline's status is that of its last command, tee, which succeeded"
+      - "sh -c starts the pipeline in the background, so the probe never waits for check-db"
+    answer: 2
+    feedback:
+      - "Any status other than 0 is a failure; each program decides what its non-zero codes mean. The probe never saw the 2."
+      - "An exec probe is judged only by its exit code. The text is ignored, whatever it says."
+      - "Check-db's 2 is lost because tee wrote its copy fine. Drop the tee, or run the pipeline in a shell with `set -o pipefail` (bash has it)."
+      - "Nothing is backgrounded without `&`. The shell waits for both commands; it simply reports tee's status."
+    explain: "The exit status of a pipeline is that of its last command unless pipefail is set. Health checks that end in a pipe can pass while the real check fails."
+
+  # ---------- lx.files-text ----------
+  - id: uniq-needs-sorted-input
+    targets: [lx.text-tools]
+    prompt: "You want the number of requests per client, most frequent first. Why is 192.0.2.10 listed twice?"
+    evidence: |
+      $ cut -d' ' -f1 access.log | uniq -c | sort -rn | head -4
+            3 192.0.2.10
+            2 198.51.100.7
+            2 192.0.2.10
+            1 203.0.113.5
+    choices:
+      - "Some of the lines kept a trailing space after cut, so the two values are not identical"
+      - "uniq -c only merges identical lines that are next to each other; sort before uniq"
+      - "sort -rn runs after uniq and splits the groups that uniq had already merged"
+      - "uniq -c needs the -i option to treat repeated values as the same client"
+    answer: 1
+    feedback:
+      - "cut -d' ' -f1 returns exactly the text before the first space, so every 192.0.2.10 is the same string."
+      - "The client's requests were interleaved with another's in the log. `cut … | sort | uniq -c | sort -rn` gives one line per client."
+      - "Sorting only reorders lines; it cannot split a count. The two groups were already separate when uniq produced them."
+      - "-i ignores case, which IP addresses do not have. The values are identical; they were just not adjacent."
+    explain: "`uniq` compares each line with the previous one only. Extract, sort, count, then sort the counts: `sort | uniq -c | sort -rn`."
+
+  - id: deleted-log-still-open
+    targets: [lx.find-links, lx.storage-filesystems]
+    prompt: "Yesterday someone ran `rm /var/log/app/app.log`, a 25 GB file, to free space. The application, PID 2210, is still running. What actually gives the space back?"
+    evidence: |
+      $ df -h /var
+      Filesystem            Size  Used Avail Use% Mounted on
+      /dev/mapper/rhel-var   40G   39G  1.2G  98% /var
+      $ sudo du -sh /var
+      14G	/var
+      $ sudo ls -l /proc/2210/fd | grep deleted
+      l-wx------. 1 app app 64 Oct 15 08:02 3 -> /var/log/app/app.log (deleted)
+    choices:
+      - "Waiting: XFS releases the blocks of deleted files in the background within a day"
+      - "Running touch /var/log/app/app.log, so that the application writes to the new file"
+      - "Comparing with du --apparent-size, because df also counts space reserved for root"
+      - "Restarting the app or making it reopen its log; next time, truncate the file"
+    answer: 3
+    feedback:
+      - "Nothing is pending. The file's inode is still in use, so its data stays allocated for as long as the process holds it open."
+      - "The process keeps writing to the open descriptor 3, which still points at the old, deleted inode. A new file of the same name is a different inode."
+      - "df and du disagree because du walks names and the 25 GB no longer has one. df counts allocated blocks, including that file's."
+      - "Data is freed when no name and no open descriptor refer to the inode. `: > app.log` empties the file in place while the application keeps writing."
+    explain: "rm removes a name, not the data. A file still open in a process keeps its blocks until it is closed: df counts them, du cannot see them, and /proc/PID/fd shows '(deleted)'."
+
+  # ---------- lx.users-permissions ----------
+  - id: group-zero-without-group-write
+    targets: [lx.users-permissions, f.scc]
+    prompt: "The Containerfile ran `chgrp -R 0 /var/cache/report`, yet on OpenShift the application still gets Permission denied writing there. Why?"
+    evidence: |
+      $ oc exec deploy/report -- id
+      uid=1000680000(1000680000) gid=0(root) groups=0(root),1000680000
+      $ oc exec deploy/report -- ls -ldn /var/cache/report
+      drwxr-xr-x. 2 1001 0 6 Oct 15 09:00 /var/cache/report
+    choices:
+      - "gid=0 gives the process root's privileges, so the refusal must come from SELinux"
+      - "The process is in group 0, so the group bits apply, and they are r-x"
+      - "The UID has no line in /etc/passwd, so the kernel falls back to the others bits"
+      - "Only the owner, 1001, may create files in a directory, whatever the group bits say"
+    answer: 1
+    feedback:
+      - "Group 0 is an ordinary group number. Privilege comes from UID 0 (and capabilities), which this process does not have."
+      - "The UID is not the owner, the group matches, so only r-x counts. Add `chmod -R g=u /var/cache/report` so group 0 gets what the owner has."
+      - "The kernel compares numbers and never reads /etc/passwd. A missing name only changes what `id` and `ls` print."
+      - "Group and others bits exist precisely so that non-owners can write. With g+w the arbitrary UID could create files here."
+    explain: "The kernel uses the first class that matches: owner, then group, then others. OpenShift's arbitrary UID is never the owner but is in group 0, so writable paths need group 0 and group write: `chgrp -R 0` and `chmod -R g=u`."
+
+  - id: setgid-dir-file-modes
+    targets: [lx.users-permissions]
+    prompt: "bob wants to fix a typo in plan.txt. Which statement is true for him?"
+    evidence: |
+      $ id bob
+      uid=1004(bob) gid=1004(bob) groups=1004(bob),2001(team)
+      $ ls -ld /srv/team /srv/team/plan.txt
+      drwxrwsr-x. 2 root  team  23 Oct 15 09:00 /srv/team
+      -rw-r--r--. 1 alice team 812 Oct 15 09:05 /srv/team/plan.txt
+    choices:
+      - "He cannot change the file's content, but he can delete or rename it"
+      - "He can change it: the s on the directory gives members the owner's rights"
+      - "He can neither change nor delete it: only alice may remove her own file"
+      - "He can change it, because files inherit the directory's group write bit"
+    answer: 0
+    feedback:
+      - "The file's group bits are r--, so no writing. Deleting changes the directory, where team has w and x and there is no sticky bit. Alice's umask 002 (or `chmod g+w`) fixes the first; `chmod +t` on the directory stops the second."
+      - "setgid on a directory only makes new entries inherit its group (team here). It grants no rights."
+      - "That is close to the sticky bit's rule, as on /tmp (a t at the end of the mode): there only the file's owner, the directory's owner or root may delete it. This directory has none."
+      - "New files get the directory's group thanks to setgid, but their mode comes from the creator's umask, here 022."
+    explain: "On a directory, w and x control creating, renaming and deleting entries; the file's own bits control its content. setgid passes the group on, the umask decides the mode, and the sticky bit protects other people's files."
+
+  # ---------- lx.ssh-security ----------
+  - id: sshd-strictmodes
+    targets: [lx.ssh-security]
+    prompt: "Since this morning, logging in to web1 as deploy asks for a password instead of using your key. Your public key is still in authorized_keys. What fixes it?"
+    evidence: |
+      [you@laptop ~]$ ssh deploy@web1
+      deploy@web1's password:
+
+      [admin@web1 ~]$ sudo journalctl -u sshd -n 1 --no-pager -o cat
+      Authentication refused: bad ownership or modes for directory /home/deploy/.ssh
+      [admin@web1 ~]$ sudo ls -ld /home/deploy/.ssh
+      drwxrwxr-x. 2 deploy deploy 48 Oct 15 08:51 /home/deploy/.ssh
+    choices:
+      - "chmod 600 on your private key on the laptop, so that the server accepts it"
+      - "ssh-keygen -R web1 on the laptop, to forget the remembered key and start over"
+      - "chmod 700 /home/deploy/.ssh on web1, keeping authorized_keys at 600"
+      - "A new key pair, installed again, because the server no longer trusts this one"
+    answer: 2
+    feedback:
+      - "A badly protected private key is refused by your own client with 'UNPROTECTED PRIVATE KEY FILE'. Here the server's journal names a directory on the server."
+      - "known_hosts holds the server's host key, which is about you trusting the server. Nothing here is a host key warning."
+      - "With StrictModes yes (the default), sshd ignores authorized_keys when ~/.ssh is writable by group or others, since someone else could add a key."
+      - "The key is fine. Any key placed in that directory would be refused in the same way until the mode is fixed."
+    explain: "sshd refuses key logins when the home directory, ~/.ssh or authorized_keys can be written by others, and tells only its own journal. Read the server side before changing keys."
+
+  - id: selinux-new-web-location
+    targets: [lx.ssh-security]
+    prompt: "httpd now serves its site from /srv/myweb and answers 403. Modes are 755 on directories and 644 on files, and SELinux is enforcing. Which fix is correct and lasting?"
+    evidence: |
+      # ls -dZ /srv/myweb /srv/myweb/index.html
+      unconfined_u:object_r:var_t:s0 /srv/myweb
+      unconfined_u:object_r:var_t:s0 /srv/myweb/index.html
+      # ausearch -m AVC -ts recent | grep -o 'avc: .*'
+      avc:  denied  { read } for  pid=2412 comm="httpd" name="index.html" dev="dm-0" ino=50331778 scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:var_t:s0 tclass=file permissive=0
+    choices:
+      - "restorecon -Rv /srv/myweb on its own, which gives the files the label httpd needs"
+      - "semanage fcontext for '/srv/myweb(/.*)?' as httpd_sys_content_t, then restorecon"
+      - "chcon -R -t httpd_sys_content_t /srv/myweb, which keeps the label through any relabel"
+      - "chmod -R 755 /srv/myweb, since the denial shows that httpd lacks the read permission"
+    answer: 1
+    feedback:
+      - "restorecon applies the label the policy defines for a path. For /srv that is var_t, the label the files already have, so nothing changes."
+      - "`semanage fcontext -a -t httpd_sys_content_t '/srv/myweb(/.*)?'` records the rule for the new location and `restorecon -Rv /srv/myweb` applies it. This is the RHEL 9 procedure for a non-default web directory."
+      - "chcon changes the label now, but the policy still says var_t for that path: the next restorecon or full relabel puts var_t back."
+      - "The AVC is SELinux's refusal, made after the modes had already allowed the read. chmod cannot change it."
+    explain: "An AVC names the process type (httpd_t), the file type (var_t) and the action. Fix the label, not the mode: restorecon for a known location, semanage fcontext plus restorecon for a new one. Never setenforce 0."
+
+  # ---------- lx.processes-signals ----------
+  - id: shell-pid1-swallows-sigterm
+    targets: [lx.processes-signals, b.pod-lifecycle]
+    prompt: "server.js closes its connections and exits when it receives SIGTERM. Its pod has the default 30-second grace period. What happens when the pod is deleted?"
+    evidence: |
+      $ oc exec deploy/api -- ps -o pid,ppid,args
+          PID    PPID COMMAND
+            1       0 /bin/sh /usr/local/bin/start.sh
+            8       1 node server.js
+           15       0 ps -o pid,ppid,args
+    choices:
+      - "sh passes SIGTERM on to its child, node closes its connections, and the pod is gone in a second or two"
+      - "SIGTERM ends sh at once, node is killed along with it, and the container reports exit code 143"
+      - "The runtime sends SIGTERM to every process in the container, so node stops cleanly as on a laptop"
+      - "sh, as PID 1 with no handler, ignores SIGTERM; node never gets it and SIGKILL ends both at 30 s: 137"
+    answer: 3
+    feedback:
+      - "A shell does not forward signals to the commands it is waiting for. And as PID 1 it does not even receive this one."
+      - "Outside a container that would be SIGTERM's default action. PID 1 of a PID namespace only receives signals it has installed a handler for, and the shell has none."
+      - "The stop signal goes to PID 1 only. The other processes are killed when PID 1 dies or when the grace period runs out."
+      - "Exit 137 without OOMKilled, after exactly the grace period. `exec node server.js` at the end of start.sh, or an exec-form ENTRYPOINT, makes node PID 1."
+    explain: "PID 1 in a container ignores signals it has no handler for (pid_namespaces(7)); only SIGKILL from outside always works. A start script without exec keeps the application from ever seeing SIGTERM: 137 = 128 + 9, 143 = 128 + 15."
+
+  - id: zombies-need-a-reaper
+    targets: [lx.processes-signals]
+    prompt: "A crawler starts a browser process for each page. After a few hours, new browsers fail to start. What resolves it?"
+    evidence: |
+      $ oc exec deploy/crawler -- ps -eo pid,ppid,stat,args | head -4
+          PID    PPID STAT COMMAND
+            1       0 Ss   python3 /app/crawl.py
+          212       1 Z    [chrome] <defunct>
+          388       1 Z    [chrome] <defunct>
+      $ oc exec deploy/crawler -- sh -c 'ps -eo stat= | grep -c Z'
+      3871
+      $ oc logs deploy/crawler | tail -1
+      BlockingIOError: [Errno 11] Resource temporarily unavailable
+    choices:
+      - "PID 1 never collects its exited children: fix the app or run tini"
+      - "Clean up with kill -9 on the defunct processes, run regularly from a CronJob"
+      - "A higher memory limit, since each zombie still holds the memory of its browser"
+      - "A higher CPU limit: zombies are harmless, and the error means the CPU is saturated"
+    answer: 0
+    feedback:
+      - "Each zombie keeps its PID until its parent waits for it, and the container's PID limit runs out, so fork fails with EAGAIN. An init as PID 1 reaps orphans, and the app should wait for its own children."
+      - "A zombie is already dead: signals, even SIGKILL from root, do nothing to it. Only its parent can collect it."
+      - "A zombie has released its memory. It keeps only a PID and its exit status."
+      - "A few zombies are harmless; thousands exhaust the PID limit. 'Resource temporarily unavailable' is fork's EAGAIN, not a CPU problem."
+    explain: "A zombie is a finished process whose parent has not collected its status. In a container, PID 1 is that parent for every orphan: it must reap, or zombies fill the PID limit."
+
+  # ---------- lx.systemd-journal ----------
+  - id: dropin-execstart-list
+    targets: [lx.systemd-journal]
+    prompt: "You added a drop-in to start the service on port 9090. After daemon-reload, the restart fails. What is the right change?"
+    evidence: |
+      $ systemctl cat app
+      # /usr/lib/systemd/system/app.service
+      [Service]
+      ExecStart=/usr/bin/app --port 8080
+
+      # /etc/systemd/system/app.service.d/override.conf
+      [Service]
+      ExecStart=/usr/bin/app --port 9090
+      $ sudo journalctl -u app -n 1 --no-pager -o cat
+      app.service: Service has more than one ExecStart= setting, which is only allowed for Type=oneshot services. Refusing.
+    choices:
+      - "Set Type=oneshot in the drop-in, as the message suggests, so both commands are allowed"
+      - "Change the port in /usr/lib/systemd/system/app.service and delete the drop-in"
+      - "Add an empty ExecStart= line in the drop-in, before the new ExecStart"
+      - "Move the drop-in to /run/systemd/system/app.service.d/, which takes priority"
+    answer: 2
+    feedback:
+      - "That would run both commands one after the other as a one-shot task, and systemd would no longer supervise a long-running server."
+      - "It works until the next package update overwrites the vendor file, and your change is lost."
+      - "ExecStart is a list: a drop-in adds to it. An empty assignment clears the list, then the new command replaces the old one."
+      - "/run is lost at reboot, and the merge rule is the same there: the list would still have two entries."
+    explain: "Drop-ins merge into the unit. Single values are overridden, but list settings such as ExecStart are appended to unless first reset with an empty assignment. `systemctl cat` shows the merged result."
+
+  - id: sigterm-is-clean-for-on-failure
+    targets: [lx.systemd-journal]
+    prompt: "worker.service has Restart=on-failure. To restart it, an operator ran `sudo kill 4120` on its main PID. The service stays down. Why?"
+    evidence: |
+      $ sudo kill 4120
+      $ journalctl -u worker -n 1 --no-pager -o cat
+      worker.service: Deactivated successfully.
+      $ systemctl is-active worker
+      inactive
+    choices:
+      - "The start rate limit was reached, so systemd stopped restarting the service"
+      - "SIGTERM is a clean stop, and on-failure restarts only failures"
+      - "systemd only tracks stops made with systemctl; a kill goes unnoticed"
+      - "A Restart= setting takes effect only after the next systemctl daemon-reload"
+    answer: 1
+    feedback:
+      - "One stop is far from the limit (5 starts in 10 s by default), and the journal would say 'Start request repeated too quickly'."
+      - "For on-failure, SIGHUP, SIGINT, SIGTERM and SIGPIPE are clean, like exit 0. Use `systemctl restart worker`; Restart=always would have restarted it."
+      - "systemd noticed at once: 'Deactivated successfully' is its record of the main process ending. It simply judged the end a success."
+      - "daemon-reload rereads edited unit files. This setting was already loaded and was applied as written."
+    explain: "Restart=on-failure restarts after a non-zero exit, an unclean signal, a timeout or a watchdog failure; SIGTERM and exit 0 are clean. A pod's restartPolicy Always, by contrast, restarts the container whatever the exit."
+
+  # ---------- lx.networking ----------
+  - id: loopback-bind-in-pod
+    targets: [lx.networking]
+    prompt: "The api pod has no readiness probe. From another pod, the Service refuses connections. What is the cause?"
+    evidence: |
+      $ oc exec deploy/api -- ss -tlnp
+      State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+      LISTEN 0      511        127.0.0.1:8080      0.0.0.0:*     users:(("node",pid=1,fd=21))
+      $ oc get endpointslices -l kubernetes.io/service-name=api
+      NAME        ADDRESSTYPE   PORTS   ENDPOINTS     AGE
+      api-7xq2c   IPv4          8080    10.217.0.45   3m
+      $ oc exec deploy/client -- curl -sS -m 5 http://api:8080/
+      curl: (7) Failed to connect to api port 8080: Connection refused
+    choices:
+      - "A NetworkPolicy blocks traffic from the client pod to the api pod"
+      - "The Service has no endpoints, so there is no pod to send the traffic to"
+      - "node listens on the pod's loopback only, so nothing answers on its pod IP"
+      - "Port 8080 is not declared as a containerPort, so traffic to it is refused"
+    answer: 2
+    feedback:
+      - "With OVN-Kubernetes, a NetworkPolicy drops packets silently, which ends in a timeout (curl exit 28), not an immediate refusal."
+      - "The EndpointSlice lists 10.217.0.45:8080, so the Service does forward to the pod."
+      - "127.0.0.1 is reachable only from inside the pod's network namespace. Bind to 0.0.0.0 (all addresses) and the pod IP answers."
+      - "containerPort is informational; a process listening on the pod IP is reachable whether or not the port is declared."
+    explain: "Each pod has its own network namespace with its own loopback. A server bound to 127.0.0.1 works with curl localhost inside the pod and refuses everything else. `ss -tln` shows the address it is bound to."
+
+  - id: timeout-means-dropped
+    targets: [lx.networking, lx.ssh-security]
+    prompt: "From an application server, a request to the reports service times out. On reports.internal, the service is listening. What is the most likely cause?"
+    evidence: |
+      $ curl -sS -m 5 https://reports.internal:8443/health
+      curl: (28) Connection timed out after 5001 milliseconds
+      $ ssh reports.internal 'ss -tln "sport = :8443"'
+      State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+      LISTEN 0      4096         0.0.0.0:8443      0.0.0.0:*
+    choices:
+      - "Nothing listens on port 8443 at the address the client is connecting to"
+      - "The name does not resolve, and curl waits for DNS until the timeout"
+      - "The service on reports.internal is bound to 127.0.0.1 only"
+      - "A firewall on the host or on the path silently drops the packets"
+    answer: 3
+    feedback:
+      - "With no listener, the remote kernel answers with a reset at once: 'Connection refused', curl exit 7, in milliseconds."
+      - "A name that does not resolve fails with its own message, 'Could not resolve host', and curl exit 6."
+      - "ss shows 0.0.0.0:8443, all addresses. A loopback-only bind would also be refused at once, not time out."
+      - "Silence until the timeout means the packets are dropped. Check the firewalls on the path and on reports.internal (firewalld's default target rejects, which fails at once with 'No route to host', so look for a zone or rule that drops); in a cluster, a NetworkPolicy produces the same symptom."
+    explain: "Read how a connection fails: 'Could not resolve host' is DNS, 'Connection refused' is no listener at that address and port, a timeout is packets dropped on the way, often by a firewall."
+
+  # ---------- lx.storage-filesystems ----------
+  - id: out-of-inodes
+    targets: [lx.storage-filesystems]
+    prompt: "A job spool directory refuses new files, although df shows plenty of space. What is going on?"
+    evidence: |
+      $ touch /var/spool/app/job-81234.tmp
+      touch: cannot touch '/var/spool/app/job-81234.tmp': No space left on device
+      $ df -hT /var/spool/app
+      Filesystem     Type  Size  Used Avail Use% Mounted on
+      /dev/vdb1      ext4   20G  6.1G   13G  33% /var/spool/app
+      $ df -i /var/spool/app
+      Filesystem      Inodes   IUsed IFree IUse% Mounted on
+      /dev/vdb1      1310720 1310720     0  100% /var/spool/app
+    choices:
+      - "Every inode is in use: millions of small files; clean up old ones"
+      - "The 5% of blocks that ext4 reserves for root are the part that is full"
+      - "A deleted file still held open by a process is using the free space"
+      - "The filesystem was remounted read-only after an error and refuses writes"
+    answer: 0
+    feedback:
+      - "Each file needs an inode, and ext4 fixes their number when the filesystem is created. Remove the stale files, and find the job that leaves them behind."
+      - "The reserve is a share of the blocks, and only 33% of them are used. The inode count is what reached 100%."
+      - "A deleted open file holds blocks, which df would count in Used. Here blocks are free and the inodes are not."
+      - "A read-only filesystem fails with 'Read-only file system', not 'No space left on device'."
+    explain: "'No space left on device' means blocks or inodes. `df -h` shows the first, `df -i` the second. On nodes, the kubelet watches both (nodefs.inodesFree is an eviction signal)."
+
+  - id: overlay-delete-is-a-whiteout
+    targets: [lx.storage-filesystems, a.container-is-a-process]
+    prompt: "This is how container storage works: lower is a read-only image layer, upper is the container's writable layer, merged is what the container sees. If a container deletes a 2 GB file that came from its image, what follows?"
+    evidence: |
+      $ mount -t overlay overlay -o lowerdir=lower,upperdir=upper,workdir=work merged
+      $ echo "changed in the container" > merged/config
+      $ rm merged/old
+      $ ls merged
+      config
+      $ ls -l upper
+      -rw-r--r--. 1 root root   25 Oct 15 02:57 config
+      c---------. 2 root root 0, 0 Oct 15 02:57 old
+      $ ls lower; cat lower/config
+      config  old
+      from the image
+    choices:
+      - "The image layer loses the file, so new containers from that image start without it"
+      - "rm fails with 'Read-only file system', because image layers cannot be changed"
+      - "The node's disk usage drops by 2 GB at once, as it does for any deleted file"
+      - "A whiteout in the writable layer hides it; the 2 GB stay in the image layer"
+    answer: 3
+    feedback:
+      - "lower still lists old: the image is shared by every container that uses it and never changes."
+      - "The container writes to the merged view, which accepts changes; they land in the upper layer."
+      - "The data is in the lower layer, which is untouched. Only a 0/0 character device, the whiteout, was added."
+      - "The changed config was copied up whole, and the deleted file became a whiteout. The writable layer is discarded with the container; data that must last belongs in a volume."
+    explain: "overlayfs merges read-only image layers with one writable layer. Changes copy a file up, deletions add whiteouts, and the image never changes. That is why images do not shrink when a later step deletes files."
+
+  # ---------- lx.shell-scripts ----------
+  - id: entrypoint-without-exec
+    targets: [lx.shell-scripts, lx.processes-signals]
+    prompt: "An image's entrypoint is the script below. Every rollout, its pods take the full 30-second grace period to stop and end with exit code 137. What is the fix?"
+    evidence: |
+      #!/bin/sh
+      set -eu
+      echo "listen=0.0.0.0:${PORT:-8080}" > /tmp/app.conf
+      /opt/app/server "$@"
+    choices:
+      - "Replace set -eu with set -euo pipefail so failures stop the script"
+      - "Raise terminationGracePeriodSeconds so the server has time to finish"
+      - "Run the server with exec, so it becomes PID 1"
+      - "Quote \"$@\" differently so the server receives its arguments"
+    answer: 2
+    feedback:
+      - "Strict mode reacts to failing commands, not to signals. The shell still ignores SIGTERM as PID 1."
+      - "The server never receives SIGTERM, so a longer grace period only makes the wait longer."
+      - "The shell is PID 1 and ignores SIGTERM; with `exec /opt/app/server \"$@\"` the server is PID 1 and receives it."
+      - "\"$@\" is already correct: each argument is passed as one word. The problem is which process is PID 1."
+    explain: "Stopping a container signals PID 1 only. An entrypoint script must end with exec so the application, not the shell, receives SIGTERM."
+
+  # ---------- lx.packages-archives ----------
+  - id: ubi-build-missing-package
+    targets: [lx.packages-archives, ct.build-images]
+    prompt: "This build succeeds on a developer's subscribed RHEL laptop and fails in CI as shown. What explains the difference?"
+    evidence: |
+      STEP 2/3: RUN dnf install -y tmux && dnf clean all
+      No match for argument: tmux
+      Error: Unable to find a match: tmux
+    choices:
+      - "The CI runner cannot reach the Red Hat content network, so no repository works"
+      - "On the laptop, the container used RHEL repositories lent by the host's subscription"
+      - "dnf needs --nobest in CI because the runner has older packages"
+      - "tmux must be installed with microdnf, because UBI images have no dnf"
+    answer: 1
+    feedback:
+      - "A network failure produces download errors for every repository, not a missing package in a working one."
+      - "On a subscribed host, Podman passes the entitlement into the container, enabling RHEL BaseOS and AppStream; tmux is in RHEL but not in the UBI repositories, which are all CI sees."
+      - "--nobest changes how versions are chosen among found packages; here the package is not found at all."
+      - "The standard UBI image has dnf; only ubi-minimal uses microdnf, and it would see the same repositories."
+    explain: "Build with --disablerepo='rhel-*' locally to see what an unsubscribed builder sees, and keep images redistributable."
+
+  # ---------- lx.users-scheduling ----------
+  - id: cron-minimal-path
+    targets: [lx.users-scheduling]
+    prompt: "A script works when you run it, but fails every night from your crontab. What is the cause?"
+    evidence: |
+      $ crontab -l
+      0 2 * * * /home/ops/bin/backup.sh >> /home/ops/backup.log 2>&1
+      $ tail -2 /home/ops/backup.log
+      /home/ops/bin/backup.sh: line 4: pg_dump: command not found
+      $ command -v pg_dump
+      /usr/local/pgsql/bin/pg_dump
+    choices:
+      - "Crontab jobs run as root, whose PATH is different from yours"
+      - "The redirection 2>&1 must come before >> in a crontab line"
+      - "cron cannot start scripts that live in a home directory"
+      - "cron gives jobs PATH=/usr/bin:/bin and never reads your profile"
+    answer: 3
+    feedback:
+      - "A user's crontab runs as that user. What differs is the environment, not the identity."
+      - "The order shown is the correct one: stdout to the file, then stderr to the same place. The log proves it worked."
+      - "The script started and wrote to its log; only pg_dump was not found."
+      - "Use the absolute path to pg_dump, or set PATH at the top of the script or the crontab."
+    explain: "cron starts jobs with a minimal environment (SHELL=/bin/sh, PATH=/usr/bin:/bin, no profile); scripts run from cron must not rely on your login environment."
+
+  # ---------- lx.first-steps ----------
+  - id: relative-path-wrong-directory
+    targets: [lx.first-steps, lx.shell-basics]
+    prompt: "The file plainly exists. Why does `cat` fail, and which command prints it?"
+    evidence: |
+      $ pwd
+      /home/learner/reports
+      $ ls /home/learner/notes
+      todo.txt
+      $ cat notes/todo.txt
+      cat: notes/todo.txt: No such file or directory
+    choices:
+      - "The path is read from reports, where you are: `cat ../notes/todo.txt` works"
+      - "notes is a directory, so cat must be told to go inside: `cat -r notes/todo.txt`"
+      - "A path is read from the root, so it needs a leading slash: `cat /notes/todo.txt`"
+      - "The file is protected and the message hides it, so `sudo cat notes/todo.txt` works"
+    answer: 0
+    feedback:
+      - "A path without a leading / starts from the current directory, so notes/todo.txt meant /home/learner/reports/notes/todo.txt. `..` goes up one level first; the absolute path /home/learner/notes/todo.txt works too."
+      - "cat has no such option and needs none: a path with directories in it already reaches the files inside them. The path just starts in the wrong place."
+      - "A leading / starts from the root of the whole tree, and there is no /notes. Without the /, the path starts from the current directory."
+      - "A permission problem is reported as 'Permission denied'. 'No such file or directory' means the path points to nothing."
+    explain: "A relative path starts from the current directory that pwd prints. When a file you can see elsewhere is 'not found', check pwd first."
+
+  - id: option-or-argument
+    targets: [lx.shell-basics]
+    prompt: "In `head -n 5 report.txt`, what is `5`?"
+    choices:
+      - "The value of the option `-n`"
+      - "A second file to read"
+      - "The number of files to print"
+    answer: 0
+    feedback:
+      - "`-n` needs a number, and takes the word right after it: `head` prints the first 5 lines of `report.txt`."
+      - "`5` follows `-n`, an option that takes a value, so `head` reads it as that value. The only file is `report.txt`."
+      - "`head` prints lines from each file it is given; `-n 5` sets how many lines, not how many files."
+    explain: "A command line is a command, then options (starting with `-`, some with a value) and arguments (what to work on)."
+
+  - id: cp-missing-destination
+    targets: [lx.files-text]
+    prompt: "No `backup` directory exists yet. What does `cp notes.txt backup` do?"
+    choices:
+      - "Creates a directory `backup` that holds a copy of `notes.txt`"
+      - "Creates a file named `backup`, a copy of `notes.txt`"
+      - "Fails with an error, because `backup` does not exist yet"
+    answer: 1
+    feedback:
+      - "`cp` never creates directories. When the destination is not an existing directory, it is the new file's name."
+      - "With no directory of that name, `backup` is taken as the name of the copy. Create the directory first, or write `backup/` so that `cp` refuses."
+      - "A missing destination is not an error for `cp`: it becomes the name of the new file."
+    explain: "`cp src dest` copies into `dest` when it is an existing directory; otherwise `dest` is the new file's name."
+
+  - id: redirect-errors
+    targets: [lx.redirection]
+    prompt: "`./build.sh > build.log` still prints error lines on the screen. Which command also captures them?"
+    choices:
+      - "`./build.sh > build.log 2>&1`"
+      - "`./build.sh >> build.log`"
+      - "`./build.sh | tee build.log`"
+    answer: 0
+    feedback:
+      - "`>` sends standard output to the file; `2>&1` then sends standard error to the same place."
+      - "`>>` appends instead of replacing, but still redirects only standard output: errors stay on the screen."
+      - "`tee` copies standard output to the file, but standard error still reaches the screen."
+    explain: "Output and errors are separate streams (1 and 2). `> file 2>&1` sends both to the file."
+
+  - id: vi-insert-mode
+    targets: [lx.editing]
+    prompt: "In vi, the bottom line shows `-- INSERT --`. You type `:wq` and press Enter, but vi stays open. Why?"
+    choices:
+      - "Insert mode types `:wq` as text into the file"
+      - "The file is read-only, so vi refuses to save it"
+      - "`:wq` only works when vi was started with `sudo`"
+    answer: 0
+    feedback:
+      - "Insert mode types every key into the file. Press `Esc` to return to normal mode, then type `:wq`."
+      - "A read-only file gives an error message after `:wq`. Here vi never saw a command."
+      - "Saving needs write permission on the file, not `sudo` in the command. vi did not even read a command here."
+    explain: "vi has modes: keys type text in insert mode and are commands in normal mode. `Esc` always returns to normal mode."

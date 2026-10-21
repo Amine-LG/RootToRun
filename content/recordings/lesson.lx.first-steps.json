@@ -1,0 +1,141 @@
+{
+ "lab": "lesson.lx.first-steps",
+ "kind": "lesson",
+ "lab_hash": "302ccc44c0a82b32",
+ "recorded_at": "2026-10-15T19:03:12+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "pwd",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/tmp/academy-lesson-x0x8d4w6\n",
+   "stderr": "",
+   "combined": "/tmp/academy-lesson-x0x8d4w6\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls /",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "afs\nbin\nboot\ndata\ndev\netc\nhome\nlib\nlib64\nmedia\nmnt\nopt\nproc\nroot\nrun\nsbin\nsrv\nsys\ntmp\nusr\nvar\n",
+   "stderr": "",
+   "combined": "afs\nbin\nboot\ndata\ndev\netc\nhome\nlib\nlib64\nmedia\nmnt\nopt\nproc\nroot\nrun\nsbin\nsrv\nsys\ntmp\nusr\nvar\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "notes\nreadme.txt\nreports\n",
+   "stderr": "",
+   "combined": "notes\nreadme.txt\nreports\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls -F",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "notes/\nreadme.txt\nreports/\n",
+   "stderr": "",
+   "combined": "notes/\nreadme.txt\nreports/\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls -l",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "total 4\ndrwxr-xr-x. 2 learner learner 41 Oct 15 19:03 notes\n-rw-r--r--. 1 learner learner 72 Oct 15 19:03 readme.txt\ndrwxr-xr-x. 2 learner learner 25 Oct 15 19:03 reports\n",
+   "stderr": "",
+   "combined": "total 4\ndrwxr-xr-x. 2 learner learner 41 Oct 15 19:03 notes\n-rw-r--r--. 1 learner learner 72 Oct 15 19:03 readme.txt\ndrwxr-xr-x. 2 learner learner 25 Oct 15 19:03 reports\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cd notes; pwd; ls",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/tmp/academy-lesson-x0x8d4w6/notes\ntodo.txt\nwelcome.txt\n",
+   "stderr": "",
+   "combined": "/tmp/academy-lesson-x0x8d4w6/notes\ntodo.txt\nwelcome.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat welcome.txt",
+   "cwd": "notes",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Welcome to the shell.\nYou found this file with ls and read it with cat.\n",
+   "stderr": "",
+   "combined": "Welcome to the shell.\nYou found this file with ls and read it with cat.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat notes/welcome.txt",
+   "cwd": "notes",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "cat: notes/welcome.txt: No such file or directory\n",
+   "combined": "cat: notes/welcome.txt: No such file or directory\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls ..",
+   "cwd": "reports",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "notes\nreadme.txt\nreports\n",
+   "stderr": "",
+   "combined": "notes\nreadme.txt\nreports\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat ../readme.txt",
+   "cwd": "reports",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "This practice directory holds notes and reports for your first minutes.\n",
+   "stderr": "",
+   "combined": "This practice directory holds notes and reports for your first minutes.\n",
+   "ok": true
+  }
+ ],
+ "seconds": 0,
+ "ok": true,
+ "problems": []
+}

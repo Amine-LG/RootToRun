@@ -1,0 +1,103 @@
+id: inc.liveness-restarts
+kind: incident
+title: "Restarts, but no errors"
+subtitle: "The logs look clean, yet the container keeps restarting"
+summary: "The portal works, mostly. Its pod restarts over and over and users see brief errors."
+module: a2-apps
+minutes: 15
+level: 2
+supports: "Recorded on OpenShift 4.21.8."
+concepts: [k8s.probes, k8s.pod-lifecycle]
+prerequisites: [b.health-probes]
+namespace: academy-inc-live
+objective: |
+  Tell a container stopped by the kubelet from one that crashed, repair the cause, and confirm that the restarts stop.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`. The app creates the project `academy-inc-live` as your learner identity when you start the
+  incident, with everything listed here in the state the symptom describes; how it got into that state is part of the
+  investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  Monitoring shows the portal's restart count climbing steadily since a port was "cleaned up" in the probe
+  configuration. The application logs show a normal start every time, and no error before each restart.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            livenessProbe: {httpGet: {path: /healthz, port: 8081}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 2}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get pods -n academy-inc-live", meaning: "Running 1/1 between kills, but RESTARTS climbing (1 restart, 28 s after creation, when recorded); the interval grows as the kubelet backs off"}
+  - {cmd: "oc get events -n academy-inc-live --field-selector reason=Unhealthy", meaning: "Liveness probe failed: Get \"http://<pod-ip>:8081/healthz\" ... connect: connection refused. A readiness failure on 8080 right after each start is normal: httpd is not listening yet"}
+  - {cmd: "oc get events -n academy-inc-live --field-selector reason=Killing", meaning: "Normal Killing: Container httpd failed liveness probe, will be restarted (the kubelet, not the application, ended the container)"}
+  - {cmd: "oc describe pod <pod> -n academy-inc-live", run: "oc describe pod {anypod:app=web} -n academy-inc-live", meaning: "State: Running, Restart Count: 1; Last State: Terminated, Reason: Completed, Exit Code: 0: httpd shut down cleanly when the kubelet sent SIGTERM. Liveness: http-get http://:8081/healthz. Events: Unhealthy (Liveness probe failed ... 8081 ... connection refused, x4 when recorded), then Killing: Container httpd failed liveness probe, will be restarted (x2: the second kill had just happened, so Restart Count does not show it yet). An OOM kill looks different: Reason OOMKilled, Exit Code 137, and no Killing event"}
+  - {cmd: "oc get deploy web -n academy-inc-live -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet}{\"\\n\"}'", meaning: "{\"path\":\"/healthz\",\"port\":8081,\"scheme\":\"HTTP\"}: port 8081, where nothing listens (httpd serves 8080)"}
+hints:
+  - "No error in the logs before each restart: something outside the process is killing it. Look at the events."
+  - "Which port does the liveness probe use, and which port does httpd listen on?"
+  - "Point the liveness probe at the port the container really listens on (the container and Service ports show it), then check that the restart count stops rising."
+fix:
+  - {cmd: "oc set probe deploy/web -n academy-inc-live --liveness --get-url=http://:8080/healthz --initial-delay-seconds=5 --period-seconds=10", meaning: "probe the port httpd serves (and probe every 10 s instead of 5 s); the template change rolls out a new pod"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-live --timeout=120s", meaning: "a new pod with the corrected probe", timeout: 140}
+fix_wait: [probe-port, web-ready, stable]
+checks:
+  - {id: probe-port, title: "The liveness probe targets port 8080", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].livenessProbe.httpGet.port", op: eq, value: 8080, expect_text: "8080"}
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: stable, title: "The running pod has not restarted", type: pods, selector: app=web, ready: true, max_restarts: 0, expect_text: "Ready, 0 restarts"}
+root_cause: |
+  The liveness probe called port 8081, where nothing listens. After `failureThreshold` failures the kubelet kills the
+  container (event `Killing ... failed liveness probe`) and starts it again. The application itself never failed,
+  which is why its logs show only normal starts.
+alternatives: |
+  - Name the container port (`ports: [{name: http, containerPort: 8080}]`) and use the name in the probe (`port: http`)
+    so the probe follows the container definition. This incident's `probe-port` check reads the number in the probe,
+    so it would report a probe that uses the port's name as not repaired although it works: make the name a
+    follow-up change.
+  - For slow-starting applications, add a startupProbe rather than a long liveness `initialDelaySeconds`.
+sre: |
+  A wrong liveness probe turns a healthy service into a flapping one, and under load a too-strict liveness probe can
+  restart every replica at once. Keep liveness checks cheap and local (no dependencies), and alert on restart rate.
+questions:
+  - q: "How do you distinguish a liveness kill from an application crash?"
+    a: "A liveness kill shows Unhealthy events followed by a Killing event ('failed liveness probe, will be restarted'); the kubelet sends SIGTERM, so the last exit code is whatever the process returns on SIGTERM (here httpd exits 0, shown as Completed; 143 is also common), or 137 if it had to be killed after the grace period. A crash has no Killing event, the application's own exit code, and usually an error in the --previous logs."
+references:
+  - {title: "Kubernetes: Configure liveness, readiness and startup probes", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"}
+  - {title: "Kubernetes: Container restarts and back-off", url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-restarts"}
+symptom_checks: [web-ready, stable]  # monitoring-level evidence shown before the answer

@@ -1,0 +1,472 @@
+{
+ "lab": "ch.config-out-of-spec",
+ "kind": "challenge",
+ "lab_hash": "dd7deab7fcbcaa07",
+ "recorded_at": "2026-10-20T17:27:08+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc set env deploy/app --list -n academy-ch-config",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "# deployments/app, container app\nGREETING=Hello\nDB_PASSWORD=practice-only-password\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get deploy app -n academy-ch-config -o jsonpath='{.spec.template.spec.containers[0].envFrom}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[{\"configMapRef\":{\"name\":\"app-settings\"}}]\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set volume deploy/app --add --name=db --type=secret --secret-name=db-credentials --mount-path=/etc/db -n academy-ch-config",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app volume updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/app -n academy-ch-config --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"app\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "setting",
+    "title": "app-settings says GREETING=Bonjour",
+    "expect": "Bonjour",
+    "status": "pass",
+    "observed": "data.GREETING = 'Bonjour'"
+   },
+   {
+    "id": "from-configmap",
+    "title": "GREETING comes from app-settings, not from the Deployment",
+    "expect": "app: ok",
+    "status": "fail",
+    "observed": "app: GREETING is set in the Deployment itself, not taken from app-settings"
+   },
+   {
+    "id": "running",
+    "title": "the running pods see GREETING=Bonjour",
+    "expect": "Bonjour",
+    "status": "fail",
+    "observed": "Hello"
+   },
+   {
+    "id": "no-literal",
+    "title": "no password written in the Deployment",
+    "expect": "app: ok",
+    "status": "fail",
+    "observed": "app: DB_PASSWORD is written in the Deployment as a literal value"
+   },
+   {
+    "id": "secret-file",
+    "title": "/etc/db/password comes from Secret db-credentials",
+    "expect": "app: ok",
+    "status": "fail",
+    "observed": "app: /etc/db/password does not come from Secret db-credentials"
+   },
+   {
+    "id": "file-present",
+    "title": "the running pods have /etc/db/password",
+    "expect": "present",
+    "status": "fail",
+    "observed": "command terminated with exit code 1"
+   },
+   {
+    "id": "ready",
+    "title": "app runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   }
+  ],
+  "at": 1792517241.207703
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "setting",
+    "title": "app-settings says GREETING=Bonjour",
+    "expect": "Bonjour",
+    "status": "pass",
+    "observed": "data.GREETING = 'Bonjour'"
+   },
+   {
+    "id": "from-configmap",
+    "title": "GREETING comes from app-settings, not from the Deployment",
+    "expect": "app: ok",
+    "status": "pass",
+    "observed": "app: ok"
+   },
+   {
+    "id": "running",
+    "title": "the running pods see GREETING=Bonjour",
+    "expect": "Bonjour",
+    "status": "pass",
+    "observed": "Bonjour"
+   },
+   {
+    "id": "no-literal",
+    "title": "no password written in the Deployment",
+    "expect": "app: ok",
+    "status": "pass",
+    "observed": "app: ok"
+   },
+   {
+    "id": "secret-file",
+    "title": "/etc/db/password comes from Secret db-credentials",
+    "expect": "app: ok",
+    "status": "pass",
+    "observed": "app: ok"
+   },
+   {
+    "id": "file-present",
+    "title": "the running pods have /etc/db/password",
+    "expect": "present",
+    "status": "pass",
+    "observed": "exit code 0"
+   },
+   {
+    "id": "ready",
+    "title": "app runs 2 Ready replicas",
+    "expect": "2/2 ready",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   }
+  ],
+  "at": 1792517255.8337555
+ },
+ "trials": [
+  {
+   "id": "restart-only",
+   "title": "Pods restarted, nothing else changed",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "setting",
+     "title": "app-settings says GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "pass",
+     "observed": "data.GREETING = 'Bonjour'"
+    },
+    {
+     "id": "from-configmap",
+     "title": "GREETING comes from app-settings, not from the Deployment",
+     "expect": "app: ok",
+     "status": "fail",
+     "observed": "app: GREETING is set in the Deployment itself, not taken from app-settings"
+    },
+    {
+     "id": "running",
+     "title": "the running pods see GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "fail",
+     "observed": "Hello"
+    },
+    {
+     "id": "no-literal",
+     "title": "no password written in the Deployment",
+     "expect": "app: ok",
+     "status": "fail",
+     "observed": "app: DB_PASSWORD is written in the Deployment as a literal value"
+    },
+    {
+     "id": "secret-file",
+     "title": "/etc/db/password comes from Secret db-credentials",
+     "expect": "app: ok",
+     "status": "fail",
+     "observed": "app: /etc/db/password does not come from Secret db-credentials"
+    },
+    {
+     "id": "file-present",
+     "title": "the running pods have /etc/db/password",
+     "expect": "present",
+     "status": "fail",
+     "observed": "command terminated with exit code 1"
+    },
+    {
+     "id": "ready",
+     "title": "app runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:restart-only",
+     "cmd": "oc rollout restart deploy/app -n academy-ch-config",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app restarted\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:restart-only",
+     "cmd": "oc rollout status deploy/app -n academy-ch-config --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"app\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "secret-as-env",
+   "title": "Greeting fixed, password moved to an environment variable from the Secret",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "setting",
+     "title": "app-settings says GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "pass",
+     "observed": "data.GREETING = 'Bonjour'"
+    },
+    {
+     "id": "from-configmap",
+     "title": "GREETING comes from app-settings, not from the Deployment",
+     "expect": "app: ok",
+     "status": "pass",
+     "observed": "app: ok"
+    },
+    {
+     "id": "running",
+     "title": "the running pods see GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "pass",
+     "observed": "Bonjour"
+    },
+    {
+     "id": "no-literal",
+     "title": "no password written in the Deployment",
+     "expect": "app: ok",
+     "status": "pass",
+     "observed": "app: ok"
+    },
+    {
+     "id": "secret-file",
+     "title": "/etc/db/password comes from Secret db-credentials",
+     "expect": "app: ok",
+     "status": "fail",
+     "observed": "app: /etc/db/password does not come from Secret db-credentials"
+    },
+    {
+     "id": "file-present",
+     "title": "the running pods have /etc/db/password",
+     "expect": "present",
+     "status": "fail",
+     "observed": "command terminated with exit code 1"
+    },
+    {
+     "id": "ready",
+     "title": "app runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:secret-as-env",
+     "cmd": "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:secret-as-env",
+     "cmd": "oc set env deploy/app --from=secret/db-credentials --prefix=DB_ -n academy-ch-config",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:secret-as-env",
+     "cmd": "oc rollout status deploy/app -n academy-ch-config --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"app\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "single-key",
+   "title": "A correct alternative: the greeting taken from the ConfigMap in a different way",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "setting",
+     "title": "app-settings says GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "pass",
+     "observed": "data.GREETING = 'Bonjour'"
+    },
+    {
+     "id": "from-configmap",
+     "title": "GREETING comes from app-settings, not from the Deployment",
+     "expect": "app: ok",
+     "status": "pass",
+     "observed": "app: ok"
+    },
+    {
+     "id": "running",
+     "title": "the running pods see GREETING=Bonjour",
+     "expect": "Bonjour",
+     "status": "pass",
+     "observed": "Bonjour"
+    },
+    {
+     "id": "no-literal",
+     "title": "no password written in the Deployment",
+     "expect": "app: ok",
+     "status": "pass",
+     "observed": "app: ok"
+    },
+    {
+     "id": "secret-file",
+     "title": "/etc/db/password comes from Secret db-credentials",
+     "expect": "app: ok",
+     "status": "pass",
+     "observed": "app: ok"
+    },
+    {
+     "id": "file-present",
+     "title": "the running pods have /etc/db/password",
+     "expect": "present",
+     "status": "pass",
+     "observed": "exit code 0"
+    },
+    {
+     "id": "ready",
+     "title": "app runs 2 Ready replicas",
+     "expect": "2/2 ready",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:single-key",
+     "cmd": "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:single-key",
+     "cmd": "oc patch deploy/app -n academy-ch-config --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/env\",\"value\":[{\"name\":\"GREETING\",\"valueFrom\":{\"configMapKeyRef\":{\"name\":\"app-settings\",\"key\":\"GREETING\"}}}]}]'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:single-key",
+     "cmd": "oc set volume deploy/app --add --name=db --type=secret --secret-name=db-credentials --mount-path=/etc/db -n academy-ch-config",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/app volume updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:single-key",
+     "cmd": "oc rollout status deploy/app -n academy-ch-config --timeout=180s",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "Waiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"app\" successfully rolled out\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 154,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-config: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

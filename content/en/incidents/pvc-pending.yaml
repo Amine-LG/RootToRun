@@ -1,0 +1,101 @@
+id: inc.pvc-pending
+kind: incident
+title: "PVC Pending, pod Pending"
+summary: "A stateful service never starts: its pod and its storage claim have both been Pending since they were created."
+module: a4-config-storage
+minutes: 20
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with CRC's default StorageClass crc-csi-hostpath-provisioner (WaitForFirstConsumer, reclaim policy Retain)."
+concepts: [storage.pvc, storage.class]
+prerequisites: [e.storage]
+namespace: academy-inc-pvc
+objective: |
+  Find out why the pod and its claim stay Pending, give the service storage that this cluster can provide, and keep
+  the workload's mount path.
+background: |
+  **Where everything comes from.** The project holds the `ledger` service: a Deployment running a short shell script
+  in the UBI 9 minimal image that records each start in `/data/started`, and its PersistentVolumeClaim. Volumes on
+  this cluster come from OpenShift Local's default StorageClass; one investigation command lists the StorageClasses
+  with the reader identity. The app creates the project `academy-inc-pvc` as your learner identity when you start the
+  incident, with everything listed here in the state the symptom describes; how it got into that state is part of the
+  investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The ledger service was deployed with manifests written for the production cluster. Its pod has been Pending since
+  creation, and so has its PersistentVolumeClaim. The storage team's rule for a fix: a claim recreated with different
+  settings gets a new name, here `ledger-data-v2`, and a claim that can never bind must not be left behind.
+setup: []
+break:
+  - |
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata: {name: ledger-data}
+    spec:
+      accessModes: [ReadWriteOnce]
+      storageClassName: fast-ssd
+      resources: {requests: {storage: 1Gi}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: ledger, labels: {app: ledger}}
+    spec:
+      replicas: 1
+      strategy: {type: Recreate}
+      selector: {matchLabels: {app: ledger}}
+      template:
+        metadata: {labels: {app: ledger}}
+        spec:
+          containers:
+          - name: ledger
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["/bin/sh", "-c", "date -u >> /data/started; echo \"starts recorded: $(wc -l < /data/started)\"; exec sleep infinity"]
+            resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
+            volumeMounts: [{name: data, mountPath: /data}]
+          volumes: [{name: data, persistentVolumeClaim: {claimName: ledger-data}}]
+investigate:
+  - {cmd: "oc get pods,pvc -n academy-inc-pvc", meaning: "both Pending: the pod has no node, the claim has no volume (STORAGECLASS fast-ssd)"}
+  - {cmd: "oc get events -n academy-inc-pvc --field-selector involvedObject.kind=PersistentVolumeClaim", meaning: "ProvisioningFailed: storageclass.storage.k8s.io \"fast-ssd\" not found"}
+  - {cmd: "oc get events -n academy-inc-pvc --field-selector reason=FailedScheduling", meaning: "0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims: with its class unknown, the claim is treated as immediate binding and the scheduler waits for it to be bound"}
+  - {cmd: "oc get storageclass", as: reader, meaning: "the classes this cluster offers: only crc-csi-hostpath-provisioner (default), reclaim policy Retain, WaitForFirstConsumer"}
+hints:
+  - "The pod waits for its volume. What does the claim's event say?"
+  - "storageClassName cannot be changed on an existing claim. Create a new claim with a class that exists (or the default)."
+  - "Mount a claim that can bind (the brief names the claim the grader expects) in place of the unbindable one; delete the old claim once no pod uses it."
+fix:
+  - {cmd: "oc set volume deploy/ledger -n academy-inc-pvc --add --overwrite --name=data --type=pvc --claim-name=ledger-data-v2 --claim-size=1Gi --claim-mode=rwo --mount-path=/data", meaning: "a new claim from the default StorageClass, same mount path"}
+  - {cmd: "oc delete pvc ledger-data -n academy-inc-pvc", meaning: "remove the claim that can never bind"}
+  - {cmd: "oc rollout status deploy/ledger -n academy-inc-pvc --timeout=180s", meaning: "the volume is provisioned when the pod is scheduled", timeout: 200}
+  - {cmd: "oc get pvc -n academy-inc-pvc", meaning: "ledger-data-v2 Bound, class crc-csi-hostpath-provisioner. CAPACITY shows 39Gi for a 1Gi request: this hostpath provisioner reports the size of the node's backing storage rather than the request; a bound volume is always at least as large as requested"}
+fix_wait: [ledger-ready, bound, old-gone]
+checks:
+  - {id: ledger-ready, title: "ledger is available", type: deployment_ready, name: ledger, expect_text: "1/1"}
+  - {id: bound, title: "ledger-data-v2 is Bound", type: field, kind: pvc, name: ledger-data-v2, path: status.phase, op: eq, value: Bound, expect_text: "Bound"}
+  - {id: old-gone, title: "The unbindable claim was removed", type: absent, kind: pvc, name: ledger-data, expect_text: "absent"}
+root_cause: |
+  The claim requested `storageClassName: fast-ssd`, which exists on the production cluster but not here. With no
+  such class, nothing can provision a volume (event `ProvisioningFailed`), so the claim stays Pending, and the pod that
+  uses it cannot be scheduled. Because a claim's class is immutable, the fix is a new claim, not an edit.
+alternatives: |
+  - Omit `storageClassName` in portable manifests so the cluster's default class is used, and set it per environment
+    with a Kustomize overlay or Helm value.
+  - Create a `fast-ssd` StorageClass on this cluster (cluster-admin), pointing at a real provisioner.
+sre: |
+  Pending claims are a classic "works in test, not in prod" issue. Also check the reclaim policy: on this cluster it
+  is Retain, so deleted claims leave Released PersistentVolumes behind (with their data) until an administrator
+  deletes them. Know whether your storage deletes data with the claim before deleting claims in production. Note also
+  the Deployment's `strategy: Recreate`: with a ReadWriteOnce volume, a rolling update can leave the new pod waiting
+  for a volume that is still attached to the old pod on another node. Cleaning up this incident deletes the project
+  and its claims; the volume that `ledger-data-v2` received then stays Released (reclaim policy Retain) until an
+  administrator removes it, and the Connections page lists it.
+questions:
+  - q: "Why can't you just edit storageClassName on the claim?"
+    a: "A claim's spec is immutable after creation, apart from a few fields such as the storage request (for expansion). A new claim is the only way to change its class."
+  - q: "With WaitForFirstConsumer, when is the volume created?"
+    a: "When a pod using the claim is scheduled, so the volume is created where the pod will run."
+references:
+  - {title: "Kubernetes: Persistent volumes", url: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"}
+  - {title: "Kubernetes: Storage classes", url: "https://kubernetes.io/docs/concepts/storage/storage-classes/"}
+  - {title: "Kubernetes: Volume binding mode", url: "https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode"}
+  - {title: "Kubernetes: Reclaiming persistent volumes", url: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaiming"}
+symptom_checks: [ledger-ready]  # monitoring-level evidence shown before the answer

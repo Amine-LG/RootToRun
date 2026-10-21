@@ -1,0 +1,837 @@
+# Running privileged applications, as a teaching flow recorded on OpenShift Local as the ordinary user developer and
+# the cluster administrator, inside experiment X-SCC-02.
+- id: n.privileged-workloads
+  title: Run privileged workloads safely
+  subtitle: "A node agent, a grant for one ServiceAccount, and an SCC with only what is needed"
+  module: b3-workload-security
+  mode: REAL_LAB
+  minutes: 45
+  level: 3
+  supports: "OpenShift 4.21 SCCs (privileged, restricted-v2 and a custom SCC) and oc 4.21. Every command was run on OpenShift Local 4.21 by the ordinary user developer, in a temporary project of their own, and by the cluster administrator kubeadmin. A privileged node-agent pod ran for less than a minute with a read-only view of the node's /etc; a custom SCC was created and granted for one ServiceAccount. The grants, the SCC, its ClusterRole and the project were then removed, and the cluster's SCCs and SCC bindings were compared with the copy taken before (experiment X-SCC-02)."
+  concepts:
+    - sec.scc
+    - sec.serviceaccounts
+    - container.security
+  prerequisites:
+    - f.scc
+    - o2.service-accounts
+  objective: |
+    Run a workload that needs host access: see it refused, see why an ordinary project administrator cannot grant the
+    access, have the administrator grant `privileged` to one ServiceAccount in one project, prove what the pod can do
+    and who can reach the node through it, take the access back, and replace it with a custom SCC that allows only
+    what the workload needs.
+  record_on: cluster-admin
+  flow:
+    - kind: ask
+      id: recall-grant-scope
+      recalls: f.scc
+      prompt: "An administrator granted `anyuid` to the ServiceAccount `legacy-sa` of a project. Which pods can now run as root?"
+      choices:
+        - text: Only the pods of the Deployment that asked for it
+          why: A grant names a subject, not a workload. Nothing ties it to one Deployment.
+        - text: Every pod in the project that runs as legacy-sa
+          why: SCC admission looks at the pod's ServiceAccount, so any pod that names legacy-sa gets the same access. That matters even more for privileged.
+        - text: Every pod in the project
+          why: Pods that run as other ServiceAccounts, `default` included, keep restricted-v2. The previous lesson showed one refused.
+      answer: 1
+    - kind: teach
+      id: situation
+      title: A node agent
+      body: |
+        A security team wants an agent on every node. It must see every process on the node and read the node's
+        configuration files in `/etc`. Unlike the vendor app of [Security Context Constraints](/lesson/f.scc), this
+        requirement is real: the agent's job is to look at the host. Running such software safely is part of a
+        cluster administrator's work.
+
+        Everything here ran on OpenShift Local 4.21: the ordinary user `developer` in their own project,
+        `academy-lesson-n-privileged-workloads`, and the cluster administrator `kubeadmin`. The prompt in front of each
+        command names who ran it.
+    - kind: show
+      id: agent-manifest
+      body: "A DaemonSet runs one copy on each node. The agent asks for three kinds of host access:"
+      code: |
+        apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: node-agent
+          labels: {app: node-agent}
+        spec:
+          selector:
+            matchLabels: {app: node-agent}
+          template:
+            metadata:
+              labels: {app: node-agent}
+            spec:
+              serviceAccountName: node-agent     # its own identity
+              hostPID: true                      # 1: the node's process namespace
+              terminationGracePeriodSeconds: 2
+              containers:
+              - name: agent
+                image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                imagePullPolicy: IfNotPresent
+                command: ["sleep", "infinity"]
+                securityContext:
+                  privileged: true               # 2: a privileged container
+                volumeMounts:
+                - {name: host-etc, mountPath: /host/etc, readOnly: true}
+                resources:
+                  requests: {cpu: 10m, memory: 16Mi}
+                  limits: {memory: 64Mi}
+              volumes:
+              - name: host-etc
+                hostPath: {path: /etc, type: Directory}   # 3: a directory of the node, mounted read-only
+      caption: node-agent.yaml
+      notice: |
+        The container only sleeps; it stands for the agent's program. Everything it is allowed to see is what a real
+        agent would see.
+    - kind: try
+      id: create-sa
+      body: "As the developer, give the agent its own ServiceAccount, `node-agent`, in your current project."
+      accept:
+        - "oc create serviceaccount node-agent"
+        - "oc create sa node-agent"
+        - "oc create serviceaccount node-agent -n academy-lesson-n-privileged-workloads"
+        - "oc create sa node-agent -n academy-lesson-n-privileged-workloads"
+      hints:
+        - match: "-z|--serviceaccount"
+          say: "`-z` names an existing ServiceAccount in other commands. Creating one is `oc create serviceaccount <name>`."
+        - match: "service-account|serviceAccount"
+          say: "The kind is written `serviceaccount` (or `sa`)."
+      hint: "`oc create`, the kind `serviceaccount`, the name."
+      run: "oc create serviceaccount node-agent"
+      then: "`serviceaccount/node-agent created`. The manifest already names it in `serviceAccountName`."
+    - kind: show
+      id: apply-agent
+      run: "oc apply -f node-agent.yaml"
+      notice: |
+        Created. Pod Security Admission warns about every host-level request (it only warns in this project), and
+        the DaemonSet is stored anyway. Whether a pod may run is SCC admission's decision, made when the pod is
+        created.
+    - kind: show
+      id: rollout-waits
+      body: |
+        As the developer, wait for the agent's pod, for at most twenty seconds. Neither the developer nor `node-agent`
+        may use an SCC that allows host access, so this is expected to time out:
+      run: "oc rollout status ds/node-agent --timeout=20s"
+      notice: "`0 out of 1 new pods have been updated`, then `timed out waiting for the condition`: as expected, SCC admission refuses the pod. The next steps show why."
+    - kind: show
+      id: ds-empty
+      run: "oc get ds node-agent"
+      notice: "One node, so one pod `DESIRED`; `CURRENT` is 0."
+    - kind: try
+      id: try-describe-ds
+      body: "There is no pod to look at. Show the DaemonSet's details and events, where its controller reports what went wrong."
+      accept:
+        - "oc describe ds node-agent"
+        - "oc describe ds/node-agent"
+        - "oc describe daemonset node-agent"
+        - "oc describe daemonset/node-agent"
+        - "oc describe daemonsets node-agent"
+        - "oc describe daemonset.apps node-agent"
+        - "oc describe daemonset.apps/node-agent"
+      hints:
+        - match: "describe pods?( |/|$)"
+          say: "No pod exists: its creation was refused. The refusal is reported on the DaemonSet."
+        - match: "^oc logs"
+          say: "No container ever started, so there is no log. The DaemonSet's events hold the reason."
+        - match: "^oc get"
+          say: "`get` shows the counts. `describe` adds the controller's events, with the reason."
+      hint: "`oc describe`, the kind and the name."
+      run: "oc describe ds node-agent"
+      then: |
+        A `FailedCreate` event, repeated 13 times in 21 seconds: `unable to validate against any security context
+        constraint`. `restricted-v2` and `restricted-v3`, which this ServiceAccount may use, refused the host PID
+        namespace, the hostPath volume and the privileged container; every SCC that would allow them, `hostaccess`
+        and `privileged` among them, is `not usable by user or serviceaccount`.
+    - kind: ask
+      id: which-scc
+      prompt: "The agent asks for a privileged container, the host PID namespace and a hostPath volume. Which built-in SCC allows all three?"
+      choices:
+        - text: anyuid
+          why: anyuid allows any UID and nothing on the host.
+        - text: hostaccess
+          why: hostaccess allows host namespaces and hostPath volumes, but not a privileged container.
+        - text: privileged
+          why: Only privileged allows a privileged container, and it allows everything else too. The administrator's view of it comes later.
+      answer: 2
+    - kind: show
+      id: review-agent
+      body: "The developer's review of the manifest agrees with the event:"
+      run: "oc adm policy scc-subject-review -f node-agent.yaml"
+      notice: "`<none>`: nothing the developer or `node-agent` may use admits it."
+    - kind: teach
+      id: boundary
+      title: Who may grant it
+      body: |
+        The developer administers this project: they can create ServiceAccounts and RoleBindings in it. Granting an
+        SCC is a RoleBinding to the ClusterRole `system:openshift:scc:<name>`. Kubernetes RBAC adds one rule: you can
+        only bind permissions you hold yourself, unless you have the `bind` verb on the role.
+    - kind: ask
+      id: guess-grant
+      guess: true
+      prompt: "The developer runs `oc adm policy add-scc-to-user privileged -z node-agent` in their own project. What happens?"
+      choices:
+        - text: It works, because they administer the project
+          why: Administering a project lets them grant what they hold there. They do not hold `use` on privileged.
+        - text: The API server refuses the RoleBinding
+          why: The binding would grant `use` on privileged, which the developer does not have. The next step shows the refusal.
+        - text: It works, but only once an administrator approves it
+          why: RBAC has no approval queue. A binding is either allowed or refused when it is written.
+      answer: 1
+    - kind: show
+      id: dev-grant-refused
+      run: "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads"
+      notice: |
+        Forbidden: the developer `is attempting to grant RBAC permissions not currently held`, and the message names
+        exactly the permission: `use` on the SCC `privileged`. This boundary is the point: if project administrators
+        could grant privileged, anyone with a project could take a node.
+    - kind: teach
+      id: why-rare
+      title: Why privileged is rarely right
+      body: |
+        A container admitted by `privileged` may ask for every capability and every device, the host's network,
+        process and IPC namespaces, any volume including any host directory, and it runs without SELinux confinement.
+        It is effectively root on the node. Whoever can create pods with its ServiceAccount, or open a shell in its
+        pods, has the same power.
+
+        So, in order: remove the requirement if the software allows it; otherwise prefer an SCC that allows only what
+        the workload needs (the end of this lesson builds one); grant `privileged` only when nothing narrower works,
+        to one ServiceAccount, in a project that only the platform team controls.
+    - kind: show
+      id: admin-describe-scc
+      body: "The administrator reads what the SCC allows before granting it:"
+      run: "oc describe scc privileged"
+      notice: |
+        Privileged containers, privilege escalation, every capability, seccomp profile and volume type, host network,
+        ports, PID and IPC, any UID and SELinux context. Its direct users and groups are platform identities only.
+    - kind: show
+      id: dry-run-crb
+      body: |
+        A common mistake is to leave out `-n`. A client-side dry run prints the object the command would send, and
+        sends nothing:
+      run: "oc adm policy add-scc-to-user privileged -z node-agent --dry-run=client -o yaml"
+      notice: |
+        A **ClusterRoleBinding**, for a ServiceAccount `node-agent` in `namespace: default`, the administrator's current
+        project, not the developer's. Without `-n` the grant is cluster-wide and names the wrong account.
+    - kind: try
+      id: try-grant-priv
+      body: "As the administrator, grant `privileged` to the ServiceAccount `node-agent` of the project `academy-lesson-n-privileged-workloads`, and to nothing else."
+      accept:
+        - "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user privileged -z node-agent --namespace academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user privileged -z node-agent --namespace=academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user privileged --serviceaccount=node-agent -n academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user privileged --serviceaccount node-agent -n academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user privileged -n academy-lesson-n-privileged-workloads -z node-agent"
+      hints:
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n`, the dry run above showed a ClusterRoleBinding for the wrong ServiceAccount. Name the project."
+        - match: "add-scc-to-user node-agent"
+          say: "The SCC comes first, then the subject: `add-scc-to-user privileged -z node-agent`."
+        - match: "-z default|--serviceaccount[= ]default"
+          say: "`default` runs every pod in the project that names no ServiceAccount. The grant is for `node-agent` only."
+        - match: "add-scc-to-group"
+          say: "The subject is one ServiceAccount, given with `-z`."
+        - match: "--dry-run"
+          say: "The dry run was the preview. This time make the grant."
+      hint: "`oc adm policy add-scc-to-user`, the SCC, `-z` and the ServiceAccount, and the project."
+      run: "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads"
+      then: "`clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged added: \"node-agent\"`."
+    - kind: show
+      id: grant-binding
+      run: "oc get rolebinding system:openshift:scc:privileged -n academy-lesson-n-privileged-workloads -o wide"
+      notice: "One RoleBinding in this project, naming one ServiceAccount: `academy-lesson-n-privileged-workloads/node-agent`."
+    - kind: try
+      id: restart
+      body: |
+        The DaemonSet controller retries a refused pod with growing delays. As the developer, make it try at once by
+        restarting the DaemonSet's rollout.
+      accept:
+        - "oc rollout restart ds/node-agent"
+        - "oc rollout restart daemonset/node-agent"
+        - "oc rollout restart daemonset node-agent"
+        - "oc rollout restart ds node-agent"
+      hints:
+        - match: "rollout (status|undo|history)"
+          say: "The subcommand that starts new pods is `restart`."
+        - match: "deploy"
+          say: "The agent is a DaemonSet: `ds/node-agent`."
+        - match: "delete"
+          say: "Nothing needs deleting: a restart changes the template, and the controller tries again at once."
+      hint: "`oc rollout restart` and the DaemonSet."
+      run: "oc rollout restart ds/node-agent"
+      then: "`daemonset.apps/node-agent restarted`."
+    - kind: show
+      id: rollout-ok
+      run: "oc rollout status ds/node-agent --timeout=120s"
+      notice: "`successfully rolled out`: the pod was admitted and started."
+    - kind: show
+      id: agent-scc
+      body: "Two annotations tell the story: the SCC, and which kind of subject was allowed to use it."
+      run: "oc get pods -l app=node-agent -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,VALIDATED-FOR:.metadata.annotations.security\\.openshift\\.io/validated-scc-subject-type'"
+      notice: |
+        `privileged`, validated for the `serviceaccount`: the grant to `node-agent` admitted the pod, not anything the
+        developer may use.
+    - kind: ask
+      id: guess-pid1
+      guess: true
+      prompt: "The agent shares the node's PID namespace. Which process is PID 1 as the agent sees it?"
+      choices:
+        - text: sleep, the container's own command
+          why: That would be true in the container's own PID namespace. The next step reads PID 1's name.
+        - text: The node's init, systemd
+          why: In the host's PID namespace, PID 1 is the node's init. The next step reads its name.
+      answer: 1
+    - kind: show
+      id: host-pid1
+      body: "With the host's PID namespace, process 1 is the node's own init:"
+      run: "oc exec ds/node-agent -- cat /proc/1/comm"
+      notice: "`systemd`: the node, not the container."
+    - kind: show
+      id: host-procs
+      run: "oc exec ds/node-agent -- sh -c 'ls -d /proc/[0-9]* | wc -l'"
+      notice: "451 process directories: every process on the node. An ordinary container sees only its own few."
+    - kind: show
+      id: host-etc
+      run: "oc exec ds/node-agent -- head -n 1 /host/etc/passwd"
+      notice: "The first line of the node's own user database, read through the read-only mount of the node's `/etc`."
+    - kind: show
+      id: ro-mount
+      body: "The manifest mounted `/etc` read-only. The container's mount table confirms it:"
+      run: "oc exec ds/node-agent -- grep ' /host/etc ' /proc/self/mounts"
+      notice: |
+        The node's disk, mounted at `/host/etc` with `ro`: read-only. Inside a privileged container this is a guard,
+        not a wall: such a container could mount the node's disks itself. Keep host mounts read-only anyway, and keep
+        privileged rare.
+    - kind: ask
+      id: who-reached-node
+      prompt: "Who read the node's process table and its /etc in the last steps, and what does that say about the grant?"
+      choices:
+        - text: The agent only, because exec runs inside its container
+          why: The commands were typed by the developer. `oc exec` gives whoever may use it the container's powers.
+        - text: The developer, by exec into the pod
+          why: Anyone who can exec into the pods, or create pods as node-agent in this project, reaches the node. Keep such grants in a project only the platform team controls.
+        - text: Nobody, because the mount was read-only
+          why: Read-only stops writes to /etc through that mount. Everything shown was read, and a privileged container can do far more.
+      answer: 1
+    - kind: show
+      id: default-refused
+      body: "The grant follows the ServiceAccount, so the same pod spec, run as the project's `default` ServiceAccount and created directly by the developer, should be refused:"
+      run: "oc create -f probe-pod.yaml"
+      notice: "Forbidden: `privileged` is `not usable` by the developer or by `default`. The grant reaches `node-agent` and nothing else."
+    - kind: show
+      id: review-after
+      body: "The developer repeats the review of the manifest, with the agent's pod running under `privileged`; then again 30 seconds later; then with `-z node-agent`, which asks about the ServiceAccount itself:"
+      run: "oc adm policy scc-subject-review -f node-agent.yaml; sleep 30; echo \"== 30 s later\"; oc adm policy scc-subject-review -f node-agent.yaml; echo \"== for the ServiceAccount itself (-z)\"; oc adm policy scc-subject-review -z node-agent -f node-agent.yaml"
+      notice: |
+        Right after the grant, `<none>`, although the pod in front of you was admitted. Thirty seconds later the same
+        review answers `privileged`, and so does the review for the ServiceAccount itself. The first answer lagged
+        behind the grant, while admission had already used it. This recording shows the lag, not its cause: treat a
+        review as a prediction that may be briefly out of date. The pod's `openshift.io/scc` annotation is the record of what
+        happened: when a review and the annotation disagree, trust the annotation, and repeat the review a little later.
+    - kind: teach
+      id: take-back
+      title: Take the access back
+      body: |
+        A privileged agent should live no longer than it is needed. The administrator removes the grant and the
+        developer deletes the DaemonSet. Removing the grant alone would leave the running pod in place, privileged.
+    - kind: show
+      id: revoke
+      run: "oc adm policy remove-scc-from-user privileged -z node-agent -n academy-lesson-n-privileged-workloads"
+      notice: "`removed: \"node-agent\"`."
+    - kind: try
+      id: delete-agent
+      body: "As the developer, delete the agent's DaemonSet."
+      accept:
+        - "oc delete ds node-agent"
+        - "oc delete daemonset node-agent"
+        - "oc delete ds/node-agent"
+        - "oc delete daemonset/node-agent"
+      hints:
+        - match: "delete pods?"
+          say: "Deleting the pod is not enough: the DaemonSet would create another one. Delete the DaemonSet."
+        - match: "delete (sa|serviceaccount)"
+          say: "Deleting the ServiceAccount leaves the running pod in place. Delete the DaemonSet."
+      hint: "`oc delete`, the kind and the name."
+      run: "oc delete ds node-agent"
+      then: "`daemonset.apps \"node-agent\" deleted`, with its pod. The privileged pod ran for well under a minute."
+    - kind: teach
+      id: prefer
+      title: Prefer an SCC with only what is needed
+      body: |
+        Suppose the agent's real job is only to watch the node's processes. Then it needs the host's PID namespace and
+        nothing else: no privileged container, no host directory, no root. An administrator can write an SCC that is a
+        copy of `restricted-v2` with one difference, `allowHostPID: true`, and grant it the same way.
+
+        An SCC is a cluster-wide object, so creating one is a cluster change: give it a clear name, list no users or
+        groups in it, grant it through RBAC to one ServiceAccount, and review it like any other exception.
+    - kind: show
+      id: scc-manifest
+      code: |
+        apiVersion: security.openshift.io/v1
+        kind: SecurityContextConstraints
+        metadata:
+          name: academy-x-hostpid
+          annotations:
+            kubernetes.io/description: "restricted-v2 plus the host PID namespace, for a process-watching agent"
+        allowHostPID: true                     # the one difference from restricted-v2
+        allowPrivilegedContainer: false
+        allowPrivilegeEscalation: false
+        allowHostDirVolumePlugin: false
+        allowHostIPC: false
+        allowHostNetwork: false
+        allowHostPorts: false
+        readOnlyRootFilesystem: false
+        requiredDropCapabilities: [ALL]
+        allowedCapabilities: [NET_BIND_SERVICE]
+        runAsUser: {type: MustRunAsRange}
+        seLinuxContext: {type: MustRunAs}
+        fsGroup: {type: MustRunAs}
+        supplementalGroups: {type: RunAsAny}
+        seccompProfiles: [runtime/default]
+        volumes: [configMap, csi, downwardAPI, emptyDir, ephemeral, persistentVolumeClaim, projected, secret]
+        users: []
+        groups: []
+      caption: hostpid-scc.yaml
+    - kind: try
+      id: create-scc
+      body: "As the administrator, create the SCC from `hostpid-scc.yaml`."
+      accept:
+        - "oc create -f hostpid-scc.yaml"
+        - "oc apply -f hostpid-scc.yaml"
+        - "oc create -f ./hostpid-scc.yaml"
+        - "oc create --filename=hostpid-scc.yaml"
+      hints:
+        - match: "(^| )-n( |$)|--namespace"
+          say: "An SCC is cluster-scoped: it belongs to no project, so `-n` does not apply."
+        - match: "add-scc"
+          say: "The SCC has to exist before it can be granted. Create it from the file first."
+      hint: "`oc create -f` and the file."
+      run: "oc create -f hostpid-scc.yaml"
+      then: "`securitycontextconstraints.security.openshift.io/academy-x-hostpid created`."
+    - kind: show
+      id: compare-custom
+      run: "oc get scc academy-x-hostpid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID,HOSTPATH:.allowHostDirVolumePlugin,RUNASUSER:.runAsUser.type,SELINUX:.seLinuxContext.type,CAPS:.allowedCapabilities"
+      notice: "The new SCC differs from `restricted-v2` in one column, `HOSTPID`, and from `privileged` in almost all of them."
+    - kind: try
+      id: create-sa2
+      body: "As the developer, create the ServiceAccount `process-reader` for the process watcher."
+      accept:
+        - "oc create serviceaccount process-reader"
+        - "oc create sa process-reader"
+        - "oc create serviceaccount process-reader -n academy-lesson-n-privileged-workloads"
+        - "oc create sa process-reader -n academy-lesson-n-privileged-workloads"
+      hints:
+        - match: "node-agent"
+          say: "Reusing node-agent would mix two workloads under one identity. The watcher gets its own: `process-reader`."
+      hint: "`oc create serviceaccount` and the name."
+      run: "oc create serviceaccount process-reader"
+      then: "`serviceaccount/process-reader created`."
+    - kind: teach
+      id: clusterrole-note
+      title: The ClusterRole behind a grant
+      body: |
+        A grant binds the ClusterRole `system:openshift:scc:<name>`. The built-in SCCs come with theirs; a new SCC has
+        none yet. `oc adm policy add-scc-to-user` creates it when it is missing. The command accepts
+        `--dry-run=server`, but in oc 4.21 only `--dry-run=client` is a preview: with `server`, oc creates the
+        ClusterRole and the RoleBinding for real. The administrator's next three commands show the first half of that.
+    - kind: show
+      id: clusterrole-missing
+      run: "oc get clusterrole system:openshift:scc:academy-x-hostpid"
+      notice: "`NotFound`: no ClusterRole for the new SCC yet."
+    - kind: show
+      id: dry-run-server
+      run: "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads --dry-run=server"
+      notice: "`added: \"process-reader\"`: the output reads exactly like a real grant and does not mention a dry run, because none happened. The ServiceAccount has now been granted the SCC."
+    - kind: ask
+      id: guess-dry-run
+      guess: true
+      prompt: "The server-side dry run printed `added`. Does the ClusterRole `system:openshift:scc:academy-x-hostpid` exist now?"
+      choices:
+        - text: No, a dry run stores nothing
+          why: That is what a server-side dry run promises, but `oc adm policy` does not pass it on to the API server. The next step checks.
+        - text: Yes, oc created it before the dry run
+          why: oc makes sure the ClusterRole exists first, and in oc 4.21 neither that step nor the binding is a server-side dry run. The next step shows the ClusterRole.
+      answer: 1
+    - kind: show
+      id: clusterrole-created
+      body: "The administrator checks both halves of the grant: the ClusterRole, then the RoleBinding in the project:"
+      run: "oc get clusterrole system:openshift:scc:academy-x-hostpid && oc get rolebinding system:openshift:scc:academy-x-hostpid -n academy-lesson-n-privileged-workloads -o wide"
+      notice: |
+        The ClusterRole exists now, and the RoleBinding of the same name, created a second ago, names
+        `academy-lesson-n-privileged-workloads/process-reader`: the "dry run" was a grant. With `oc adm policy`, preview with `--dry-run=client -o yaml`, as earlier in this lesson, and check the
+        result with `oc get rolebinding` or `oc adm policy scc-subject-review` before anything depends on it.
+    - kind: try
+      id: grant-custom
+      body: "As the administrator, run the grant without the flag, as you normally would: `academy-x-hostpid` for the ServiceAccount `process-reader` of `academy-lesson-n-privileged-workloads` only. The server \"dry run\" already made it, so this run only confirms it."
+      accept:
+        - "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader --namespace academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader --namespace=academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user academy-x-hostpid --serviceaccount=process-reader -n academy-lesson-n-privileged-workloads"
+        - "oc adm policy add-scc-to-user academy-x-hostpid -n academy-lesson-n-privileged-workloads -z process-reader"
+      hints:
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n` the grant becomes a ClusterRoleBinding. Name the project."
+        - match: "--dry-run"
+          say: "No dry run this time: make the grant itself."
+        - match: "privileged"
+          say: "The point is to grant the narrow SCC, `academy-x-hostpid`."
+      hint: "`oc adm policy add-scc-to-user`, the SCC, `-z` and the ServiceAccount, and the project."
+      run: "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads"
+      then: "`added: \"process-reader\"`, the same line as the server \"dry run\", which had already added it: the command updated a binding that existed."
+    - kind: show
+      id: apply-reader
+      body: "The process watcher asks for the host PID namespace and keeps every restriction of restricted-v2:"
+      run: "oc apply -f process-reader.yaml"
+      notice: "Created."
+    - kind: show
+      id: rollout-reader
+      run: "oc rollout status deploy/process-reader --timeout=120s"
+      notice: "Rolled out."
+    - kind: show
+      id: reader-scc
+      run: "oc get pods -l app=process-reader -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc'"
+      notice: "Admitted by `academy-x-hostpid`."
+    - kind: ask
+      id: guess-reader-procs
+      guess: true
+      prompt: "The process watcher runs under academy-x-hostpid, as a project UID with no capability. How many processes will it see?"
+      choices:
+        - text: Only its own few, because it is not privileged
+          why: Seeing processes depends on the PID namespace, not on privileged mode. The next step counts them.
+        - text: All of the node's processes
+          why: It shares the host's PID namespace, which is the one thing its SCC allows. The next step counts them.
+      answer: 1
+    - kind: show
+      id: reader-procs
+      run: "oc exec deploy/process-reader -- sh -c 'ls -d /proc/[0-9]* | wc -l'"
+      notice: "455 this time (the node keeps starting and ending processes): it sees the node's processes, like the privileged agent."
+    - kind: show
+      id: reader-ident
+      run: "oc exec deploy/process-reader -- sh -c 'id; grep CapEff /proc/self/status'"
+      notice: "`uid=1000840000`, a UID from the project's range, not root, and `CapEff` all zeros: no effective capability."
+    - kind: show
+      id: reader-pid1
+      body: "Can it read the name of the node's process 1, as the privileged agent did?"
+      run: "oc exec deploy/process-reader -- cat /proc/1/comm"
+      notice: |
+        `systemd`: yes. Watching processes was the job, and this SCC allows it. What it cannot do is everything else
+        privileged gave the agent.
+    - kind: ask
+      id: compare-agents
+      prompt: "Compared with the privileged agent, what does the process watcher lack?"
+      choices:
+        - text: Only the view of the node's processes
+          why: It saw the node's processes too; that was the one thing its SCC added.
+        - text: Root, capabilities, host directories and freedom from SELinux
+          why: It runs as a project UID with no capability, no host mount and the confined container type. If it is ever compromised, that is what the attacker gets.
+        - text: Nothing, because hostPID gives the same powers as privileged
+          why: The host PID namespace shows processes. Acting on them, or on the node, needs what privileged adds.
+      answer: 1
+    - kind: show
+      id: cleanup-custom
+      body: "The administrator removes the grant, the SCC and its ClusterRole. Deleting the SCC does not delete the ClusterRole:"
+      run: "oc adm policy remove-scc-from-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads"
+      notice: "`removed: \"process-reader\"`."
+    - kind: show
+      id: delete-scc
+      run: "oc delete scc academy-x-hostpid && oc delete clusterrole system:openshift:scc:academy-x-hostpid"
+      notice: "Both cluster objects are deleted: the SCC and `system:openshift:scc:academy-x-hostpid`."
+    - kind: order
+      id: order-procedure
+      prompt: "Put the administrator's procedure for a workload that needs host access in order."
+      items:
+        - "Read the refusal and the access the workload asks for"
+        - "Remove what the software does not really need"
+        - "Choose the narrowest SCC that admits it, writing one if needed"
+        - "Grant it with -n to one dedicated ServiceAccount"
+        - "Check the pod's openshift.io/scc annotation"
+        - "Remove the grant when the workload is retired"
+      why: "Every later step depends on knowing what is really needed. A narrower SCC is chosen before any grant, and the grant goes to one identity in one project so that it can be checked on the pod and taken back."
+    - kind: reflect
+      id: explain-privileged
+      prompt: "A vendor's monitoring agent's install guide says to grant privileged to the default ServiceAccount of its project. What do you propose instead, and why?"
+      model: |
+        I would give the agent its own ServiceAccount and find out which host access it really uses: if it only reads
+        processes or a few host directories, an SCC that allows only that (a copy of restricted-v2 with the needed
+        setting) is enough; privileged gives root on the node, all capabilities and no SELinux confinement. Whatever
+        SCC is chosen, I would grant it with -n to that ServiceAccount only, in a project that only the platform team
+        administers, because anyone who can exec into the agent's pods or create pods with its ServiceAccount gets the
+        same access. Granting to default would extend it to every pod in the project.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can tell why a host-level workload is refused, explain why a project administrator cannot grant
+        `privileged`, grant it narrowly as an administrator, prove which SCC and which subject admitted a pod and who
+        can reach the node through it, take the access back, and build an SCC that allows only what is needed.
+
+        Next, [SELinux, seccomp and the node underneath](/lesson/n.selinux-node) follows the checks that still apply
+        after a pod is admitted, and reads them on the node itself.
+  sections:
+    - id: privileged-choices
+      title: Host access and the narrowest SCC
+      depth: true
+      body: |
+        | The workload needs | Narrowest built-in SCC on OpenShift 4.21 | Notes |
+        |---|---|---|
+        | a fixed non-zero UID | nonroot-v2 | keeps restricted-v2's other limits |
+        | UID 0 | anyuid | lists no seccomp profile |
+        | host network and ports | hostnetwork-v2 | keeps a project UID |
+        | host directories | hostmount-anyuid-v2 | any UID; SELinux context RunAsAny |
+        | host namespaces and host directories | hostaccess | no privileged container |
+        | a privileged container | privileged | everything else as well |
+
+        Check the installed SCCs (`oc get scc`, `oc describe scc <name>`) rather than this table: the list differs
+        between versions. A custom SCC is a copy of the closest built-in one with one or two changes; never edit the
+        built-in SCCs. For a workload that must keep a specific SCC, the pod-template annotation
+        `openshift.io/required-scc: <name>` pins admission to it: the grant is still needed, and the pod no longer
+        moves to another SCC when someone grants one with a higher priority.
+    - id: common-mistakes
+      title: Common mistakes
+      depth: true
+      body: |
+        - **Granting to `default`.** Every pod in the project that names no ServiceAccount gets the SCC.
+        - **Leaving out `-n`.** The grant becomes a ClusterRoleBinding, for a ServiceAccount of the administrator's
+          current project.
+        - **Granting privileged into a shared project.** Anyone who can exec into its pods, or create pods with the
+          ServiceAccount, reaches the node.
+        - **Removing the grant and leaving the pods.** Running pods keep the SCC they were admitted with.
+        - **Deleting a custom SCC and forgetting its ClusterRole** `system:openshift:scc:<name>`.
+  review:
+    - q: Why can a project administrator not grant privileged to their own ServiceAccount?
+      a: RBAC refuses a binding that grants permissions the requester does not hold (use on the SCC privileged), unless they have bind on the role.
+    - q: How does an administrator grant privileged to one ServiceAccount in one project?
+      a: oc adm policy add-scc-to-user privileged -z <sa> -n <project>, which creates a RoleBinding to system:openshift:scc:privileged in that project.
+    - q: Which annotations show how a pod was admitted?
+      a: openshift.io/scc names the SCC; security.openshift.io/validated-scc-subject-type says whether it was allowed for the user or the ServiceAccount.
+    - q: What does a privileged SCC give a container?
+      a: Privileged mode, all capabilities, host namespaces and ports, any volume including hostPath, any UID, and no SELinux confinement.
+    - q: What should you prefer to privileged, and what does it take?
+      a: An SCC that allows only what the workload needs, usually a copy of restricted-v2 with one change; it is a cluster-wide object, created by an administrator and granted through RBAC.
+  labs: []
+  limits: |
+    OpenShift Local has one node, so the DaemonSet runs one pod. The containers only sleep: they stand for the
+    agents' programs. The privileged pod mounted the node's `/etc` read-only and was deleted within a minute;
+    no command wrote to the node. A grant made through an SCC's own `users` or `groups` fields is not shown, because
+    the 4.21 documentation uses RBAC grants.
+  enterprise: |
+    Platform teams run node agents (monitoring, security scanning, storage and network drivers) in dedicated
+    projects that application teams cannot administer, usually installed by an operator that brings its own SCC.
+    Every privileged or custom SCC grant is an exception with an owner and a review, and the list of who can use
+    privileged is part of regular access reviews.
+  references:
+    - title: 'OpenShift 4.21: Managing security context constraints'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies
+    - title: 'OpenShift 4.21: Using RBAC to define and apply permissions'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac
+    - title: 'OpenShift 4.21: Understanding and managing pod security admission'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-and-managing-pod-security-admission
+    - title: 'Kubernetes: Using RBAC authorization (privilege escalation prevention)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#privilege-escalation-prevention-and-bootstrapping
+    - title: 'oc 4.21 source: add-scc-to-user and remove-scc-from-user'
+      url: https://github.com/openshift/oc/blob/release-4.21/pkg/cli/admin/policy/modify_scc.go
+  commands:
+    - {cmd: "oc create serviceaccount node-agent", as: developer, meaning: "the agent's own identity"}
+    - {cmd: "oc apply -f node-agent.yaml", as: developer, meaning: "a DaemonSet that asks for host access"}
+    - {cmd: "oc rollout status ds/node-agent --timeout=20s", as: developer, expect: fail, meaning: "no pod becomes available"}
+    - {cmd: "oc get ds node-agent", as: developer, meaning: "one pod desired, none current"}
+    - {cmd: "oc describe ds node-agent", as: developer, meaning: "the FailedCreate event"}
+    - {cmd: "oc adm policy scc-subject-review -f node-agent.yaml", as: developer, meaning: "no SCC the developer or node-agent may use admits it"}
+    - {cmd: "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads", as: developer, expect: fail, meaning: "a project administrator cannot grant what they do not hold"}
+    - {cmd: "oc describe scc privileged", as: admin, meaning: "what privileged allows"}
+    - {cmd: "oc adm policy add-scc-to-user privileged -z node-agent --dry-run=client -o yaml", as: admin, meaning: "without -n: a ClusterRoleBinding for a ServiceAccount of the administrator's project"}
+    - {cmd: "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads", as: admin, meaning: "privileged for one ServiceAccount in one project"}
+    - {cmd: "oc get rolebinding system:openshift:scc:privileged -n academy-lesson-n-privileged-workloads -o wide", as: admin, meaning: "the RoleBinding the grant created"}
+    - {cmd: "oc rollout restart ds/node-agent", as: developer, meaning: "make the controller try again now"}
+    - {cmd: "oc rollout status ds/node-agent --timeout=120s", as: developer, meaning: "admitted and running"}
+    - {cmd: "oc get pods -l app=node-agent -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,VALIDATED-FOR:.metadata.annotations.security\\.openshift\\.io/validated-scc-subject-type'", as: developer, meaning: "admitted by privileged, for the ServiceAccount"}
+    - {cmd: "oc exec ds/node-agent -- cat /proc/1/comm", as: developer, meaning: "process 1 is the node's systemd"}
+    - {cmd: "oc exec ds/node-agent -- sh -c 'ls -d /proc/[0-9]* | wc -l'", as: developer, meaning: "the node's processes"}
+    - {cmd: "oc exec ds/node-agent -- head -n 1 /host/etc/passwd", as: developer, meaning: "the node's /etc, read through the hostPath mount"}
+    - {cmd: "oc exec ds/node-agent -- grep ' /host/etc ' /proc/self/mounts", as: developer, meaning: "the host mount is read-only"}
+    - {cmd: "oc create -f probe-pod.yaml", as: developer, expect: fail, meaning: "the same spec as the default ServiceAccount is refused"}
+    - {cmd: "oc adm policy scc-subject-review -f node-agent.yaml; sleep 30; echo \"== 30 s later\"; oc adm policy scc-subject-review -f node-agent.yaml; echo \"== for the ServiceAccount itself (-z)\"; oc adm policy scc-subject-review -z node-agent -f node-agent.yaml", as: developer, meaning: "the review after the grant: as developer, after a pause, and for the ServiceAccount"}
+    - {cmd: "oc adm policy remove-scc-from-user privileged -z node-agent -n academy-lesson-n-privileged-workloads", as: admin, meaning: "the grant is removed"}
+    - {cmd: "oc delete ds node-agent", as: developer, meaning: "the privileged pod is deleted"}
+    - {cmd: "oc create -f hostpid-scc.yaml", as: admin, meaning: "a custom SCC: restricted-v2 plus the host PID namespace"}
+    - {cmd: "oc get scc academy-x-hostpid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID,HOSTPATH:.allowHostDirVolumePlugin,RUNASUSER:.runAsUser.type,SELINUX:.seLinuxContext.type,CAPS:.allowedCapabilities", as: admin, meaning: "the custom SCC beside restricted-v2 and privileged"}
+    - {cmd: "oc create serviceaccount process-reader", as: developer, meaning: "the process watcher's identity"}
+    - {cmd: "oc get clusterrole system:openshift:scc:academy-x-hostpid", as: admin, expect: fail, meaning: "no ClusterRole for the new SCC yet"}
+    - {cmd: "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads --dry-run=server", as: admin, meaning: "presented as a server-side dry run; oc adm policy honours only --dry-run=client, so this granted for real"}
+    - {cmd: "oc get clusterrole system:openshift:scc:academy-x-hostpid && oc get rolebinding system:openshift:scc:academy-x-hostpid -n academy-lesson-n-privileged-workloads -o wide", as: admin, meaning: "the server \"dry run\" created the ClusterRole and the RoleBinding"}
+    - {cmd: "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads", as: admin, meaning: "the custom SCC for one ServiceAccount"}
+    - {cmd: "oc apply -f process-reader.yaml", as: developer, meaning: "a Deployment that asks only for the host PID namespace"}
+    - {cmd: "oc rollout status deploy/process-reader --timeout=120s", as: developer, meaning: "admitted"}
+    - {cmd: "oc get pods -l app=process-reader -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc'", as: developer, meaning: "admitted by the custom SCC"}
+    - {cmd: "oc exec deploy/process-reader -- sh -c 'ls -d /proc/[0-9]* | wc -l'", as: developer, meaning: "it sees the node's processes"}
+    - {cmd: "oc exec deploy/process-reader -- sh -c 'id; grep CapEff /proc/self/status'", as: developer, meaning: "a project UID and no capability"}
+    - {cmd: "oc exec deploy/process-reader -- cat /proc/1/comm", as: developer, expect: any, meaning: "whether a confined container may read the node's process 1"}
+    - {cmd: "oc adm policy remove-scc-from-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads", as: admin, meaning: "the grant is removed"}
+    - {cmd: "oc delete scc academy-x-hostpid && oc delete clusterrole system:openshift:scc:academy-x-hostpid", as: admin, meaning: "the SCC and its ClusterRole are deleted"}
+  files:
+    node-agent.yaml: |
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: node-agent
+        labels: {app: node-agent}
+      spec:
+        selector:
+          matchLabels: {app: node-agent}
+        template:
+          metadata:
+            labels: {app: node-agent}
+          spec:
+            serviceAccountName: node-agent
+            hostPID: true
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: agent
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                privileged: true
+              volumeMounts:
+              - {name: host-etc, mountPath: /host/etc, readOnly: true}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+            volumes:
+            - name: host-etc
+              hostPath: {path: /etc, type: Directory}
+    probe-pod.yaml: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: agent-probe
+      spec:
+        serviceAccountName: default
+        hostPID: true
+        terminationGracePeriodSeconds: 2
+        containers:
+        - name: agent
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+          - {name: host-etc, mountPath: /host/etc, readOnly: true}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+        volumes:
+        - name: host-etc
+          hostPath: {path: /etc, type: Directory}
+    hostpid-scc.yaml: |
+      apiVersion: security.openshift.io/v1
+      kind: SecurityContextConstraints
+      metadata:
+        name: academy-x-hostpid
+        annotations:
+          kubernetes.io/description: "restricted-v2 plus the host PID namespace, for a process-watching agent"
+      allowHostPID: true
+      allowPrivilegedContainer: false
+      allowPrivilegeEscalation: false
+      allowHostDirVolumePlugin: false
+      allowHostIPC: false
+      allowHostNetwork: false
+      allowHostPorts: false
+      readOnlyRootFilesystem: false
+      requiredDropCapabilities: [ALL]
+      allowedCapabilities: [NET_BIND_SERVICE]
+      runAsUser: {type: MustRunAsRange}
+      seLinuxContext: {type: MustRunAs}
+      fsGroup: {type: MustRunAs}
+      supplementalGroups: {type: RunAsAny}
+      seccompProfiles: [runtime/default]
+      volumes: [configMap, csi, downwardAPI, emptyDir, ephemeral, persistentVolumeClaim, projected, secret]
+      users: []
+      groups: []
+    process-reader.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: process-reader
+        labels: {app: process-reader}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: process-reader}
+        template:
+          metadata:
+            labels: {app: process-reader}
+          spec:
+            serviceAccountName: process-reader
+            hostPID: true
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsNonRoot: true
+            containers:
+            - name: reader
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+  experiment:
+    id: X-SCC-02
+    objective: "Run a privileged node agent granted narrowly (privileged for one ServiceAccount in one project, which the developer cannot grant), prove what it can reach, take it back, then replace it with a custom SCC that adds only the host PID namespace to restricted-v2, and leave no SCC, ClusterRole or binding behind."
+    changes:
+      - "SecurityContextConstraints academy-x-hostpid (cluster-scoped; created, deleted)"
+      - "ClusterRole system:openshift:scc:academy-x-hostpid (cluster-scoped; created by oc adm policy add-scc-to-user, during its server-side dry run, deleted)"
+      - "RoleBindings system:openshift:scc:privileged and system:openshift:scc:academy-x-hostpid in project academy-lesson-n-privileged-workloads, each naming one ServiceAccount (created, removed)"
+      - "One privileged pod with the host PID namespace and the node's /etc mounted read-only, on node crc, for about a minute (DaemonSet node-agent, deleted)"
+      - "Project academy-lesson-n-privileged-workloads, the developer's temporary lesson project, with ServiceAccounts node-agent and process-reader and the Deployment process-reader (deleted by the rollback)"
+    preflight:
+      - cmd: |-
+          found=$(oc get scc academy-x-hostpid --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get clusterrolebinding system:openshift:scc:privileged --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc get clusterrole system:openshift:scc:privileged -o name"}
+      - cmd: |-
+          ans=$(oc auth can-i use securitycontextconstraints/privileged --as=system:serviceaccount:academy-lesson-n-privileged-workloads:node-agent -n academy-lesson-n-privileged-workloads 2>/dev/null)
+          test "$ans" = no
+    snapshot:
+      - "oc get scc -o json | jq -S '[.items[] | {name:.metadata.name,body:del(.metadata,.status)}] | sort_by(.name)'"
+      - "oc get clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found -o name"
+      - "oc get clusterrolebindings -o json | jq -S '[.items[] | {name:.metadata.name,roleRef,subjects}] | sort_by(.name)'"
+      - "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable}'"
+      - "oc get clusterrole system:openshift:scc:privileged -o jsonpath='{.rules}'"
+    rollback:
+      - "oc delete rolebinding system:openshift:scc:privileged system:openshift:scc:academy-x-hostpid -n academy-lesson-n-privileged-workloads --ignore-not-found"
+      - "oc delete project academy-lesson-n-privileged-workloads --ignore-not-found --wait=false"
+      - "oc delete scc academy-x-hostpid --ignore-not-found"
+      - "oc delete clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          found=$(oc get namespace academy-lesson-n-privileged-workloads --ignore-not-found -o name) || exit 1
+          test -z "$found" && exit 0
+          sleep 5
+        done
+        exit 1
+    verify:
+      - cmd: |-
+          found=$(oc get scc academy-x-hostpid --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get namespace academy-lesson-n-privileged-workloads --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc wait node/crc --for=condition=Ready --timeout=60s"}

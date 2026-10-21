@@ -1,0 +1,690 @@
+# Kubernetes path (start track), written as teaching flows. Commands are recorded with kubectl against a cluster,
+# as the ordinary learner identity, in a temporary namespace (record_on: cluster).
+- id: a.what-kubernetes-does
+  title: "From containers to Kubernetes"
+  subtitle: "Pods, Deployments, and a cluster that keeps what you asked for"
+  module: f0-prereqs
+  mode: REAL_LAB
+  minutes: 20
+  level: 1
+  supports: "Kubernetes 1.34 with kubectl 1.34. Recorded on OpenShift Local 4.21 as an ordinary user, in a temporary namespace; every command shown is plain Kubernetes and works the same on any conformant cluster."
+  concepts: [k8s.architecture, k8s.controllers, k8s.workloads, k8s.deployment]
+  prerequisites: [ct.podman-run]
+  diagram: control-loop
+  record_on: cluster
+  objective: |
+    Explain what Kubernetes adds to running containers, run a pod and a Deployment with kubectl, and predict what
+    happens when a pod disappears in each case.
+  flow:
+    - kind: ask
+      id: recall-podman
+      prompt: "A look back. You started a web server with `podman run -d`, and its process crashes. By default, what does Podman do?"
+      recalls: ct.podman-run
+      choices:
+        - text: "Nothing: the container stays exited"
+          why: "Podman's default restart policy is `no`. Something has to notice and start it again: you, or a restart policy you set."
+        - text: "It restarts the container right away"
+          why: "Only with a restart policy such as `--restart=on-failure`. The default is to leave an exited container as it is."
+        - text: "It starts the container on another machine"
+          why: "Podman manages containers on the machine it runs on. It has no idea other machines exist."
+      answer: 0
+    - kind: teach
+      id: one-machine
+      title: "What one machine cannot do"
+      body: |
+        With Podman you start containers on one machine, and that machine is the limit. With the default
+        restart policy, a container that crashes stays stopped until someone notices; a restart policy can
+        restart it on that machine, but cannot move it elsewhere. If the machine itself fails, its applications
+        become unavailable.
+        If you need three copies to share the load, you start three, on machines you choose, and keep track of
+        them yourself.
+
+        Now picture a company with hundreds of applications, each needing a few copies, spread over dozens of
+        machines. Someone, or something, has to decide where each copy runs, notice when one stops, start a
+        replacement somewhere sensible, and do it at three in the morning without being asked.
+
+        **Kubernetes** is that something. It runs on a group of machines, called a **cluster**, and does that
+        watching and replacing for you.
+    - kind: teach
+      id: declare
+      title: "You describe the result, Kubernetes keeps it true"
+      body: |
+        With Podman you give instructions: run this container, now. With Kubernetes you describe a result:
+        "two copies of this web server should be running". Kubernetes stores that description, compares it
+        with what is actually running, and acts whenever the two differ. It keeps doing this forever.
+
+        The description is called the **desired state**. The programs that compare and act are
+        **controllers**. Most of what Kubernetes does comes down to this loop: look, compare, correct.
+
+        A useful picture is a thermostat: you set 21 °C, and it switches the heating on and off to keep it
+        there. Where the picture stops working: a thermostat controls one thing, while a cluster runs many
+        controllers at once, each looking after its own kind of object.
+    - kind: ask
+      id: which-desired
+      prompt: "A Deployment asks for two replicas. One pod disappears and `kubectl get deployments` shows `READY 1/2`. Which number is the desired state?"
+      choices:
+        - text: "2: the stored target; 1 is what exists now"
+          why: "The desired state is the stored target, and it stays at 2 when a pod disappears. The controller compares it with the observed 1 and creates a pod to close the gap."
+        - text: "1 is stored now, because a pod was lost"
+          why: "Losing a pod changes what is observed, not what was requested. If the stored number fell to 1 each time, nothing would ever be replaced."
+        - text: "Both are stored, and the controller picks one"
+          why: "Only the target is stored as the description. The count of ready pods is observed from the cluster, and the controller's job is to make it equal the target."
+      answer: 0
+    - kind: teach
+      id: kubectl
+      title: "Talking to the cluster: kubectl"
+      body: |
+        You never log in to the cluster's machines to start things. You send your requests to the cluster's
+        **API** (the single entry point that stores and serves every description), and the standard tool for
+        that is `kubectl`.
+
+        Its commands read almost like sentences: `kubectl get pods` means "show me the pods",
+        `kubectl delete pod web` means "delete the pod called web". The common pattern is
+        `kubectl <verb> <kind> [name]`; creating objects and reading logs have their own forms.
+
+        Everything below was recorded with `kubectl` on a small test cluster, as an ordinary user, in a
+        **namespace** made for this lesson: a named area of the cluster that holds objects, like a folder. Despite
+        the name, it is not the kernel namespace of the container lessons: it separates names and permissions, not
+        processes. For this recording, `oc` (the OpenShift client, introduced
+        later) was invoked in its `kubectl` mode: the output is what `kubectl` prints.
+    - kind: teach
+      id: own-cluster
+      title: "To repeat the commands"
+      body: |
+        You need a cluster where you may create pods (the setup guide lists free options), and a namespace to work
+        in. On kind or minikube, the `default` namespace works. On OpenShift, an ordinary user may not create pods
+        in `default`, so first create a project, OpenShift's form of a namespace, with `oc new-project <name>`
+        (projects are explained in [From kubectl to oc](/lesson/k.kubectl-to-oc)). It also becomes the namespace
+        that `kubectl` uses.
+    - kind: teach
+      id: pod
+      title: "The smallest thing Kubernetes runs: a pod"
+      body: |
+        Kubernetes does not run containers on their own. It runs **pods**. A pod is one container, or a few
+        that belong tightly together, which Kubernetes starts and stops as a unit on one machine. For now,
+        think "a pod is one container, with a little wrapping".
+
+        `kubectl run` starts a single pod, much as `podman run` starts a single container. This one runs the
+        same kind of Apache web server image you could run with Podman:
+    - kind: show
+      id: run-pod
+      run: "kubectl run web --image=registry.access.redhat.com/ubi9/httpd-24:latest"
+      notice: "The cluster accepted the request and stored it. Starting the pod takes a few seconds: the image may need to be downloaded first."
+    - kind: try
+      id: try-get-pods
+      body: "Ask the cluster to list the pods."
+      accept: ["kubectl get pods", "kubectl get pod", "kubectl get po"]
+      hints:
+        - match: "^kubectl pods"
+          say: "`kubectl` needs a verb first: what you want to do. To list things, the verb is `get`."
+        - match: "^kubectl get pods? web$"
+          say: "That works too, but shows only the pod called web. The task is the whole list: leave out the name."
+        - match: "^kubectl list"
+          say: "Close, but `kubectl` uses the verb `get` to list things: `kubectl get <kind>`."
+        - match: "^(podman|docker) "
+          say: "`podman ps` lists containers on this machine. Pods live in the cluster, and the cluster is reached with `kubectl`."
+      hint: "`kubectl`, the verb `get`, then the kind of thing: pods."
+      run: kubectl get pods
+      then: |
+        The recording waited until the pod was ready before running this command. If you run it right after
+        `kubectl run`, you may see `Pending` or `ContainerCreating` first: that is startup in progress, not a
+        failure. One pod, `web`, with `1/1` containers ready, in the state `Running`. `RESTARTS` counts how many times
+        its container had to be restarted, and `AGE` is how long ago the pod was created.
+    - kind: ask
+      id: guess-delete-pod
+      guess: true
+      prompt: "You delete the pod `web` with `kubectl delete pod web`. What will `kubectl get pods` show next?"
+      choices:
+        - text: "No pods"
+          why: "Watch what the next step shows, and why."
+        - text: "A new pod `web`, started again"
+          why: "That is what many people expect from Kubernetes. The next step shows what actually happens to a pod you started this way."
+        - text: "The same pod, stopped"
+          why: "Watch what the next step shows: a deleted pod is not kept in a stopped state."
+      answer: 0
+    - kind: show
+      id: delete-pod
+      run: "kubectl delete pod web; kubectl get pods"
+      notice: |
+        The pod is gone, and nothing replaces it. Deleting the pod removed the object that told Kubernetes
+        to run this container. This is different from a crash: a standalone pod still tells Kubernetes to
+        restart its container if the container fails, so a crash inside a live pod is handled. But no
+        controller owns this pod, so after the pod itself is deleted, nothing creates another. A Deployment
+        is what keeps a requested number of pods present.
+
+        To get Kubernetes' real benefit, you describe the result you want to keep, not a single pod.
+    - kind: ask
+      id: crash-vs-delete
+      prompt: "The web server process inside the pod from `kubectl run` crashes, and the pod object still exists. By default, what does Kubernetes do?"
+      choices:
+        - text: "It restarts the container in the same pod"
+          why: "A pod's default restart policy is `Always`, so the kubelet (the agent on each machine that starts containers, met in the lesson on the cluster's parts) restarts a failed container while the pod exists. Deleting the pod is what removes that instruction."
+        - text: "It leaves the container stopped, like Podman"
+          why: "That is Podman's default (`no`). A pod from `kubectl run` has restart policy `Always`, so the container is started again."
+        - text: "It deletes the pod and creates a new one"
+          why: "Replacing deleted pods is a controller's job, and a standalone pod has none. A container failure inside a live pod is handled by restarting the container."
+      answer: 0
+    - kind: teach
+      id: deployment
+      title: "Describing what should keep running: a Deployment"
+      body: |
+        A **Deployment** is that description: "keep N pods running from this image". A controller reads it
+        and creates the pods. If one disappears, the controller sees N−1, which is not N, and creates a new
+        one.
+
+        `kubectl create deployment` creates one. `--replicas=2` asks for two copies:
+    - kind: show
+      id: create-deploy
+      run: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2"
+    - kind: try
+      id: get-deploy
+      body: "List the deployments, the same way you listed pods."
+      accept: ["kubectl get deployments", "kubectl get deployment", "kubectl get deploy"]
+      hints:
+        - match: "^kubectl get pods?$"
+          say: "That lists pods. The pattern is `kubectl get <kind>`, and the kind here is deployments."
+        - match: "^kubectl get deployments? web$"
+          say: "That works too, but shows only `web`. Leave out the name to list them all."
+        - match: "^kubectl deployments?"
+          say: "The verb comes first: `kubectl get`, then the kind."
+      hint: "Same as for pods, with a different kind: `kubectl get` followed by deployments."
+      run: kubectl get deployments
+      then: "The recording waited for the rollout to finish first; straight after creating a Deployment you may see `READY 0/2` or `1/2` while the pods start. Here it shows `READY 2/2`: two pods wanted, two ready. `UP-TO-DATE` and `AVAILABLE` matter during updates, a later lesson's subject."
+    - kind: show
+      id: get-labels
+      body: |
+        Now list the pods. `--show-labels` adds the **labels**: short `key=value` tags attached to objects.
+        Kubernetes uses them to find which pods belong to what:
+      run: kubectl get pods --show-labels
+      highlight: ["app=web"]
+      notice: |
+        Two pods. Their names start with the Deployment's name and end with random characters, because the
+        controller created them and needed unique names. Both carry the label `app=web`, which
+        `kubectl create deployment` added so that the Deployment can recognise its own pods. The second label,
+        `pod-template-hash`, is one Kubernetes adds for its own bookkeeping; you can ignore it.
+    - kind: ask
+      id: guess-delete-both
+      guess: true
+      prompt: "Now you delete both pods at once, selecting them by their label: `kubectl delete pods -l app=web`. What will `kubectl get pods` show right after?"
+      choices:
+        - text: "No pods, as before"
+          why: "That is what happened to the pod from `kubectl run`. Something is different now: watch the next step."
+        - text: "Two new pods, with new names"
+          why: "See the next step for the reason."
+        - text: "The same two pods, restarted"
+          why: "Deleted pods are not restarted. The question is whether anything creates new ones."
+      answer: 1
+    - kind: show
+      id: delete-both
+      run: "kubectl delete pods -l app=web; kubectl get pods"
+      notice: |
+        Both pods were deleted, and two new pods are already there, with names you have not seen before.
+        They are a few seconds old and still starting (`ContainerCreating`, `0/1` ready). Nobody typed a
+        command to create them: the controller behind the Deployment (through its ReplicaSet, see "Other kinds
+        you will meet") saw zero pods where two were wanted, and closed the gap.
+
+        This is the core idea of Kubernetes, and the rest of the course builds on it. Pods are disposable:
+        they are replaced, not repaired. What lasts is the description.
+    - kind: ask
+      id: where-change
+      prompt: "The web server must now run 4 copies instead of 2. Where do you make the change so that it lasts?"
+      choices:
+        - text: "In the Deployment: set its replicas to 4"
+          why: "The Deployment holds the desired state. Change it, and its controller creates the two extra pods and keeps four from then on."
+        - text: "Start two more pods with `kubectl run`"
+          why: "Those pods would not belong to the Deployment. Nothing would replace them if they disappeared, and the Deployment would still aim for 2."
+        - text: "Delete the two pods so that four come back"
+          why: "The controller replaces pods to match the Deployment's number, which is still 2. Deleting pods never changes the target."
+      answer: 0
+    - kind: teach
+      id: scale
+      body: |
+        The command for that is `kubectl scale deployment web --replicas=4`. It changes the number stored in
+        the Deployment, and the controller does the rest. You could also edit the Deployment's description
+        directly; the next lessons show what that description looks like as a file.
+    - kind: explore
+      id: diagram
+      diagram: control-loop
+      body: "Behind `kubectl create deployment`, several parts of the cluster each did one small job: the API server stored the Deployment, one controller created a ReplicaSet, another created the pods, the scheduler chose a node for each pod, and the kubelet on that node started the containers. Select each part to read what it does. You do not need to remember the names yet: [What a cluster is made of](/lesson/b.architecture) follows the same path step by step."
+    - kind: teach
+      id: openshift
+      title: "Where the platform fits"
+      body: |
+        The cluster these recordings come from is OpenShift Local, a one-machine OpenShift cluster for
+        learning. **OpenShift is Kubernetes with more built on top**: everything in this lesson is plain
+        Kubernetes, and the same `kubectl` commands give the same results on any Kubernetes cluster.
+
+        OpenShift also has its own command-line tool, `oc`, which does everything `kubectl` does plus
+        OpenShift's own features. You will meet it, and see exactly how it relates to `kubectl`, in
+        [From kubectl to oc](/lesson/k.kubectl-to-oc), later in this track. Until then, this course uses `kubectl`.
+    - kind: reflect
+      id: explain-difference
+      prompt: "Explain to a colleague who knows Podman why a pod from `kubectl run` stayed deleted, while the pods of a Deployment came back."
+      model: |
+        `kubectl run` created one pod, once, with no controller behind it. Its container would be restarted after a
+        crash, but when the pod itself is deleted, nothing describes that a pod should exist, so it is gone. A Deployment stores a desired state, "two pods
+        from this image", and a controller keeps comparing that with what exists. When the pods disappear, it
+        sees zero instead of two and creates new ones.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can say what Kubernetes adds to running containers: it keeps a described result true across
+        failures. You have run a pod and a Deployment with `kubectl`, listed them, read their state, and seen a
+        controller replace deleted pods.
+
+        Next, you look at what these descriptions really are: objects stored by the API, written as YAML,
+        which is how you will create and change almost everything from here on.
+  sections:
+    - id: more-objects
+      title: "Other kinds you will meet"
+      depth: true
+      body: |
+        A Deployment does not create pods directly: it creates a **ReplicaSet**, which creates the pods (you
+        can see it with `kubectl get replicasets`). The split matters during updates, when the Deployment keeps
+        one ReplicaSet per version.
+
+        Other controllers keep other promises: a **DaemonSet** keeps one pod on every machine, a **Job** runs
+        pods until a task finishes, a **CronJob** creates a Job on a schedule, and a **StatefulSet** gives
+        each pod a stable name and its own storage. A **Service** gives a changing set of pods one stable
+        address. Each has its own lesson.
+
+        Adding copies under load is not automatic: Kubernetes keeps the number you declare, and changes it
+        only when you configure an autoscaler.
+
+        Why pods, and not containers: the containers of one pod always run on the same node, share one network
+        namespace (one IP address, one `localhost`) and can share volumes, like the containers of a Podman pod.
+        More copies of an application are more pods, never more containers in one pod.
+
+        Older tutorials show `kubectl run` creating a Deployment. Since Kubernetes 1.18 it creates only a pod;
+        Deployments come from `kubectl create deployment` or from a manifest.
+  review:
+    - q: "What is a pod?"
+      a: "The smallest thing Kubernetes runs: one container, or a few that belong together, started and stopped as a unit on one machine."
+    - q: "Why did the Deployment's pods come back after being deleted?"
+      a: "The Deployment stores a desired state (two pods). Its controller compared that with what existed (zero) and created new pods."
+    - q: "Where do you change the number of copies so that it lasts?"
+      a: "In the Deployment (its replicas), for example with `kubectl scale deployment web --replicas=4`."
+    - q: "What tool sends requests to a Kubernetes cluster's API?"
+      a: "`kubectl`, as in `kubectl get pods` or `kubectl delete pod web`."
+  commands:
+    - cmd: "kubectl run web --image=registry.access.redhat.com/ubi9/httpd-24:latest"
+      meaning: "one pod, created once"
+    - cmd: "kubectl wait --for=condition=Ready pod/web --timeout=180s"
+      meaning: "wait until the pod is ready (not shown in the lesson)"
+    - cmd: kubectl get pods
+      meaning: "the pod web, running"
+    - cmd: "kubectl delete pod web; kubectl get pods"
+      meaning: "the pod is deleted and nothing replaces it"
+    - cmd: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2"
+      meaning: "a Deployment that keeps two pods"
+    - cmd: "kubectl rollout status deployment/web --timeout=180s"
+      meaning: "wait until both pods are ready (not shown in the lesson)"
+    - cmd: kubectl get deployments
+      meaning: "READY 2/2"
+    - cmd: kubectl get pods --show-labels
+      meaning: "two pods created by the Deployment, labelled app=web"
+    - cmd: "kubectl delete pods -l app=web; kubectl get pods"
+      meaning: "both pods deleted; the controller behind the Deployment (through its ReplicaSet) has already created two new ones"
+  references:
+    - {title: "Kubernetes documentation: Overview", url: "https://kubernetes.io/docs/concepts/overview/"}
+    - {title: "Kubernetes documentation: Pods", url: "https://kubernetes.io/docs/concepts/workloads/pods/"}
+    - {title: "Kubernetes documentation: Deployments", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"}
+    - {title: "Kubernetes documentation: Controllers", url: "https://kubernetes.io/docs/concepts/architecture/controller/"}
+    - {title: "kubectl reference: kubectl run", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_run/"}
+    - {title: "kubectl reference: kubectl create deployment", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_deployment/"}
+    - {title: "Podman documentation: podman run --restart", url: "https://docs.podman.io/en/latest/markdown/podman-run.1.html"}
+    - {title: "Kubernetes documentation: Namespaces", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+    - {title: "Kubernetes 1.18 changelog: kubectl run only creates pods", url: "https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.18.md"}
+
+- id: k.kubectl-to-oc
+  title: "From kubectl to oc"
+  subtitle: "What stays the same, what the platform adds, and how oc relates to kubectl"
+  module: f3-openshift
+  mode: REAL_LAB
+  minutes: 25
+  level: 1
+  supports: "OpenShift 4.21 (Kubernetes 1.34), oc 4.21 and kubectl 1.34. Recorded on OpenShift Local as an ordinary user, in a temporary project."
+  concepts: [ocp.projects, net.routes, k8s.architecture]
+  prerequisites: [a.what-kubernetes-does]
+  record_on: cluster
+  objective: |
+    Say what OpenShift adds to Kubernetes and what stays the same, use oc and kubectl side by side and know
+    when they are interchangeable, and explain the difference between a namespace and a project, and between an
+    Ingress and a Route.
+  flow:
+    - kind: ask
+      id: recall-pattern
+      prompt: "A look back. Which command lists the Deployments in your namespace?"
+      recalls: a.what-kubernetes-does
+      choices:
+        - text: "`kubectl get deployments`"
+          why: "`kubectl <verb> <kind>`: the verb `get` lists, the kind is deployments."
+        - text: "`kubectl deployments list`"
+          why: "The verb comes first, and listing is `get`: `kubectl get deployments`."
+        - text: "`kubectl describe`"
+          why: "`describe` prints a detailed report on objects, and needs to know which kind. Listing is `get`."
+      answer: 0
+    - kind: teach
+      id: what-is-openshift
+      title: "Kubernetes, plus a platform"
+      body: |
+        Everything you learned about Kubernetes stays true on OpenShift. OpenShift is a **Kubernetes
+        distribution**: underneath, it runs the same Kubernetes, with the same API and the same objects. A
+        Pod is a Pod and a Deployment is a Deployment, on OpenShift as on any other cluster.
+
+        What OpenShift adds falls into three groups:
+
+        - **More kinds of objects** in the API, such as Routes (expose an application outside the cluster),
+          Projects, ImageStreams and Builds.
+        - **Built-in components** that a plain cluster leaves you to choose and install: a web console, an
+          image registry, a router for incoming traffic, monitoring, and user login.
+        - **Stricter defaults**, especially for security: for example, containers run as an ordinary user, not
+          as root, unless an administrator allows it.
+
+        This lesson shows most of these differences on a real cluster, next to their Kubernetes counterparts. The
+        default container user is described here, and shown in later lessons.
+    - kind: teach
+      id: two-clients
+      title: "Two tools, one API"
+      body: |
+        OpenShift ships its own command-line tool, `oc`. It contains all of `kubectl`'s commands, and adds
+        commands for OpenShift's features. Both read the same saved connection to the cluster (the cluster's
+        address, your user and a default namespace, kept in a file called a kubeconfig), and both send requests
+        to the same API. So for anything that is plain Kubernetes, they are interchangeable.
+
+        To repeat the commands, you need a current project to work in: on OpenShift, create one with
+        `oc new-project <name>` (projects are explained below); both tools then use it. The recording ran in a
+        temporary project made for it. Here is the same question, asked both ways, with the same connection:
+    - kind: show
+      id: setup
+      run: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest >/dev/null; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get pods"
+      notice: "A Deployment called `web`, created with `kubectl` as in the Kubernetes lessons, and its pod, listed with `kubectl`."
+    - kind: ask
+      id: guess-same
+      guess: true
+      prompt: "Now the same list with `oc get pods`. What do you expect?"
+      choices:
+        - text: "The same table, same pod"
+          why: "See the next step."
+        - text: "A different, OpenShift-style table"
+          why: "A reasonable guess for a different tool. The next step shows the result."
+        - text: "Nothing: the pod was created with kubectl"
+          why: "Objects live in the cluster, not in the tool that created them. The next step shows what `oc` sees."
+      answer: 0
+    - kind: show
+      id: oc-pods
+      run: oc get pods
+      notice: |
+        The same pod, in the same table. `oc get`, `oc describe`, `oc logs`, `oc apply`, `oc delete` and the
+        other Kubernetes verbs are the same commands as in `kubectl`, with the same options. Objects belong to
+        the cluster, so it does not matter which of the two tools created them.
+    - kind: show
+      id: field-kubectl
+      body: |
+        One default differs, and it matters when you write manifests. The lesson's file `broken-field.yaml` is the
+        one from [Objects, YAML and the API](/lesson/f0.objects-api): a Deployment with `replica` instead of
+        `replicas`. `--dry-run=server` asks the API to check the object without saving it. First with `kubectl`,
+        which is expected to refuse it, as in that lesson:
+      run: "kubectl apply -f broken-field.yaml --dry-run=server"
+      notice: "Refused: `kubectl` asks the API for strict checking (`--validate=strict`), and the API names the unknown field."
+    - kind: show
+      id: field-oc
+      body: "Now the same file with `oc`. The second command prints the number of replicas in the object the API returned:"
+      run: "oc apply -f broken-field.yaml --dry-run=server; oc apply -f broken-field.yaml --dry-run=server -o jsonpath='{.spec.replicas}{\"\\n\"}'"
+      notice: |
+        No error: `oc` accepts the file. `oc apply` and `oc create` do not ask the API to refuse unknown fields
+        (their `--validate` default is `ignore`), so the API dropped `replica: 2` silently, and the Deployment got
+        the default of 1 replica. Add `--validate=strict` to `oc apply` when you want the check. Nothing was saved:
+        `--dry-run=server` created no Deployment `broken`.
+    - kind: teach
+      id: identity
+      body: |
+        The differences appear where OpenShift adds something. Asking "who am I?" is one: Kubernetes has
+        `kubectl auth whoami`, and `oc` has a shorter `oc whoami`, which OpenShift had long before Kubernetes
+        added its own.
+    - kind: try
+      id: whoami
+      body: "Ask the cluster who you are, with `oc`'s short command."
+      accept: ["oc whoami"]
+      hints:
+        - match: "^kubectl whoami"
+          say: "`kubectl` has no `whoami` of its own: its version is `kubectl auth whoami`. The short one belongs to `oc`."
+        - match: "^oc auth whoami"
+          say: "That works too, since `oc` contains `kubectl`'s commands. The task asks for the shorter `oc` one."
+        - match: "^whoami$"
+          say: "`whoami` alone is the Linux command: it names your user on this machine, not on the cluster."
+      hint: "`oc`, then the word that asks \"who am I\"."
+      run: "kubectl auth whoami; oc whoami"
+      then: |
+        For comparison, the recording ran `kubectl auth whoami` first, then `oc whoami`: the table is the first
+        command's output, and the last line, `developer`, is what `oc whoami` prints.
+        The same user either way: `developer`, an ordinary user on this test cluster. `kubectl auth whoami`
+        prints a table with more detail, such as the groups the user belongs to; `oc whoami` prints only the
+        name. `oc` adds conveniences like this one; it does not change what you are allowed to do.
+    - kind: teach
+      id: projects
+      title: "Namespaces and projects"
+      body: |
+        In Kubernetes, a **namespace** is a named area that holds most objects; administrators create them
+        with `kubectl create namespace`. OpenShift keeps namespaces, and adds the **project**: a namespace
+        with some extra information (a display name, a description, who requested it), which ordinary users
+        can request for themselves.
+
+        On a typical OpenShift cluster, ordinary users are not allowed to create namespaces directly, only
+        to request projects. Here is what the `developer` user gets for each:
+    - kind: show
+      id: ns-denied
+      run: "kubectl create namespace academy-bridge-demo"
+      notice: "Refused: this user may not create namespaces. That is not a `kubectl` limitation; the cluster's permissions say no."
+    - kind: show
+      id: new-project
+      run: "oc new-project academy-bridge-demo --skip-config-write"
+      notice: |
+        `oc new-project` sends a **project request**, which this cluster allows ordinary users to make (an
+        administrator can turn that off; you then ask them for a project). OpenShift creates the namespace and
+        makes the requester its administrator. The project and its namespace have
+        the same name: they are two views of one thing. (`--skip-config-write` only kept the recording from
+        switching to the new project, which is what the hint about `oc project` in the output refers to. The
+        recording deleted this extra project afterwards; delete yours too when you have tried it.)
+    - kind: ask
+      id: project-vs-ns
+      prompt: "With `oc`, you create a Deployment in project `shop`. Where does `kubectl` find it?"
+      choices:
+        - text: "In the namespace `shop`"
+          why: "The project and the namespace are one thing seen two ways, with the same name. The Deployment lives in that namespace, whichever tool created it."
+        - text: "Nowhere: `kubectl` cannot see projects"
+          why: "`kubectl` does not need to know about projects: the Deployment is in the namespace `shop`, which it reads like any other."
+        - text: "In a namespace OpenShift created beside it"
+          why: "There is no second namespace. One project corresponds to exactly one namespace, with the same name."
+      answer: 0
+    - kind: teach
+      id: ingress-route
+      title: "Ingress and Route"
+      body: |
+        To reach an application from outside the cluster over HTTP, Kubernetes has the **Ingress** object:
+        "send requests for this host name to this Service". A separate component, an ingress controller, does
+        the work, and plain Kubernetes leaves you to install one.
+
+        OpenShift has a router built in, and its own object for the same job, the **Route**, which existed
+        before Ingress did. (Not the routing-table route of the Linux networking lesson: a Route is a rule for the
+        router, from a host name to a Service.) OpenShift also accepts standard Ingress objects: it generates Routes from their
+        rules, one Route for each host and path.
+
+        First, the Kubernetes way. The Ingress needs a **Service** in front of the pods (a stable address for
+        them, covered in its own lesson), which `kubectl expose` creates. Unlike a systemd service, a Kubernetes
+        Service runs no program: it is an address in front of pods.
+    - kind: show
+      id: ingress
+      run: "kubectl expose deployment web --port=8080 >/dev/null; kubectl create ingress web --rule='web-bridge.apps-crc.testing/*=web:8080'; sleep 5; oc get routes"
+      highlight: ["web-bridge.apps-crc.testing"]
+      notice: |
+        `kubectl create ingress` created a standard Ingress with one rule: requests for the host
+        `web-bridge.apps-crc.testing`, any path (`/*`), go to the Service `web` on port 8080. A few seconds
+        later, `oc get routes` shows one Route for that rule, which OpenShift generated from the Ingress (its
+        name is the Ingress name plus random characters). The router serves the Route. `apps-crc.testing` is
+        OpenShift Local's domain for applications; on another cluster, choose a host name under that cluster's own
+        application domain.
+    - kind: show
+      id: expose-route
+      body: |
+        The OpenShift way skips the Ingress. Both tools have an `expose` command, and what it creates depends on
+        what you expose. Above, `kubectl expose deployment` created a Service. Exposing a **Service** with `oc`
+        creates a **Route** to it, with a host name built from the Service and project names:
+      run: "oc expose service web; oc get route web"
+      notice: "One command, and the application has an address outside the cluster. `kubectl expose service` only ever creates another Service, never a Route: only `oc` knows how to make a Route from a Service. (Here it would even be refused: without `--name`, the new Service takes the name `web`, which is already used.)"
+    - kind: ask
+      id: kubectl-routes
+      prompt: "On this OpenShift cluster, can `kubectl get routes` list the Routes?"
+      choices:
+        - text: "Yes: Routes are in this cluster's API"
+          why: "`kubectl` can read any kind the API serves. On a plain Kubernetes cluster there would be no Routes to list."
+        - text: "No: only the `oc` client understands Routes"
+          why: "What `oc` adds are commands, such as `oc new-project`, and behaviours, such as exposing a Service as a Route. Reading objects goes through the API, which serves Routes here to any client."
+        - text: "Only Routes generated from an Ingress object"
+          why: "Where a Route came from does not matter: all Routes are the same kind of object in the API."
+      answer: 0
+    - kind: show
+      id: kubectl-get-routes
+      run: kubectl get routes
+      notice: "Both Routes, listed by `kubectl`. The difference between the two tools is in the commands they offer, not in which objects they can see."
+    - kind: teach
+      id: security
+      title: "Stricter by default"
+      body: |
+        One more difference shapes everyday work. On OpenShift, when a pod does not say which user to run as, its
+        containers run as an unprivileged user ID taken from a range reserved for its project, whatever user the
+        image names. This is set by **security context constraints** (SCCs), an OpenShift feature. Plain
+        Kubernetes has security admission checks too, which can refuse a pod, but they do not pick a user ID
+        for it.
+
+        This shows up in two different ways. A pod that explicitly asks for a user outside the allowed range is
+        **refused** before it starts. A pod that asks for nothing starts, but a program that expects to be
+        root may then fail with `Permission denied` when it writes where only root may. The troubleshooting
+        lesson shows the second case, and how images are built to avoid it.
+    - kind: ask
+      id: which-creates-route
+      prompt: "A Service `api` exists. Which command gives it a Route?"
+      choices:
+        - text: "`oc expose service api`"
+          why: "Exposing a Service with `oc` creates a Route to it."
+        - text: "`kubectl expose service api`"
+          why: "`kubectl expose` only creates Services, never Routes. Here it would even fail: without `--name`, the new Service takes the name `api`, which is already used."
+        - text: "`oc expose deployment api`"
+          why: "Exposing a Deployment creates a Service, with either tool. The Route comes from exposing the Service."
+      answer: 0
+    - kind: ask
+      id: transfer
+      prompt: "A team moves its scripts to OpenShift. Their user may request projects, not create namespaces. Which step must change?"
+      choices:
+        - text: "`kubectl create namespace` for each environment"
+          why: "Their user is not allowed to create namespaces, so this step fails. They request projects with `oc new-project` instead, or an administrator creates the namespaces."
+        - text: "Their `kubectl apply -f deployment.yaml` steps"
+          why: "Deployments are plain Kubernetes, and `kubectl apply` works the same on OpenShift. The image may need to cope with an arbitrary user, but the command does not change."
+        - text: "The Ingress objects they use for HTTP"
+          why: "OpenShift accepts standard Ingress objects and generates Routes from their rules, as you saw. Unless they rely on a particular ingress controller's options, they work as they are."
+      answer: 0
+    - kind: reflect
+      id: explain-oc
+      prompt: "A colleague asks: \"Should I learn `kubectl` or `oc`?\" Answer in a few sentences."
+      model: |
+        Both, and it is less work than it sounds: `oc` contains `kubectl`'s commands, so for plain Kubernetes
+        objects (pods, Deployments, Services) they are the same commands with the same results. `kubectl` works
+        on every Kubernetes cluster, including OpenShift. `oc` adds OpenShift's own commands and behaviours, such
+        as `oc new-project`, `oc whoami`, and exposing a Service as a Route, which you need for
+        OpenShift-specific workflows.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can say what OpenShift adds to Kubernetes, use `oc` and `kubectl` side by side, and explain how a
+        project relates to a namespace and a Route to an Ingress.
+
+        From here on, the course uses `oc` for OpenShift work. When a command is plain Kubernetes, the lesson
+        says so, and `kubectl` gives the same result. Next: how OpenShift manages itself with operators, and
+        how to read the health of the cluster.
+  sections:
+    - id: comparison
+      title: "Equivalents at a glance"
+      depth: true
+      body: |
+        | Task | Kubernetes | OpenShift |
+        |---|---|---|
+        | list, inspect, change objects | `kubectl get`, `kubectl describe`, `kubectl apply`, `kubectl delete` | the same commands with `oc` |
+        | refuse unknown fields in a manifest | by default (`--validate=strict`) | only with `--validate=strict` (the `oc` default is `ignore`) |
+        | who am I | `kubectl auth whoami` | `oc whoami` |
+        | log in | a kubeconfig from your provider | `oc login` (OpenShift's built-in OAuth) |
+        | a place for your objects | `kubectl create namespace` (usually administrators) | `oc new-project` (a project request) |
+        | expose over HTTP | Ingress (needs an ingress controller) | Route (`oc expose`); Ingress is also accepted |
+        | build an image in the cluster | not built in | BuildConfig and Build objects, `oc start-build` |
+        | track image versions | not built in | ImageStream |
+        | default container user | what the image or pod asks for | an arbitrary UID from the project's range (restricted-v2 SCC) |
+        | cluster administration | `kubectl` plus provider tools | `oc adm` |
+
+        `oc` can also be called as `kubectl`: the `kubectl` recorded in the Kubernetes lessons is the
+        Kubernetes client built into `oc`, and it reports its own Kubernetes client version.
+  review:
+    - q: "Can `kubectl` be used on an OpenShift cluster?"
+      a: "Yes. OpenShift serves the standard Kubernetes API; `kubectl` works for every kind it serves, including Routes."
+    - q: "What is the relationship between `oc` and `kubectl`?"
+      a: "`oc` contains `kubectl`'s commands and adds OpenShift ones (`oc new-project`, `oc login`, `oc adm`); `oc expose service` creates a Route, where `kubectl expose` creates a Service."
+    - q: "What is a project?"
+      a: "OpenShift's view of a namespace, with extra information, which ordinary users can request with `oc new-project`."
+    - q: "Route or Ingress on OpenShift?"
+      a: "Both work: the Route is OpenShift's own object, and OpenShift generates Routes from an Ingress's rules (one per host and path)."
+    - q: "Why can a manifest with a misspelt field be refused by `kubectl apply` but accepted by `oc apply`?"
+      a: "`kubectl` asks for strict validation by default (`--validate=strict`); `oc` defaults to `--validate=ignore`, which drops unknown fields silently. Add `--validate=strict` to `oc apply`."
+  commands:
+    - cmd: "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest >/dev/null; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get pods"
+      meaning: "a Deployment and its pod, with kubectl"
+    - cmd: oc get pods
+      meaning: "the same pod, the same table, with oc"
+    - cmd: "kubectl apply -f broken-field.yaml --dry-run=server"
+      expect: fail
+      meaning: "kubectl asks for strict validation: the unknown field spec.replica is refused"
+    - cmd: "oc apply -f broken-field.yaml --dry-run=server; oc apply -f broken-field.yaml --dry-run=server -o jsonpath='{.spec.replicas}{\"\\n\"}'"
+      meaning: "oc's --validate default is ignore: the same file is accepted and the unknown field is dropped (replicas defaults to 1)"
+    - cmd: "kubectl auth whoami; oc whoami"
+      meaning: "the same user, two commands"
+    - cmd: "kubectl create namespace academy-bridge-demo"
+      expect: fail
+      meaning: "ordinary users may not create namespaces"
+    - cmd: "oc new-project academy-bridge-demo --skip-config-write"
+      meaning: "but they may request a project"
+    - cmd: "kubectl expose deployment web --port=8080 >/dev/null; kubectl create ingress web --rule='web-bridge.apps-crc.testing/*=web:8080'; sleep 5; oc get routes"
+      meaning: "a standard Ingress, turned into a Route by OpenShift"
+    - cmd: "oc expose service web; oc get route web"
+      meaning: "a Route created directly"
+    - cmd: kubectl get routes
+      meaning: "kubectl lists Routes too"
+    - cmd: "oc delete project academy-bridge-demo --wait=false"
+      meaning: "remove the extra project (not shown in the lesson)"
+  files:
+    broken-field.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: broken
+      spec:
+        replica: 2
+        selector:
+          matchLabels:
+            app: broken
+        template:
+          metadata:
+            labels:
+              app: broken
+          spec:
+            containers:
+              - name: web
+                image: registry.access.redhat.com/ubi9/httpd-24:latest
+  references:
+    - {title: "OpenShift 4.21: Usage of oc and kubectl commands", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/cli_tools/openshift-cli-oc#usage-oc-kubectl"}
+    - {title: "kubectl reference: kubectl apply (--validate, default strict)", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_apply/"}
+    - {title: "oc source, release-4.21: the --validate default changed to ignore (changeSharedFlagDefaults)", url: "https://github.com/openshift/oc/blob/release-4.21/pkg/cli/cli.go"}
+    - {title: "OpenShift 4.21: Working with projects", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/projects"}
+    - {title: "OpenShift 4.21: Routes (creating a route through an Ingress object)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes"}
+    - {title: "Kubernetes documentation: Namespaces", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"}
+    - {title: "Kubernetes documentation: Ingress", url: "https://kubernetes.io/docs/concepts/services-networking/ingress/"}
+    - {title: "kubectl reference: kubectl auth whoami", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_auth/kubectl_auth_whoami/"}
+    - {title: "OpenShift 4.21: Managing security context constraints", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies"}

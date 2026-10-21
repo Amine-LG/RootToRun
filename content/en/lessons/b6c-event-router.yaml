@@ -1,0 +1,315 @@
+# Keep events with the Event Router (generated from one command list; edit with care)
+- id: p.event-router
+  title: Keep events with the Event Router
+  subtitle: Events expire; forwarded log lines last as long as the log store keeps them
+  module: p2-reliability
+  mode: REAL_LAB
+  minutes: 20
+  level: 3
+  supports: The Event Router image `registry.redhat.io/openshift-logging/eventrouter-rhel9:v0.4` (Red Hat's registry) on OpenShift 4.21. Every
+    command was run on OpenShift Local 4.21 by the ordinary user developer and the cluster administrator kubeadmin (experiment X-OBS-01); the cluster role
+    and its binding were removed afterwards. OpenShift Logging's documentation installs the router in openshift-logging, where the collector forwards
+    its log as an infrastructure log; no collector runs on this cluster.
+  concepts:
+  - obs.logging
+  - obs.signals
+  prerequisites:
+  - n.logging
+  - h.observability
+  record_on: cluster-admin
+  files:
+    event-reader.yaml: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: academy-event-reader\nrules:\n- apiGroups:\
+      \ [\"\"]\n  resources: [events]\n  verbs: [get, list, watch]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\n\
+      metadata:\n  name: academy-event-reader\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: academy-event-reader\n\
+      subjects:\n- kind: ServiceAccount\n  name: eventrouter\n  namespace: NAMESPACE\n"
+    eventrouter.yaml: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: eventrouter\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\
+      \ {app: eventrouter}\n  template:\n    metadata:\n      labels: {app: eventrouter}\n    spec:\n      serviceAccountName: eventrouter\n \
+      \     containers:\n      - name: eventrouter\n        image: registry.redhat.io/openshift-logging/eventrouter-rhel9:v0.4\n        command:\
+      \ [/bin/eventrouter, -v, \"1\", -logtostderr]\n        resources:\n          requests: {cpu: 10m, memory: 32Mi}\n          limits: {memory:\
+      \ 128Mi}\n        volumeMounts:\n        - {name: config, mountPath: /etc/eventrouter}\n      volumes:\n      - name: config\n        configMap:\
+      \ {name: eventrouter}\n"
+    config.json: '{"sink": "stdout"}
+
+      '
+  objective: |
+    Explain why events need keeping beyond their time to live, deploy the Event Router with its configuration
+    and an events-only cluster role, and read cluster events as JSON lines in its log.
+  flow:
+  - kind: ask
+    id: recall-events
+    recalls: h.observability
+    prompt: A pod failed to start yesterday afternoon and was deleted. Where can you read why, this morning?
+    choices:
+    - text: 'Probably nowhere in the cluster: its events have expired'
+      why: Events are short-lived API objects; the next step shows for how long. Something must keep them elsewhere.
+    - text: In `oc get events`, which keeps a full history
+      why: The API server deletes events after a time to live.
+    - text: In the pod's logs
+      why: The pod is deleted, and a pod that never started has no logs.
+    answer: 0
+  - kind: teach
+    id: situation
+    title: Events do not last
+    body: |
+      Events explain what the cluster did: a failed pull, a refused admission, a killed container. They are API
+      objects, and the API server deletes them after a time to live, so they are gone when the incident review
+      starts. The **Event Router** is a small component that watches events in every namespace and writes each
+      one as a JSON line to its own log. A log collector (OpenShift Logging's Vector) forwards those lines, like any
+      other log, to the configured log store, whose retention decides how long they last.
+
+      On the lab cluster there is no log collector. Here the router runs in developer's project and you read its
+      log directly; the cluster administrator, kubeadmin, gives it permission to watch events everywhere. Running it
+      in developer's project is a lab shortcut, and the steps below show what it costs. developer is an ordinary
+      user, admin of their own project only. Each prompt names who ran the command.
+  - kind: show
+    id: ttl
+    body: 'As the cluster administrator, kubeadmin, read how long the API server keeps events. The setting is in a platform namespace that developer cannot read:'
+    run: oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\.yaml}' | jq -c '.apiServerArguments["event-ttl"]'
+    notice: '`["3h"]`: the API server''s arguments are stored as lists, and this one holds a single value, three hours. On
+      this cluster an event disappears three hours after it was last updated (Kubernetes'' own default is one hour).
+      [Check a cluster''s health](/lesson/n.cluster-admin-health) read the same setting.'
+  - kind: show
+    id: ns
+    run: oc project -q > ns.txt && oc create serviceaccount eventrouter && oc create configmap eventrouter --from-file=config.json
+    body: 'developer prepares three things in their own project. `config.json`, shown next, is one of the lesson''s files
+      (listed under “Before you start: source files”); `ns.txt` is written here.'
+    notice: '`oc project -q` prints only the current project''s name, saved in `ns.txt` because the administrator''s
+      command, two steps later, needs it. Then the router''s identity, a ServiceAccount, and its configuration, a
+      ConfigMap made from `config.json`. To reproduce it, run the administrator''s command in the same directory, so
+      that it finds `ns.txt`.'
+  - kind: show
+    id: config
+    code: '{"sink": "stdout"}
+
+      '
+    caption: config.json
+    origin: file
+    body: 'The router''s whole configuration: where to send events. `stdout` makes every event a line in its container log, which a collector
+      picks up.'
+  - kind: ask
+    id: which-role
+    prompt: The router must see events from every project. What does its ServiceAccount need?
+    choices:
+    - text: Read access to events, cluster-wide
+      why: Watching every namespace needs a cluster-wide grant; read verbs on events only, nothing else.
+    - text: The view role in its own project only
+      why: That shows events of its own project only.
+    - text: The cluster-reader role, bound cluster-wide
+      why: It would work, but grants reading almost everything; the router needs events only.
+    answer: 0
+  - kind: show
+    id: rbac-file
+    code: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: academy-event-reader\nrules:\n- apiGroups: [\"\"]\n\
+      \  resources: [events]\n  verbs: [get, list, watch]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n\
+      \  name: academy-event-reader\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: academy-event-reader\nsubjects:\n\
+      - kind: ServiceAccount\n  name: eventrouter\n  namespace: NAMESPACE\n"
+    caption: event-reader.yaml (NAMESPACE is filled in)
+    origin: file
+  - kind: show
+    id: rbac
+    body: 'As the cluster administrator, kubeadmin, create the events-only ClusterRole and bind it to the router''s ServiceAccount in developer''s project:'
+    run: sed "s/NAMESPACE/$(cat ns.txt)/" event-reader.yaml | oc apply -f -
+    notice: '`sed` writes developer''s project name from `ns.txt` in place of `NAMESPACE`, and the result goes straight to
+      `oc apply`: the ClusterRole and its binding to that one ServiceAccount are created. Only a cluster administrator
+      may create them. This binding is a lab shortcut: it gives a ServiceAccount in developer''s project read access
+      to the events of every namespace, so the router''s log, which developer can read, will hold platform events
+      that developer could not list directly. A real install runs the router in a namespace that only
+      administrators control (the documentation uses openshift-logging), so that only they hold this access.'
+  - kind: show
+    id: deploy-file
+    code: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: eventrouter\nspec:\n  replicas: 1\n  selector:\n    matchLabels: {app: eventrouter}\n\
+      \  template:\n    metadata:\n      labels: {app: eventrouter}\n    spec:\n      serviceAccountName: eventrouter\n      containers:\n   \
+      \   - name: eventrouter\n        image: registry.redhat.io/openshift-logging/eventrouter-rhel9:v0.4\n        command: [/bin/eventrouter,\
+      \ -v, \"1\", -logtostderr]\n        resources:\n          requests: {cpu: 10m, memory: 32Mi}\n          limits: {memory: 128Mi}\n      \
+      \  volumeMounts:\n        - {name: config, mountPath: /etc/eventrouter}\n      volumes:\n      - name: config\n        configMap: {name:\
+      \ eventrouter}\n"
+    caption: eventrouter.yaml
+    origin: file
+    body: The image comes from Red Hat's registry, pulled with the cluster's pull secret; the configuration is mounted where the router reads
+      it, `/etc/eventrouter/config.json`.
+  - kind: show
+    id: deploy
+    body: 'Back in developer''s terminal, deploy the router:'
+    run: oc apply -f eventrouter.yaml && oc rollout status deploy/eventrouter --timeout=180s
+    notice: The Deployment is created and its single router pod is available. From now on it lists and watches events.
+  - kind: ask
+    id: guess-backlog
+    guess: true
+    prompt: The router started a minute ago. Will its log hold events that happened before it started?
+    choices:
+    - text: Yes, those the API still keeps
+      why: When it starts, the router lists the events that exist, then watches for new ones; anything already expired is lost.
+    - text: No, only new events
+      why: A watch starts with a list of what exists; the router writes those too.
+    - text: Yes, all of them since the cluster was installed
+      why: Expired events no longer exist anywhere to be listed.
+    answer: 0
+  - kind: show
+    id: broken
+    body: 'Something worth recording: a pod whose image does not exist.'
+    run: oc run broken --image=registry.access.redhat.com/ubi9/does-not-exist:1.0 --restart=Never && sleep 20 && oc get events --field-selector
+      involvedObject.name=broken -o custom-columns=REASON:.reason,MESSAGE:.message | cut -c1-110
+    notice: The pull fails and the kubelet reports why, in events attached to the pod.
+  - kind: ask
+    id: guess-log
+    guess: true
+    prompt: What will the router's log hold about the broken pod?
+    choices:
+    - text: JSON lines with reason, message and object
+      why: The router writes a line each time it sees an event added or updated, as JSON, with the object it is about; the next step reads them.
+    - text: 'Nothing: the pod is in another project than the router''s'
+      why: The router watches every namespace; its project does not limit it.
+    - text: Only events of type Warning
+      why: It writes every event, Normal and Warning.
+    answer: 0
+  - kind: show
+    id: logged
+    run: 'oc logs deploy/eventrouter | grep -m 3 ''"name":"broken'' | jq -c ''{verb, reason: .event.reason, object: .event.involvedObject.name,
+      namespace: .event.involvedObject.namespace, message: (.event.message[0:70])}'''
+    notice: '`verb` says whether the router saw the event added or updated (a repeated event updates its count); the rest is the event itself.'
+  - kind: show
+    id: others
+    run: oc logs deploy/eventrouter | grep '^{' | jq -r '.event.involvedObject.namespace' | sort | uniq -c | sort -rn | head -5
+    notice: 'Events from other people''s namespaces: `console-demo`, another project on this cluster, and platform
+      namespaces such as `openshift-marketplace` and `openshift-operator-lifecycle-manager`, tens to over a hundred lines
+      each: the events the API still kept when the router started, and every one since. What a collector stores is a
+      cluster-wide record. This is the cost of the lab shortcut: developer, an ordinary user, reads those events
+      through the log of a pod in their own project. Anyone who administers the project that holds the router''s ServiceAccount can read its log, or run
+      other pods as that ServiceAccount, and so gets the same view. That is why a real install keeps the router in
+      a namespace only administrators control.'
+  - kind: show
+    id: delete-pod
+    run: oc delete pod broken && oc get events --field-selector involvedObject.name=broken -o name | wc -l && oc logs deploy/eventrouter | grep
+      -c '"name":"broken'
+    notice: 'With the pod deleted, the API still lists its 7 events for now, until their time to live; the router''s log has 10 lines about it,
+      one per addition or update. That log itself rotates and goes with the pod: only forwarding to a log store keeps the lines.'
+  - kind: try
+    id: try-find
+    body: Show the lines of the Event Router's log (Deployment `eventrouter`) that mention `FailedScheduling`.
+    accept:
+    - oc logs deploy/eventrouter | grep FailedScheduling
+    - oc logs deployment/eventrouter | grep FailedScheduling
+    - oc logs deploy/eventrouter | grep 'FailedScheduling'
+    - oc logs deploy/eventrouter | grep "FailedScheduling"
+    hints:
+    - match: oc get events
+      say: '`oc get events` reads what the API still keeps; the router''s log is where older events are.'
+    - match: ^(?!.*grep).*$
+      say: Filter the log with `| grep FailedScheduling`.
+    hint: '`oc logs deploy/eventrouter | grep FailedScheduling`.'
+    then: This command was not recorded. `grep` prints each line of the log that contains `FailedScheduling`, one event
+      as JSON per line, like the ones above; if the router saw no such event, it prints nothing and exits with status
+      1. With a log store, the same search runs over the days the store keeps, long after the events have left the
+      API.
+  - kind: show
+    id: cleanup
+    body: 'The cluster administrator, kubeadmin, removes the cluster-wide grant:'
+    run: oc delete clusterrolebinding academy-event-reader && oc delete clusterrole academy-event-reader
+    notice: The cluster-wide grant is removed. The router, its ServiceAccount and ConfigMap belong to developer's project
+      and go when it is deleted.
+  - kind: reflect
+    id: explain-router
+    prompt: Explain to a colleague why a cluster that already keeps container logs also runs an Event Router.
+    model: |
+      Container logs say what the application did; events say what the cluster did to it: pulls, scheduling,
+      evictions, probe failures, refused admissions. Events are API objects deleted after a time to live, three
+      hours here, so they are gone before most incident reviews. The Event Router turns each event into a log
+      line, and the log collector keeps those lines with the rest, searchable for as long as the retention allows.
+      It needs only read access to events across the cluster.
+  - kind: teach
+    id: what-next
+    title: What you can do now
+    body: |
+      You can say why events need keeping, deploy the Event Router with a configuration and an events-only
+      cluster role, read events as JSON log lines, and find a deleted pod's events in the router's log.
+
+      Next, [SLOs and incident response](/lesson/h.slo-incidents) uses these signals to agree reliability targets and
+      to run an incident.
+  sections:
+  - id: reference
+    title: Reference
+    depth: true
+    body: |
+      | Task | Command |
+      |---|---|
+      | how long events live | `oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\.yaml}' \| jq '.apiServerArguments["event-ttl"]'` |
+      | events of one object | `oc get events --field-selector involvedObject.name=<name>` |
+      | events kept by the router | `oc logs deploy/eventrouter \| grep <reason or name>` |
+
+      The router needs `get`, `list` and `watch` on events at cluster scope, and nothing else. With OpenShift Logging,
+      deploy it where the documentation says (openshift-logging) so that its log is collected as an infrastructure log.
+  review:
+  - q: How long does the API server keep events on this cluster?
+    a: Three hours (event-ttl 3h); Kubernetes' default is one hour.
+  - q: What does the Event Router do?
+    a: Watches events in every namespace and writes each as a JSON line to its log, where a log collector can store it.
+  - q: What permission does the Event Router need?
+    a: A ClusterRole with get, list and watch on events, bound to its ServiceAccount.
+  labs: []
+  limits: No log collector or log store runs on OpenShift Local here, so events are read from the router's own log, which rotates and disappears
+    with its pod; the lesson does not wait three hours to show an event expiring.
+  enterprise: Platform teams deploy the Event Router next to the log collector and keep events with the infrastructure logs, so incident reviews
+    can see what the cluster did days later.
+  references:
+  - title: 'Red Hat OpenShift Logging 6.6: Collecting Kubernetes events (Event Router)'
+    url: https://docs.redhat.com/en/documentation/red_hat_openshift_logging/6.6/html/configure/collect-kubernetes-events
+  - title: OpenShift Event Router source
+    url: https://github.com/openshift/eventrouter
+  - title: kube-apiserver reference (--event-ttl, default one hour)
+    url: https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/
+  - title: 'Kubernetes API: Event'
+    url: https://kubernetes.io/docs/reference/kubernetes-api/core/event-v1/
+  - title: 'Kubernetes: Using RBAC authorization (ClusterRole and ClusterRoleBinding)'
+    url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+  commands:
+  - cmd: oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\.yaml}' | jq -c '.apiServerArguments["event-ttl"]'
+    as: admin
+    meaning: how long the API server keeps events
+  - cmd: oc project -q > ns.txt && oc create serviceaccount eventrouter && oc create configmap eventrouter --from-file=config.json
+    as: developer
+    meaning: 'the router''s identity and its configuration: write events to standard output'
+  - cmd: sed "s/NAMESPACE/$(cat ns.txt)/" event-reader.yaml | oc apply -f -
+    as: admin
+    meaning: read access to events in every namespace, for that one ServiceAccount
+  - cmd: oc apply -f eventrouter.yaml && oc rollout status deploy/eventrouter --timeout=180s
+    as: developer
+    meaning: the Event Router
+    timeout: 210
+  - cmd: oc run broken --image=registry.access.redhat.com/ubi9/does-not-exist:1.0 --restart=Never && sleep 20 && oc get events --field-selector
+      involvedObject.name=broken -o custom-columns=REASON:.reason,MESSAGE:.message | cut -c1-110
+    as: developer
+    meaning: 'a pod whose image does not exist: events say why'
+  - cmd: 'oc logs deploy/eventrouter | grep -m 3 ''"name":"broken'' | jq -c ''{verb, reason: .event.reason, object: .event.involvedObject.name,
+      namespace: .event.involvedObject.namespace, message: (.event.message[0:70])}'''
+    as: developer
+    meaning: the same events, now lines in the router's log
+  - cmd: oc logs deploy/eventrouter | grep '^{' | jq -r '.event.involvedObject.namespace' | sort | uniq -c | sort -rn | head -5
+    as: developer
+    meaning: events from every namespace, not only this project
+  - cmd: oc delete pod broken && oc get events --field-selector involvedObject.name=broken -o name | wc -l && oc logs deploy/eventrouter | grep
+      -c '"name":"broken'
+    as: developer
+    meaning: the pod is gone; its events remain in the API for now, and in the log for as long as the log is kept
+  - cmd: oc delete clusterrolebinding academy-event-reader && oc delete clusterrole academy-event-reader
+    as: admin
+    meaning: remove the cluster-wide read access
+  experiment:
+    id: X-OBS-01
+    objective: developer deploys the Event Router in a project; the administrator grants its ServiceAccount read access to events cluster-wide;
+      events of a broken pod appear in its log; the cluster role and binding are deleted.
+    changes:
+    - ClusterRole and ClusterRoleBinding academy-event-reader (events get, list, watch for one ServiceAccount; created, deleted)
+    - 'In developer''s temporary project: the Event Router Deployment, its ConfigMap and ServiceAccount, and a pod that cannot pull its image
+      (deleted with it)'
+    preflight:
+    - cmd: oc get clusterrole academy-event-reader
+      expect: fail
+    snapshot:
+    - oc get clusterrolebindings -o name
+    - oc get clusterroles -o name | grep -c academy- || true
+    rollback:
+    - oc delete clusterrolebinding academy-event-reader --ignore-not-found
+    - oc delete clusterrole academy-event-reader --ignore-not-found
+    verify:
+    - cmd: oc get clusterrole academy-event-reader
+      expect: fail

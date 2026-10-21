@@ -1,0 +1,103 @@
+id: lab.groups
+title: "Control access with groups"
+subtitle: "Role bindings, and the binding that outlives its group"
+summary: "An administrator creates a group, you grant it a role in your project, the API answers access questions for its members, then the group disappears while the binding stays."
+module: b2-authn-authz
+mode: REAL_LAB
+minutes: 30
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (user.openshift.io Groups). Groups are cluster-scoped: creating and deleting them needs cluster-admin (steps marked admin)."
+concepts: [ocp.auth, sec.rbac]
+prerequisites: [o2.groups]
+namespace: academy-groups
+objective: |
+  Grant access to a team through a group, check the effective result with the API, and notice what remains when a
+  group is deleted.
+background: |
+  OpenShift **Groups** are lists of user names, usually synchronized from LDAP or Active Directory. Binding roles to
+  groups instead of people makes access follow team membership. A RoleBinding names its subjects **by name**: if the
+  group is deleted, the binding is not.
+
+  **Where everything comes from.** The app creates the project `academy-groups` as the learner identity (OpenShift
+  Local's `developer`, who becomes its admin). The group `academy-auditors` is cluster-scoped, so the steps marked
+  admin create and delete it with the administrator identity (OpenShift Local's `kubeadmin`), after you connected it
+  on the Connections page. `oc get groups` in step 1 runs as the reader identity, a read-only ServiceAccount
+  (`academy-reader` in the project `academy-system`) that the app creates once from the Connections page and binds
+  to the built-in `cluster-reader` role: Groups are cluster-scoped, and `developer` may not list them. **Cleanup.** Step 4 deletes the group. If you stop earlier, Clean up deletes it as well:
+  the app recorded the group, with its UID, when it was created, and removes exactly that object before deleting the
+  project.
+steps:
+  - id: create
+    title: "admin: create the group"
+    do: "An administrator creates `academy-auditors` with the user `developer` in it."
+    commands:
+      - {cmd: "oc adm groups new academy-auditors developer", as: admin, meaning: "a cluster-scoped Group"}
+      - {cmd: "oc get groups", as: reader, meaning: "groups and their users: academy-auditors with developer"}
+    observe: "`group.user.openshift.io/academy-auditors created`, then one line: `academy-auditors   developer`. `oc get groups` lists only Group objects with their members; the virtual groups that the cluster associates automatically with every authenticated user, such as `system:authenticated`, are not Group objects and never appear in it."
+    why: "Groups are cluster-scoped, so creating one needs a cluster-wide grant that a project's owner does not have. In most organisations groups are not made by hand: a scheduled LDAP sync or an OpenID Connect groups claim fills them, and changes to who may edit them are reviewed."
+  - id: bind
+    title: "Grant the group a role in your project"
+    do: "As the project admin, bind the built-in `view` role to the group, then read the binding."
+    commands:
+      - {cmd: "oc policy add-role-to-group view academy-auditors -n academy-groups", meaning: "a RoleBinding named view, subject Group academy-auditors"}
+      - {cmd: "oc get rolebindings -n academy-groups -o wide", meaning: "ROLE and GROUPS columns: view → ClusterRole/view, group academy-auditors"}
+    predict:
+      prompt: "Could developer bind `admin` instead of `view` to the group?"
+      choices: ["No, only cluster-admins bind roles", "Yes: developer is admin of this project and holds those permissions here", "Only with a ClusterRoleBinding"]
+      answer: 1
+      explain: "RBAC lets you grant what you hold yourself, inside the scope where you hold it (or what you are explicitly allowed to `bind`)."
+      feedback:
+        - "Project admins manage RoleBindings in their own project. RBAC's escalation check only stops you granting permissions you do not hold yourself in that scope."
+        - "Right: developer holds every permission of `admin` in this project, so RBAC allows a RoleBinding that grants `admin` here."
+        - "A RoleBinding can reference a ClusterRole such as `admin` and grant it in one namespace. A ClusterRoleBinding would grant it everywhere, which developer cannot do."
+    observe: |
+      The binding is a RoleBinding named `view` pointing to `ClusterRole/view`: a cluster-wide role definition granted
+      in this namespace only. The other bindings (`admin`, `system:deployers`, `system:image-builders`,
+      `system:image-pullers`) are the defaults OpenShift creates in every new project.
+    wait_for: [binding]
+  - id: ask
+    title: "admin: ask the API about a group member"
+    do: "Impersonation (admin only) answers what a member of the group can do."
+    commands:
+      - {cmd: "oc auth can-i list pods -n academy-groups --as=someone --as-group=academy-auditors", as: admin, meaning: "yes, through the group"}
+      - {cmd: "oc auth can-i delete pods -n academy-groups --as=someone --as-group=academy-auditors", as: admin, meaning: "no: view is read-only", expect: fail}
+      - {cmd: "oc policy who-can list pods -n academy-groups", meaning: "the group appears among the subjects (Groups: academy-auditors)"}
+    observe: |
+      `yes` for list and `no` for delete (exit code 1). The impersonated user `someone` is not in the Group object, yet
+      gets `yes`: with `--as-group` you assert the membership yourself, so the answer tells you what bindings grant to
+      that group name. `who-can` lists academy-auditors under Groups, next to cluster-wide groups such as
+      system:cluster-admins and many controller service accounts. On this CRC cluster it ends with `Error during
+      evaluation, results may not be complete`, because a ClusterRoleBinding references a ClusterRole that does not
+      exist.
+    why: "`--as-group` asserts a membership, so it tests the bindings, not the directory: to know whether a person really gets the access, check the Group object as well."
+  - id: orphan
+    title: "admin: delete the group, keep looking"
+    do: "An administrator deletes the group. Read the RoleBinding again."
+    commands:
+      - {cmd: "oc delete group academy-auditors", as: admin, meaning: "the group is gone"}
+      - {cmd: "oc get rolebinding view -n academy-groups -o jsonpath='{.subjects}'", meaning: "still names Group academy-auditors"}
+    observe: "The binding still grants `view` to a group named academy-auditors. If a group with that name is created again (by a directory sync, for example), its members get access immediately."
+    why: "Bindings reference subjects by name, not by identity. Stale bindings go unnoticed until something reuses the name: this is exactly what access reviews look for."
+hints: []
+checks:
+  - {id: binding, title: "A RoleBinding grants view to academy-auditors", type: count, kind: rolebindings, op: gte, value: 1, where: {path: "subjects[0].name", op: eq, value: academy-auditors}, expect_text: "binding exists"}
+  - {id: view, title: "The binding uses the view role", type: field, kind: rolebinding, name: view, path: roleRef.name, op: eq, value: view, expect_text: "roleRef view"}
+questions:
+  - q: "Why bind roles to groups rather than users?"
+    a: "Access then follows team membership managed in the directory: joiners, movers and leavers are handled in one place."
+  - q: "A deleted group's RoleBinding remains. Why is that a risk?"
+    a: "Anyone who later becomes a member of a new group with the same name inherits the old access without any review."
+enterprise: |
+  Directory-synced groups (`oc adm groups sync` with LDAP, or OIDC group claims) are the norm in large enterprises and
+  regulated organisations. Access reviews should include bindings whose subjects no longer exist.
+references:
+  - {title: "OpenShift 4.21: Using RBAC", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac"}
+  - {title: "OpenShift 4.21: Syncing LDAP groups", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/ldap-syncing"}
+  - {title: "Kubernetes: RBAC privilege escalation prevention", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#privilege-escalation-prevention-and-bootstrapping"}
+# Groups are cluster-scoped: the ledger records the one this lab creates (with its UID) so cleanup removes it even if
+# the learner stops before the step that deletes it.
+cluster_objects:
+  - {kind: Group, name: academy-auditors, path: /apis/user.openshift.io/v1/groups/academy-auditors, created_by: "oc adm groups new academy-auditors developer", deleted_by: "oc delete group academy-auditors"}
+variations:
+  - "On your own: find every RoleBinding in your projects whose Group subject no longer exists. Check: your method reports the `view` binding after step 4, and nothing for groups that exist."
+  - "With the administrator identity, recreate a group named `academy-auditors` with a different user, and ask the API what that user may do in this project. Check: the old binding grants it `view` at once; then delete the group again (it is yours to clean up, the app did not record it)."

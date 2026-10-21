@@ -1,0 +1,119 @@
+id: lab.access-can-come-back
+title: "Access that can come back"
+summary: "Grant a ServiceAccount access in another project, delete the ServiceAccount, and watch the access survive, then return when the name is reused."
+module: l1-access
+mode: REAL_LAB
+minutes: 30
+level: 3
+supports: "Recorded on OpenShift 4.21.8. Reproduces, as a normal project admin, the behaviour documented by the Lineage project (bindings reference subjects by name)."
+concepts: [sec.rbac, sec.serviceaccounts, sec.audit]
+prerequisites: [l.access-can-come-back]
+namespace: academy-ghost
+extra_namespaces: [academy-ghost-target]
+objective: |
+  Prove that bindings reference subjects by name, find a binding whose subject no longer exists, and clean it up.
+background: |
+  You will create `scanner` in `academy-ghost`. You will grant it `view` in a *different* project, `academy-ghost-target`.
+  Deleting a ServiceAccount never deletes the bindings that name it: bindings store the subject's kind, namespace
+  and name, not a reference to the object. Deleting the ServiceAccount's *namespace* does remove RoleBindings in
+  that same namespace, but a binding in another namespace (or a ClusterRoleBinding, or an SCC `users` entry)
+  survives. The Lineage project (an open-source access explainer) calls these grants **resurrectable**: inactive
+  while the subject is missing, live again the moment the name is reused.
+
+  **Where everything comes from.** The app creates both projects, `academy-ghost` and `academy-ghost-target`, as the
+  learner identity, so you are admin of both; they start empty. You create `scanner` and its grant in the steps. Clean
+  up deletes both projects, and with them every binding the lab created.
+
+  **What the checks can prove.** The final verification reads only the end state: no binding in the target names
+  scanner, scanner may not list pods there, and scanner exists again. A fresh project already meets the first two.
+  The proof that the grant existed and outlived the ServiceAccount comes from the checks of steps 1 to 3, run
+  while you are at each of those steps.
+steps:
+  - id: grant
+    title: "A ServiceAccount and a cross-namespace grant"
+    do: "Create scanner in academy-ghost, then grant it view in academy-ghost-target."
+    commands:
+      - {cmd: "oc create serviceaccount scanner -n academy-ghost", meaning: "the subject"}
+      - {cmd: "oc get serviceaccount scanner -n academy-ghost -o jsonpath='{.metadata.uid}'", meaning: "the account's UID: note it, you will compare it later"}
+      - {cmd: "oc policy add-role-to-user view system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "creates a RoleBinding named `view` in the target namespace that names scanner from academy-ghost"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "yes"}
+    checks: [binding, granted]
+    wait_for: [binding, granted]
+  - id: delete
+    title: "Delete the ServiceAccount"
+    do: "Delete scanner, confirm it is gone, then look at the binding and ask the API again."
+    commands:
+      - {cmd: "oc delete serviceaccount scanner -n academy-ghost", meaning: "the subject is gone"}
+      - {cmd: "oc get serviceaccount scanner -n academy-ghost", meaning: "NotFound", expect: fail}
+      - {cmd: "oc get rolebindings -n academy-ghost-target -o wide", meaning: "the `view` binding still lists `academy-ghost/scanner`"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "still yes"}
+    predict:
+      prompt: "The ServiceAccount no longer exists. What does `oc auth can-i ... --as=...:scanner` answer?"
+      choices: ["no: the subject is gone", "yes: RBAC evaluates the name; the binding still grants it"]
+      answer: 1
+      explain: "RBAC matches subjects by name. No token can currently authenticate as scanner (its tokens died with it), but the grant is armed."
+      feedback:
+        - "RBAC never checks that a subject exists. It compares the requesting identity's name and groups with the subjects stored in bindings, and the binding still names scanner."
+        - "Right. The binding stores the string academy-ghost/scanner; any identity presenting that name matches it, whether or not a ServiceAccount object exists right now."
+    observe: |
+      `NotFound` for the ServiceAccount, yet the target still has a `view` RoleBinding whose SERVICEACCOUNTS column says
+      `academy-ghost/scanner`, next to the bindings OpenShift creates in every project (admin, system:deployers,
+      system:image-builders, system:image-pullers). `can-i` still answers `yes`.
+    checks: [sa-gone, binding, granted]
+    wait_for: [sa-gone, binding, granted]
+  - id: reuse
+    title: "Reuse the name"
+    do: "Create a brand-new ServiceAccount with the same name and read its UID."
+    commands:
+      - {cmd: "oc create serviceaccount scanner -n academy-ghost", meaning: "a different object, same name"}
+      - {cmd: "oc get serviceaccount scanner -n academy-ghost -o jsonpath='{.metadata.uid}'", meaning: "the new object's UID"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "yes: the old grant applies to the new account"}
+    observe: |
+      A new UID (`5ab89f7c-…` in the recording), different from the one you noted in the first step (`f48c8e68-…`):
+      this is a different object, and the API server gives every new object a fresh UID. Even so, `can-i` answers
+      `yes` again without anyone granting anything.
+    checks: [sa-back, binding, granted]
+    wait_for: [sa-back, binding, granted]
+    why: |
+      Whoever can create a ServiceAccount named scanner in academy-ghost (project admins and editors) and get a token
+      for it, or run a pod as it, inherits access to academy-ghost-target. Tokens issued to the old account do not
+      come back (they carry its UID); the new account's tokens carry the old grant. In a big cluster this is how
+      forgotten grants become real access.
+  - id: audit
+    title: "Audit, then clean up"
+    do: "List the target's bindings with their subjects, then remove the stale grant."
+    commands:
+      - {cmd: "oc get rolebindings -n academy-ghost-target -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name", meaning: "who is named, from which namespace (`<none>` for users and groups, which have no namespace)"}
+      - {cmd: "oc policy remove-role-from-user view system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "remove scanner from the `view` binding"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-ghost:scanner -n academy-ghost-target", meaning: "no", expect: fail}
+    observe: |
+      One row stands out: `view` names `scanner` from `academy-ghost`, a namespace other than the binding's own. The
+      other rows are OpenShift's per-project defaults. After the removal `can-i` says `no` (exit code 1).
+    why: |
+      The listing shows who is named, not whether that subject exists. An access review has to check each foreign
+      ServiceAccount subject against the live accounts (`oc get serviceaccount <name> -n <namespace>`); that
+      comparison is what access-review tools automate.
+    wait_for: [revoked, no-binding]
+hints: []
+checks:
+  - {id: binding, title: "A binding in the target names scanner", type: count, kind: rolebindings, namespace: academy-ghost-target, op: gte, value: 1, where: [{path: "subjects[0].kind", op: eq, value: ServiceAccount}, {path: "subjects[0].name", op: eq, value: scanner}, {path: "subjects[0].namespace", op: eq, value: academy-ghost}], final: false, expect_text: "1 binding"}
+  - {id: granted, title: "scanner of academy-ghost may list pods in the target", type: can_i, as: "system:serviceaccount:academy-ghost:scanner", namespace: academy-ghost-target, verb: list, resource: pods, final: false, expect_text: "yes"}
+  - {id: sa-gone, title: "scanner is deleted (step 2)", type: absent, kind: serviceaccount, name: scanner, final: false, expect_text: "not found"}
+  - {id: no-binding, title: "No binding in the target names scanner any more", type: count, kind: rolebindings, namespace: academy-ghost-target, op: eq, value: 0, where: {path: "subjects[0].name", op: eq, value: scanner}, expect_text: "0 bindings"}
+  - {id: sa-back, title: "scanner exists again (the name was reused)", type: exists, kind: serviceaccount, name: scanner, expect_text: "exists"}
+  - {id: revoked, title: "scanner can no longer list pods in the target", type: can_i, as: "system:serviceaccount:academy-ghost:scanner", namespace: academy-ghost-target, verb: list, resource: pods, expect: "no", expect_text: "no"}
+questions:
+  - q: "When is a ServiceAccount grant 'resurrectable'?"
+    a: "When the binding survives the subject: it lives in another namespace, is a ClusterRoleBinding, or is an SCC user entry, so recreating the same name reactivates it."
+  - q: "Why does a RoleBinding in the subject's own namespace not have this problem when the namespace is deleted?"
+    a: "Deleting the namespace deletes both the ServiceAccount and that RoleBinding."
+enterprise: |
+  Decommissioning a team or an application must include its grants elsewhere: cross-namespace RoleBindings,
+  ClusterRoleBindings, SCC users and image-puller grants. Access-review tools can report these grants so that an
+  access review removes them before a name is reused.
+references:
+  - {title: "Lineage (an open-source project by the author of this site): access that can come back", url: "https://github.com/Amine-LG/lineage/blob/main/docs/access-can-come-back.md"}
+  - {title: "Kubernetes: RBAC subjects", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-subjects"}
+  - {title: "OpenShift 4.21: Understanding and creating service accounts", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-and-creating-service-accounts"}
+variations:
+  - "On your own: write a check that lists every RoleBinding in your projects whose ServiceAccount subject no longer exists. Check: it reports the stale grant when you repeat steps 1 and 2, and nothing after step 4."

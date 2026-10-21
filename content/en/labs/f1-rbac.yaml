@@ -1,0 +1,146 @@
+id: lab.rbac
+title: "Least privilege for two ServiceAccounts"
+summary: "Give a reporting job read-only access to pods and a CI deployer the right to update Deployments, nothing more; prove it with oc auth can-i."
+module: b2-authn-authz
+mode: REAL_LAB
+minutes: 35
+level: 2
+supports: "Verified on CRC / OpenShift 4.21.8 as developer (project admin): create Role/RoleBinding, impersonate ServiceAccounts for can-i."
+concepts: [sec.rbac, sec.serviceaccounts]
+prerequisites: [f.rbac]
+namespace: academy-rbac
+objective: |
+  Write the narrowest Roles that do the job, bind them to ServiceAccounts, and prove both what they can and
+  what they cannot do.
+background: |
+  Two ServiceAccounts exist: `reporter` (a job that lists pods for a report) and `ci-deployer` (a pipeline that
+  updates the image of the `web` Deployment). Neither has any permission yet. You work as `developer`, who is
+  admin of this project: you can create Roles and RoleBindings here, and only for permissions you hold
+  (escalation prevention).
+
+  **Where everything comes from.** The app creates the project `academy-rbac` and applies the ServiceAccounts
+  `reporter` and `ci-deployer` and the Deployment `web` (`sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal`, no login needed) shown below. Every Role and RoleBinding is yours.
+  `oc auth can-i --as=system:serviceaccount:…` works because a project admin may impersonate the ServiceAccounts of
+  the project. Clean up deletes the project.
+commands:
+  - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac", meaning: "evaluate a permission for a ServiceAccount (exit code 0 = yes, 1 = no)", expect: fail}
+  - {cmd: "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-rbac", meaning: "a namespaced Role"}
+  - {cmd: "oc create rolebinding reporter-pod-reader --role=pod-reader --serviceaccount=academy-rbac:reporter -n academy-rbac", meaning: "grant it"}
+  - {cmd: "oc adm policy who-can patch deployments -n academy-rbac", meaning: "every user and group holding a permission (oc resolves `deployments` to `deployments.apps`)"}
+setup:
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: reporter}
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: ci-deployer}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+steps:
+  - id: baseline
+    title: "Start from zero"
+    do: "Check what `reporter` can do right now."
+    commands:
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac", meaning: "expect no (exit code 1)", expect: fail}
+      - {cmd: "oc auth can-i --list --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac", meaning: "everything it can do in this namespace (rules from every binding that reaches it)"}
+    predict:
+      prompt: "A brand-new ServiceAccount in an OpenShift project can list pods in that project?"
+      choices: ["Yes, ServiceAccounts can read their own namespace", "No, only a few discovery and self-review permissions", "Yes, it inherits developer's rights"]
+      answer: 1
+      explain: "A new ServiceAccount gets only what reaches it through groups: cluster-wide basics for every authenticated identity (discovery, self reviews, use of the restricted SCCs) and, in OpenShift, system:image-puller in its own namespace. Nothing about pods."
+      feedback:
+        - "A ServiceAccount has no implicit rights on its own namespace. RBAC is deny-by-default: it can read pods only if a binding grants that to it or to one of its groups."
+        - "Right. Its rules come from groups such as system:authenticated and system:serviceaccounts:academy-rbac: discovery, self reviews, basic user info, image pulls in its namespace. Listing pods needs an explicit grant."
+        - "Identities do not inherit from whoever created them. developer's admin RoleBinding names developer only; the ServiceAccount is a separate subject with its own bindings."
+    observe: |
+      `no` (exit code 1). The `--list` output contains no `pods` row: only generic rules such as self subject reviews,
+      discovery URLs (`/api`, `/apis`, `/version`...), build webhooks, listing projects, `get` on `imagestreams/layers`
+      (pulling images of this namespace) and `use` on the `restricted-v2` and `restricted-v3` SCCs.
+  - id: reporter
+    title: "reporter: read pods, nothing else"
+    do: "Create a Role that can get, list and watch pods, and bind it to reporter."
+    commands:
+      - {cmd: "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-rbac", meaning: "the Role"}
+      - {cmd: "oc create rolebinding reporter-pod-reader --role=pod-reader --serviceaccount=academy-rbac:reporter -n academy-rbac", meaning: "the binding"}
+      - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac", meaning: "now yes"}
+      - {cmd: "oc auth can-i delete pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac", meaning: "still no", expect: fail}
+    observe: "list → yes, delete → no. `oc auth can-i` also signals the answer in its exit code (0 yes, 1 no), handy in scripts."
+    checks: [rep-list, rep-delete, rep-secrets]
+  - id: deployer
+    title: "ci-deployer: update Deployments, not delete them"
+    do: |
+      The pipeline runs `oc set image deploy/web ...`, which reads the Deployment (get) and sends a patch. Create a
+      Role `deployer` with exactly get, list and patch on deployments (API group apps) and bind it to ci-deployer;
+      list is there so the pipeline can also find Deployments with `oc get`.
+    commands:
+      - {cmd: "oc create role deployer --verb=get,list,patch --resource=deployments.apps -n academy-rbac", meaning: "deployments live in the apps group"}
+      - {cmd: "oc create rolebinding ci-deployer-deployer --role=deployer --serviceaccount=academy-rbac:ci-deployer -n academy-rbac", meaning: "bind"}
+      - {cmd: "oc auth can-i patch deployments.apps --as=system:serviceaccount:academy-rbac:ci-deployer -n academy-rbac", meaning: "yes"}
+      - {cmd: "oc auth can-i delete deployments.apps --as=system:serviceaccount:academy-rbac:ci-deployer -n academy-rbac", meaning: "no", expect: fail}
+    predict:
+      prompt: "Would binding the built-in `edit` ClusterRole to ci-deployer also work?"
+      choices: ["Yes, and it is equally safe", "Yes, but it also allows deleting workloads and reading Secrets in the namespace", "No, ClusterRoles cannot be used in RoleBindings"]
+      answer: 1
+      explain: "It works (a RoleBinding can reference a ClusterRole; the rules then apply only in the binding's namespace), but `edit` is far broader than the job needs."
+      feedback:
+        - "It would work, but it is not equally safe: `edit` also allows creating and deleting most namespaced objects and reading Secrets, far more than patching one Deployment."
+        - "Right. A RoleBinding to the `edit` ClusterRole works, but it grants write access to most objects in the namespace, including deleting workloads and reading Secrets."
+        - "RoleBindings may reference ClusterRoles; that is how the built-in admin, edit and view roles are granted per project. The rules then apply only in the RoleBinding's namespace."
+    observe: "patch → yes, delete → no, exit codes 0 and 1."
+    checks: [dep-patch, dep-delete, dep-secrets]
+  - id: whocan
+    title: "Audit view: who can patch deployments here?"
+    do: "List every subject that can patch deployments in this project."
+    commands:
+      - {cmd: "oc adm policy who-can patch deployments.apps -n academy-rbac", meaning: "users, groups and ServiceAccounts with the permission"}
+    observe: |
+      Users: `developer` (project admin), `kubeadmin` and `system:admin`, your
+      `system:serviceaccount:academy-rbac:ci-deployer`, and many platform ServiceAccounts (operators, the garbage
+      collector). Groups: `system:cluster-admins` and `system:masters`. reporter is absent. The recording also ends
+      with `Error during evaluation, results may not be complete`: a cluster binding refers to a ClusterRole that does
+      not exist, so the review could not evaluate it. Read that warning as "this list may be incomplete".
+    why: "Effective permission is the union of every binding that reaches a subject. Reviewing it per permission is how access audits work, and most of the list is the platform itself, which is why reviews filter system subjects."
+hints: []
+checks:
+  - {id: rep-list, title: "reporter can list pods", type: can_i, as: reporter, verb: list, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: rep-delete, title: "reporter cannot delete pods", type: can_i, as: reporter, verb: delete, resource: pods, expect: "no", expect_text: "no"}
+  - {id: rep-secrets, title: "reporter cannot read Secrets", type: can_i, as: reporter, verb: get, resource: secrets, expect: "no", expect_text: "no"}
+  - {id: dep-patch, title: "ci-deployer can patch deployments", type: can_i, as: ci-deployer, verb: patch, resource: deployments.apps, expect: "yes", expect_text: "yes"}
+  - {id: dep-delete, title: "ci-deployer cannot delete deployments", type: can_i, as: ci-deployer, verb: delete, resource: deployments.apps, expect: "no", expect_text: "no"}
+  - {id: dep-secrets, title: "ci-deployer cannot read Secrets", type: can_i, as: ci-deployer, verb: get, resource: secrets, expect: "no", expect_text: "no"}
+  - {id: dep-pods, title: "ci-deployer cannot delete pods", type: can_i, as: ci-deployer, verb: delete, resource: pods, expect: "no", expect_text: "no"}
+variations:
+  - "Try to bind `cluster-admin` to reporter with a RoleBinding. The API server refuses because you would grant permissions you do not hold (the error says you are attempting to grant RBAC permissions not currently held): escalation prevention."
+  - "Delete the reporter ServiceAccount and recreate it with the same name. Does the RoleBinding still apply? (Yes: bindings name subjects; this is the 'access that comes back' problem.)"
+troubleshooting:
+  - problem: "`can-i patch deployments` says no although the Role exists."
+    hint: "Check the API group: `--resource=deployments.apps` (or `deployments` with `oc create role`, which resolves the group). `oc describe role deployer`."
+questions:
+  - q: "Why use `oc auth can-i --as` rather than testing with the real token?"
+    a: "It asks the API server to evaluate RBAC for that subject without needing (or exposing) its token. It uses impersonation, so you need the `impersonate` permission on that subject; project admins and editors have it for ServiceAccounts in their namespace."
+  - q: "What prevents developer from granting cluster-admin to a ServiceAccount?"
+    a: "RBAC escalation prevention: you can create a binding only to a role whose permissions you already hold in that scope, unless you have the `bind` verb on that role (`escalate` is the equivalent for creating or editing Roles)."
+enterprise: |
+  CI/CD ServiceAccounts with `admin` or `edit` on production projects are a frequent audit finding. Narrow Roles,
+  one ServiceAccount per pipeline, short-lived tokens and periodic who-can reviews are the usual remedy.
+references:
+  - {title: "Kubernetes: Using RBAC authorization", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"}
+  - {title: "Kubernetes: Privilege escalation prevention", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#privilege-escalation-prevention-and-bootstrapping"}
+  - {title: "OpenShift 4.21: Using RBAC to define and apply permissions", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac"}

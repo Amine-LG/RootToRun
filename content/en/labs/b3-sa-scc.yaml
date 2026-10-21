@@ -1,0 +1,161 @@
+id: lab.sa-scc
+title: "ServiceAccounts and SCC exceptions"
+summary: "A workload that insists on root is rejected; an administrator grants anyuid to its ServiceAccount; then you remove the need for the exception altogether."
+module: b3-workload-security
+mode: REAL_LAB
+minutes: 35
+level: 3
+supports: "Recorded on OpenShift 4.21.8 (SCCs restricted-v2 and anyuid). Granting an SCC needs cluster-admin; those steps are marked admin."
+concepts: [sec.scc, sec.serviceaccounts, sec.rbac]
+prerequisites: [o2.service-accounts]
+namespace: academy-scc
+objective: |
+  See how SCC admission uses the pod's ServiceAccount, how an exception is granted through RBAC, why it is scoped to
+  one ServiceAccount, and how to get rid of it by fixing the workload.
+background: |
+  `needs-root` runs with ServiceAccount `rooty` and sets `runAsUser: 0`. restricted-v2 forbids it, so its pods are
+  rejected at creation. `oc adm policy add-scc-to-user anyuid -z rooty` binds the `system:openshift:scc:anyuid`
+  ClusterRole (verb `use` on that SCC) to that one ServiceAccount. SCCs are OpenShift-specific, granted through
+  ordinary Kubernetes RBAC; upstream Kubernetes only has Pod Security Admission, which OpenShift also runs alongside
+  SCCs. Admin steps are recorded with a cluster-admin identity.
+
+  **Where everything comes from.** The app creates the project `academy-scc` and applies the ServiceAccount `rooty`
+  and the Deployment `needs-root` shown below, which runs `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed) and asks for UID 0 in its manifest. The steps marked
+  admin use the administrator identity you connected on the Connections page (OpenShift Local's `kubeadmin`): granting
+  an SCC needs cluster-admin. The last step reads the SCCs as the reader identity, a read-only ServiceAccount
+  (`academy-reader` in the project `academy-system`) that the app creates once from the Connections page and binds to
+  the built-in `cluster-reader` role. The grant is revoked in the lab, and the RoleBinding it created is deleted with the
+  project on Clean up.
+setup:
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: rooty}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: needs-root, labels: {app: needs-root}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: needs-root}}
+      template:
+        metadata: {labels: {app: needs-root}}
+        spec:
+          serviceAccountName: rooty
+          terminationGracePeriodSeconds: 2
+          securityContext: {runAsUser: 0}
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+steps:
+  - id: rejected
+    title: "Rejected at admission"
+    do: "The Deployment has no pods. Find out why."
+    commands:
+      - {cmd: "oc get deploy,rs,pods -n academy-scc", meaning: "0 pods"}
+      - {cmd: "oc get events -n academy-scc --field-selector reason=FailedCreate", meaning: "the ReplicaSet's rejection"}
+    wait_for: [rejected]
+    observe: "The ReplicaSet exists (DESIRED 1, CURRENT 0) but has no pods. The event says `unable to validate against any security context constraint` and lists every SCC: the ones this ServiceAccount may not use say `Forbidden: not usable by user or serviceaccount` (anyuid among them), and the ones it may use say why the spec does not fit, for example `provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1003180000, 1003189999]` (the project's UID range; yours differs)."
+    why: "SCC admission runs when the pod is created, so a Deployment never gets a pod to describe: the rejection is only visible as a FailedCreate event on the ReplicaSet. The range comes from the project's `openshift.io/sa.scc.uid-range` annotation, so it differs per project."
+  - id: review
+    title: "Which SCC would admit it?"
+    do: "Ask the API which SCC this pod spec would get with its ServiceAccount."
+    commands:
+      - cmd: "oc adm policy scc-subject-review -f - -n academy-scc"
+        meaning: "evaluate SCC admission for a pod spec, without creating anything"
+        stdin: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: probe
+          spec:
+            serviceAccountName: rooty
+            securityContext: {runAsUser: 0}
+            containers:
+            - name: app
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+    observe: "`ALLOWED BY` is `<none>`: no SCC that this ServiceAccount may use admits a pod with `runAsUser: 0`."
+    why: "`scc-subject-review` runs the same SCC matching as admission but creates nothing, so you can test a spec, or the effect of a grant, before deploying."
+  - id: grant
+    title: "admin: grant anyuid to that ServiceAccount only"
+    do: "An administrator grants the exception and you restart the rollout."
+    commands:
+      - {cmd: "oc adm policy add-scc-to-user anyuid -z rooty -n academy-scc", as: admin, meaning: "use of anyuid for system:serviceaccount:academy-scc:rooty"}
+      - {cmd: "oc get rolebinding system:openshift:scc:anyuid -n academy-scc -o wide", meaning: "the grant is an ordinary RoleBinding in this project: ClusterRole/system:openshift:scc:anyuid for academy-scc/rooty"}
+      - {cmd: "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:rooty -n academy-scc", meaning: "yes. oc warns that SCCs are not namespaced; the answer still depends on -n, because the grant is a RoleBinding in this project"}
+      - {cmd: "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:default -n academy-scc", expect: fail, meaning: "no (exit code 1): the default ServiceAccount of the same project did not get it"}
+      - {cmd: "oc rollout restart deploy/needs-root -n academy-scc", meaning: "the ReplicaSet tries again"}
+      - {cmd: "oc rollout status deploy/needs-root -n academy-scc --timeout=120s", meaning: "now admitted", timeout: 150}
+    wait_for: [ready]
+    observe: "The grant created a RoleBinding named `system:openshift:scc:anyuid` in academy-scc whose only subject is `academy-scc/rooty`. `can-i use` answers `yes` for rooty and `no` for `default` in the same project. oc adds `Warning: resource 'securitycontextconstraints' is not namespace scoped`: the SCC object is cluster-wide, but the permission to use it comes from a RoleBinding in this project, so the question needs `-n`. The rollout then completes."
+    why: "The exception covers one ServiceAccount in one project: every other pod in academy-scc runs as `default` and still gets restricted-v2. Granting the SCC to a group, or through a ClusterRoleBinding, would be far broader. (If you rerun the previous step's review right after the grant, it can still print `<none>` for about ten seconds: SCC reviews are answered by the OpenShift API server, which caches authorization answers briefly. Pod admission does not wait for that, as the rollout shows.)"
+  - id: as-root
+    title: "Confirm what was admitted"
+    do: "Read the SCC annotation and the identity inside the container."
+    commands:
+      - {cmd: "oc get pods -l app=needs-root -n academy-scc -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'", meaning: "which SCC admitted each pod (the openshift.io/scc annotation)"}
+      - {cmd: "oc exec deploy/needs-root -n academy-scc -- id", meaning: "uid=0(root)"}
+    observe: "Both listed pods show SCC `anyuid`, and `id` prints `uid=0(root) gid=0(root)`. There are two pods because the rollout was still finishing: once the grant existed, the original ReplicaSet's next retry also succeeded (its pod, `needs-root-67bbb6688b-…` in the recording, is the one being replaced), and the restart's new ReplicaSet created the other. anyuid is the only SCC available to `rooty` that allows UID 0."
+    why: "The `openshift.io/scc` annotation is written by SCC admission and is the authoritative record of which SCC a pod got. Annotation keys contain dots, so they are escaped in the column path (`openshift\\.io/scc`) and the whole argument is single-quoted so the shell keeps the backslash; unquoted, the column prints `<none>`."
+  - id: remove
+    title: "Remove the need for the exception"
+    do: "Delete runAsUser from the pod template, then (admin) revoke the exception."
+    predict:
+      prompt: "The template no longer sets runAsUser, and rooty has lost anyuid. The image's default user is root. What happens to the new pod?"
+      choices:
+        - "It is rejected again, because rooty no longer has anyuid"
+        - "It is admitted by restricted-v2 and runs with a UID from the project's range"
+        - "It is admitted and runs as root, because the image's default user is root"
+        - "It is admitted by anyuid, because the existing pods already use it"
+      answer: 1
+      explain: "restricted-v2 uses MustRunAsRange: when the pod does not ask for a UID, admission assigns the first UID of the project's range, so the image's default user is ignored."
+      feedback:
+        - "anyuid was only needed because the spec demanded UID 0. Without that demand, restricted-v2 matches and the pod is admitted."
+        - "Right: restricted-v2 assigns a UID from the project's `openshift.io/sa.scc.uid-range` when the pod does not set one."
+        - "The image's USER is a default, not a requirement. restricted-v2 overrides it with a UID from the project's range."
+        - "SCCs are evaluated per pod at creation time. New pods are checked against what the ServiceAccount may use now, and anyuid was revoked."
+    commands:
+      - {cmd: "oc patch deploy/needs-root -n academy-scc --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/template/spec/securityContext/runAsUser\"}]'", meaning: "stop asking for root"}
+      - {cmd: "oc adm policy remove-scc-from-user anyuid -z rooty -n academy-scc", as: admin, meaning: "revoke the exception"}
+      - {cmd: "oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-scc:rooty -n academy-scc", expect: fail, meaning: "no (exit code 1): the exception is gone"}
+      - {cmd: "oc rollout restart deploy/needs-root -n academy-scc", meaning: "new pods"}
+      - {cmd: "oc rollout status deploy/needs-root -n academy-scc --timeout=120s", meaning: "admitted by restricted-v2", timeout: 150}
+    wait_for: [restricted]
+  - id: after
+    title: "Back to the default"
+    do: "Read the SCC and the UID again."
+    commands:
+      - {cmd: "oc get pods -l app=needs-root -n academy-scc -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'", meaning: "the new pod and any old ones still terminating, each with the SCC that admitted it"}
+      - {cmd: "oc get scc anyuid restricted-v2 -o custom-columns=NAME:.metadata.name,PRIORITY:.priority", as: reader, meaning: "SCC priorities: anyuid 10, restricted-v2 none"}
+      - {cmd: "oc exec deploy/needs-root -n academy-scc -- id", meaning: "a high UID from the project's range"}
+    observe: "The listing has three pods: the new one admitted by `restricted-v2`, and two older ones still terminating with `anyuid`. One of those was created by the `oc patch` rollout a moment *before* the revoke: although its spec no longer asked for UID 0, it still got anyuid, because anyuid has priority 10 and restricted-v2 none, and admission tries the SCCs a pod may use in priority order. That is why the step revokes the grant and then restarts. `id` in the new pod prints `uid=1003180000(1003180000) gid=0(root)`, the first UID of the project's range. The lab's final check confirms that the running pod is `restricted-v2`."
+    why: "Removing `runAsUser` is the real fix: the image runs fine as an arbitrary UID with group 0, so no exception is needed and the grant can be revoked."
+hints:
+  - "A Deployment with zero pods: look at the ReplicaSet's FailedCreate events, not at pods."
+  - "The event lists every SCC with the reason it did not apply. Which part of the pod spec does restricted-v2 object to?"
+  - "Ask whether the workload really needs root before asking for anyuid: remove `runAsUser: 0` from the pod template."
+checks:
+  - {id: rejected, title: "Pods were rejected by SCC admission", type: event, reason: FailedCreate, message_contains: "security context constraint", final: false, expect_text: "FailedCreate ... security context constraint"}
+  - {id: ready, title: "needs-root is running", type: deployment_ready, name: needs-root, expect_text: "1/1"}
+  - {id: restricted, title: "It now runs under restricted-v2", type: pods, selector: app=needs-root, annotation: "openshift.io/scc=restricted-v2", expect_text: "openshift.io/scc=restricted-v2"}
+  - {id: no-root, title: "The template no longer asks for root", type: field, kind: deployment, name: needs-root, path: spec.template.spec.securityContext.runAsUser, op: absent, expect_text: "no runAsUser"}
+questions:
+  - q: "Why grant an SCC to a dedicated ServiceAccount instead of `default`?"
+    a: "Every pod in the namespace that does not set a ServiceAccount uses default: the exception would spread to all of them."
+  - q: "Can a project administrator grant anyuid to their own ServiceAccount?"
+    a: "No. Using an SCC requires the `use` verb on that SCC, and RBAC escalation prevention stops project admins from granting a permission they do not hold. A cluster administrator has to grant it."
+  - q: "Where do you look when a Deployment has zero pods because of SCC?"
+    a: "FailedCreate events of its ReplicaSet (oc get events --field-selector reason=FailedCreate)."
+enterprise: |
+  Every SCC exception should have an owner, a justification, a review date and a single dedicated ServiceAccount.
+  Periodic reviews list who can `use` non-default SCCs. Note that RBAC-based checks such as `oc auth can-i` only
+  see grants made through RBAC, not users or groups listed directly in an SCC object, so a review must read both.
+  An access-review tool should therefore show SCC grants alongside RBAC.
+references:
+  - {title: "OpenShift 4.21: Managing security context constraints", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies"}
+variations:
+  - "Before asking an administrator for an exception, test the request: run `oc adm policy scc-subject-review` on a pod spec that sets `runAsUser` to the first UID of your project's range. Check: the review names `restricted-v2`, so that spec needs no exception."
+  - "Find out which SCCs the project's `default` ServiceAccount may use. Check: `oc auth can-i use` answers yes for `restricted-v2` and no for `anyuid`."

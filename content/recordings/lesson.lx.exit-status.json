@@ -1,0 +1,113 @@
+{
+ "lab": "lesson.lx.exit-status",
+ "kind": "lesson",
+ "lab_hash": "12266acfb3135f82",
+ "recorded_at": "2026-10-15T17:10:45+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "echo hello; echo \"status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "hello\nstatus: 0\n",
+   "stderr": "",
+   "combined": "hello\nstatus: 0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls logs; echo \"status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "app.log\nstatus: 0\n",
+   "stderr": "",
+   "combined": "app.log\nstatus: 0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls nosuchdir; echo \"status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "status: 2\n",
+   "stderr": "ls: cannot access 'nosuchdir': No such file or directory\n",
+   "combined": "ls: cannot access 'nosuchdir': No such file or directory\nstatus: 2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep -q ERROR logs/app.log; echo \"ERROR: $?\"; grep -q FATAL logs/app.log; echo \"FATAL: $?\"; grep -q ERROR missing.log; echo \"missing file: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ERROR: 0\nFATAL: 1\nmissing file: 2\n",
+   "stderr": "grep: missing.log: No such file or directory\n",
+   "combined": "ERROR: 0\nFATAL: 1\ngrep: missing.log: No such file or directory\nmissing file: 2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "nosuchcommand; echo \"status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "status: 127\n",
+   "stderr": "bash: nosuchcommand: command not found\n",
+   "combined": "bash: nosuchcommand: command not found\nstatus: 127\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cd nosuchdir && echo cleaning up",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "bash: line 1: cd: nosuchdir: No such file or directory\n",
+   "combined": "bash: line 1: cd: nosuchdir: No such file or directory\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep -q ERROR logs/app.log || echo 'not found, or failed'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep -q FATAL logs/app.log || echo 'not found, or failed'; grep -q ERROR missing.log || echo 'not found, or failed'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "not found, or failed\nnot found, or failed\n",
+   "stderr": "grep: missing.log: No such file or directory\n",
+   "combined": "not found, or failed\ngrep: missing.log: No such file or directory\nnot found, or failed\n",
+   "ok": true
+  }
+ ],
+ "seconds": 4,
+ "ok": true,
+ "problems": []
+}

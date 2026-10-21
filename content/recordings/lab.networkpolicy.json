@@ -1,0 +1,328 @@
+{
+ "lab": "lab.networkpolicy",
+ "kind": "lab",
+ "lab_hash": "1f3966805d73cb2c",
+ "recorded_at": "2026-10-20T18:16:10+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "open",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>academy netpol</h1>",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "open",
+   "cmd": "oc exec deploy/stranger -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>academy netpol</h1>",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "open",
+   "cmd": "oc get networkpolicy -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-netpol namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "deny",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/deny-all-ingress created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deny",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "command terminated with exit code 28\n",
+   "ok": true
+  },
+  {
+   "step": "route-down",
+   "cmd": "oc get pods -n openshift-ingress -o custom-columns=NAME:.metadata.name,HOSTNETWORK:.spec.hostNetwork,NODE:.spec.nodeName",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                 HOSTNETWORK   NODE\nrouter-default-78b77bfd47-qhpc8      true          crc\nroutes-controller-867bd6f755-kzt45   <none>        crc\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "route-down",
+   "cmd": "oc get pods -l app=web -n academy-netpol -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nweb-7ddfddcc56-km446   1/1     Running   0          30s   10.217.0.232   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "allow-client",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/allow-client-to-web created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "allow-client",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>academy netpol</h1>",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "allow-client",
+   "cmd": "oc exec deploy/stranger -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "command terminated with exit code 28\n",
+   "ok": true
+  },
+  {
+   "step": "allow-router",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/allow-from-router created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "allow-router",
+   "cmd": "oc get networkpolicy -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  POD-SELECTOR   AGE\nallow-client-to-web   app=web        14s\nallow-from-router     app=web        2s\ndeny-all-ingress      <none>         28s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/client-deny-egress created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "command terminated with exit code 28\n",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/client-allow-dns created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc exec deploy/client -n academy-netpol -- getent hosts web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.5.129    web.academy-netpol.svc.cluster.local\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "command terminated with exit code 28\n",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc apply -f - -n academy-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/client-allow-web created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "egress",
+   "cmd": "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>academy netpol</h1>",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "route-ok",
+    "title": "The Route answers 200",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-netpol.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   },
+   {
+    "id": "client-ok",
+    "title": "client can reach web",
+    "expect": "page content",
+    "status": "pass",
+    "observed": "<h1>academy netpol</h1>"
+   },
+   {
+    "id": "stranger-blocked",
+    "title": "stranger is blocked",
+    "expect": "curl exit 28 (timeout)",
+    "status": "fail",
+    "observed": "<h1>academy netpol</h1>"
+   },
+   {
+    "id": "dns-ok",
+    "title": "client can resolve names (DNS egress allowed)",
+    "expect": "web resolves",
+    "status": "pass",
+    "observed": "10.217.5.129    web.academy-netpol.svc.cluster.local"
+   },
+   {
+    "id": "client-egress-isolated",
+    "title": "An egress policy selects client (its outgoing traffic is isolated)",
+    "expect": "isolated for egress",
+    "status": "fail",
+    "observed": "policies isolating these pods for egress: none"
+   },
+   {
+    "id": "deny-exists",
+    "title": "A default-deny ingress policy exists",
+    "expect": "exists",
+    "status": "fail",
+    "observed": "Error from server (NotFound): networkpolicies.networking.k8s.io \"deny-all-ingress\" not found"
+   }
+  ],
+  "at": 1792520189.0046077
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "route-ok",
+    "title": "The Route answers 200",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-netpol.apps-crc.testing/ → HTTP 200 · academy netpol"
+   },
+   {
+    "id": "client-ok",
+    "title": "client can reach web",
+    "expect": "page content",
+    "status": "pass",
+    "observed": "<h1>academy netpol</h1>"
+   },
+   {
+    "id": "stranger-blocked",
+    "title": "stranger is blocked",
+    "expect": "curl exit 28 (timeout)",
+    "status": "pass",
+    "observed": "command terminated with exit code 28"
+   },
+   {
+    "id": "dns-ok",
+    "title": "client can resolve names (DNS egress allowed)",
+    "expect": "web resolves",
+    "status": "pass",
+    "observed": "10.217.5.129    web.academy-netpol.svc.cluster.local"
+   },
+   {
+    "id": "client-egress-isolated",
+    "title": "An egress policy selects client (its outgoing traffic is isolated)",
+    "expect": "isolated for egress",
+    "status": "pass",
+    "observed": "policies isolating these pods for egress: client-allow-dns, client-allow-web, client-deny-egress"
+   },
+   {
+    "id": "deny-exists",
+    "title": "A default-deny ingress policy exists",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "networkpolicy/deny-all-ingress exists"
+   }
+  ],
+  "at": 1792520267.3644683
+ },
+ "seconds": 96,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-netpol: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

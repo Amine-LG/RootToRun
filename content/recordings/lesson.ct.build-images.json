@@ -1,0 +1,149 @@
+{
+ "lab": "lesson.ct.build-images",
+ "kind": "lesson",
+ "lab_hash": "2bbcc9bf4fa5aa88",
+ "recorded_at": "2026-10-15T17:10:49+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "podman pull -q quay.io/prometheus/busybox:latest >/dev/null",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat Containerfile",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "FROM quay.io/prometheus/busybox:latest\nCOPY site/ /www/\nEXPOSE 8080\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n",
+   "stderr": "",
+   "combined": "FROM quay.io/prometheus/busybox:latest\nCOPY site/ /www/\nEXPOSE 8080\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman build -t localhost/site:1.0 . 2>&1 | grep -E '^STEP|^COMMIT'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\nSTEP 3/4: EXPOSE 8080\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\nCOMMIT localhost/site:1.0\n",
+   "stderr": "",
+   "combined": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\nSTEP 3/4: EXPOSE 8080\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\nCOMMIT localhost/site:1.0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run -d --name site -p 18280:8080 localhost/site:1.0 >/dev/null; curl -s --retry 5 --retry-connrefused --retry-delay 1 http://localhost:18280/",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>Built into the image</h1>\n",
+   "stderr": "",
+   "combined": "<h1>Built into the image</h1>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman build -t localhost/site:1.0 . 2>&1 | grep -E '^STEP|Using cache|^COMMIT'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\n--> Using cache 6c6e35d23ac17595fc3ee94494e6fb5eee1c20ecf1d8a879933386e400b10f37\nSTEP 3/4: EXPOSE 8080\n--> Using cache a23aa0a4eb6bd9e304f4ebf9fac14828b3ee9215f87af6c3e9f282f899325a2d\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n--> Using cache b1e6a3dc63dc54907deefa4e8f4d27ad929d65629e710068f3d903c6a36d0d26\nCOMMIT localhost/site:1.0\n",
+   "stderr": "",
+   "combined": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\n--> Using cache 6c6e35d23ac17595fc3ee94494e6fb5eee1c20ecf1d8a879933386e400b10f37\nSTEP 3/4: EXPOSE 8080\n--> Using cache a23aa0a4eb6bd9e304f4ebf9fac14828b3ee9215f87af6c3e9f282f899325a2d\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n--> Using cache b1e6a3dc63dc54907deefa4e8f4d27ad929d65629e710068f3d903c6a36d0d26\nCOMMIT localhost/site:1.0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo '<p>release 1.1</p>' >> site/index.html && podman build -t localhost/site:1.1 . 2>&1 | grep -E '^STEP|Using cache|^COMMIT'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\nSTEP 3/4: EXPOSE 8080\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\nCOMMIT localhost/site:1.1\n",
+   "stderr": "",
+   "combined": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\nSTEP 3/4: EXPOSE 8080\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\nCOMMIT localhost/site:1.1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman build -t localhost/site:2.0 . 2>&1 | grep -E '^STEP|Using cache|^COMMIT'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\n--> Using cache 5650f8ae6d7b4ca7f7e409bbfa3b4a5937dc21ca737c1cdb7c5571d14c471a2a\nSTEP 3/4: EXPOSE 8080\n--> Using cache 250349f2bbbf0b060ce2a58252e445171439da56ae235e077017c388a9849a44\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n--> Using cache 797423794e3b616b7f8a5d935cd76cc3380e776ead58fe69efcfd0da2d968ec1\nCOMMIT localhost/site:2.0\n",
+   "stderr": "",
+   "combined": "STEP 1/4: FROM quay.io/prometheus/busybox:latest\nSTEP 2/4: COPY site/ /www/\n--> Using cache 5650f8ae6d7b4ca7f7e409bbfa3b4a5937dc21ca737c1cdb7c5571d14c471a2a\nSTEP 3/4: EXPOSE 8080\n--> Using cache 250349f2bbbf0b060ce2a58252e445171439da56ae235e077017c388a9849a44\nSTEP 4/4: CMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n--> Using cache 797423794e3b616b7f8a5d935cd76cc3380e776ead58fe69efcfd0da2d968ec1\nCOMMIT localhost/site:2.0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman history --format '{{.CreatedBy}} | {{.Size}}' localhost/site:1.1 | cut -c1-90",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/bin/sh -c #(nop) CMD [\"httpd\", \"-f\", \"-p\"... | 0B\n/bin/sh -c #(nop) EXPOSE 8080 | 0B\n/bin/sh -c #(nop) COPY dir:280d68aa177e2cd... | 2.56kB\nCOPY /rootfs / # buildkit | 1.26MB\nMAINTAINER The Prometheus Authors <prometh... | 0B\nBusyBox 1.38.0 (uclibc), Buildroot 2026.08... | 1.5MB\n",
+   "stderr": "",
+   "combined": "/bin/sh -c #(nop) CMD [\"httpd\", \"-f\", \"-p\"... | 0B\n/bin/sh -c #(nop) EXPOSE 8080 | 0B\n/bin/sh -c #(nop) COPY dir:280d68aa177e2cd... | 2.56kB\nCOPY /rootfs / # buildkit | 1.26MB\nMAINTAINER The Prometheus Authors <prometh... | 0B\nBusyBox 1.38.0 (uclibc), Buildroot 2026.08... | 1.5MB\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat .containerignore; podman run --rm localhost/site:1.1 ls /www",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "site/*.log\nsite/secrets.env\nindex.html\n",
+   "stderr": "",
+   "combined": "site/*.log\nsite/secrets.env\nindex.html\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat Containerfile.quotes; podman build -q -f Containerfile.quotes -t localhost/site:quotes . >/dev/null && podman run --rm localhost/site:quotes",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 127,
+   "stdout": "FROM quay.io/prometheus/busybox:latest\nCOPY site/ /www/\nCMD ['httpd', '-f', '-p', '8080', '-h', '/www']\n",
+   "stderr": "/bin/sh: line 0: [httpd,: not found\n",
+   "combined": "FROM quay.io/prometheus/busybox:latest\nCOPY site/ /www/\nCMD ['httpd', '-f', '-p', '8080', '-h', '/www']\n/bin/sh: line 0: [httpd,: not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rm -f -t 0 site >/dev/null; podman rmi -f localhost/site:1.0 localhost/site:1.1 localhost/site:2.0 localhost/site:quotes >/dev/null; echo cleaned up",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cleaned up\n",
+   "stderr": "",
+   "combined": "cleaned up\n",
+   "ok": true
+  }
+ ],
+ "seconds": 24,
+ "ok": true,
+ "problems": []
+}

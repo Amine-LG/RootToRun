@@ -1,0 +1,157 @@
+id: ch.recover-and-scale
+kind: challenge
+title: "Recover and scale an API"
+summary: "Three faults stand between an API and its users. Find them, repair them, then scale for load."
+module: r1-app-challenges
+minutes: 35
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Any cluster with Routes and the UBI images works."
+concepts: [k8s.deployment, k8s.probes, net.services, net.endpointslices, net.routes, container.images]
+prerequisites: [o1.troubleshooting, b.pod-lifecycle, d.services-dns]
+namespace: academy-ch-recover
+objective: |
+  Bring an API back to service and scale it to three Ready replicas, with every request path working, without
+  deleting and recreating the project.
+background: |
+  **Where everything comes from.** The project starts with the `api` objects exactly as the three afternoon changes
+  left them (a Deployment, its ConfigMap page, a Service and a Route) and the `client` pod (`sleep` in the UBI 9
+  minimal image) for tests from inside. The app creates the project `academy-ch-recover` as your learner identity when
+  you start the challenge and applies the starting objects; everything else is yours to create. The images come from
+  Red Hat's public registry `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you
+  press Grade, as the app's own identities; Clean up deletes the project.
+symptom: |
+  The `api` Deployment was "improved" by three separate changes on the same afternoon. Its Route now answers 503 and
+  the team is about to double the traffic. Nobody remembers exactly what changed. The `client` pod in the project is
+  there for you (and the grader) to test from inside.
+requirements:
+  - "The Deployment `api` runs **3 replicas**, all Ready, from an image that exists (`registry.access.redhat.com/ubi9/httpd-24:latest` is the approved one)."
+  - "Inside the project, `http://api:8080/status` answers `api ok`."
+  - "The Route `api` answers `api ok` at `/status` from outside the cluster."
+  - "Repair what is there. (Deleting the project is not an option in production; the grader does not check how you repaired it.)"
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: api-content}
+    data: {status: "api ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: api, labels: {app: api}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: api}}
+      template:
+        metadata: {labels: {app: api}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:9.9-does-not-exist
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /status, port: 8000}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: api-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: api}
+    spec:
+      selector: {app: api}
+      ports: [{port: 8080, targetPort: 8081}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: api}
+    spec:
+      to: {kind: Service, name: api}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: client, labels: {app: client}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: client}}
+      template:
+        metadata: {labels: {app: client}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+hints:
+  - "Read the pod's status and events before changing anything. The first fault hides the second: a container that never starts never runs its probe."
+  - "After the image pulls, compare the readiness probe's port with the port httpd listens on (the container port)."
+  - "Pods Ready but still 503? Compare the Service's targetPort with the container port, then look at the EndpointSlice."
+fix:
+  - {cmd: "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover", meaning: "fault 1: an image tag that does not exist"}
+  - {cmd: "oc set probe deploy/api --readiness --get-url=http://:8080/status --period-seconds=5 -n academy-ch-recover", meaning: "fault 2: the probe checked a port nothing listens on"}
+  - cmd: "oc patch svc/api --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/targetPort\",\"value\":8080}]' -n academy-ch-recover"
+    meaning: "fault 3: the Service sent traffic to port 8081"
+  - {cmd: "oc scale deploy/api --replicas=3 -n academy-ch-recover", meaning: "then scale"}
+  - {cmd: "oc rollout status deploy/api -n academy-ch-recover --timeout=180s", meaning: "wait for three Ready pods", timeout: 200}
+checks:
+  - {id: ready, title: "api runs 3 Ready replicas", type: deployment_ready, name: api, replicas: 3, expect_text: "3/3 ready"}
+  - {id: endpoints, title: "The Service has 3 ready endpoints on port 8080", type: endpoints, service: api, op: gte, value: 3, port: 8080, expect_text: "3 ready endpoints, port 8080"}
+  - {id: inside, title: "http://api:8080/status answers inside the project", type: exec, from: app=client, command: ["/usr/bin/curl", "-s", "-m", "5", "http://api:8080/status"], trusted: true, expect_output: "api ok", expect_text: "api ok"}
+  - {id: outside, title: "Route api answers /status", type: route_http, route: api, path: /status, expect_status: 200, contains: "api ok", expect_text: "HTTP 200 api ok"}
+trials:
+  - id: scaled-only
+    title: "Scaled to 3 without repairing anything"
+    kind: wrong
+    expect: failed
+    commands:
+      - {cmd: "oc scale deploy/api --replicas=3 -n academy-ch-recover"}
+  - id: two-of-three
+    title: "Two of the three faults repaired, the third left in place, then scaled"
+    kind: partial
+    expect: partial
+    expect_checks: {ready: pass, inside: fail, outside: fail}
+    commands:
+      - {cmd: "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover"}
+      - {cmd: "oc set probe deploy/api --readiness --get-url=http://:8080/status -n academy-ch-recover"}
+      - {cmd: "oc scale deploy/api --replicas=3 -n academy-ch-recover"}
+  - id: probe-removed
+    title: "A correct alternative: one fault repaired in a weaker way (see the solution), another by applying a manifest"
+    kind: alternative
+    expect: verified
+    commands:
+      - {cmd: "oc set image deploy/api httpd=registry.access.redhat.com/ubi9/httpd-24:latest -n academy-ch-recover"}
+      - {cmd: "oc set probe deploy/api --readiness --remove -n academy-ch-recover"}
+      - cmd: "oc apply -f - -n academy-ch-recover"
+        stdin: |
+          apiVersion: v1
+          kind: Service
+          metadata: {name: api}
+          spec:
+            selector: {app: api}
+            ports: [{port: 8080, targetPort: 8080}]
+      - {cmd: "oc scale deploy/api --replicas=3 -n academy-ch-recover"}
+root_cause: |
+  Three independent faults, layered so that each one hides the next:
+  1. **Image tag that does not exist**: pods stay in `ErrImagePull`/`ImagePullBackOff`, so nothing else can be
+     observed yet.
+  2. **Readiness probe on port 8000**, while httpd listens on 8080: the pods run but never become Ready, so the
+     Service has no ready endpoints and the router answers 503.
+  3. **Service targetPort 8081**: the pods are Ready and the EndpointSlice lists them, but connections to port 8081
+     are refused. From outside, the router still answers 503.
+  Scaling first (the obvious reaction to "traffic is coming") only multiplies broken pods.
+alternatives: |
+  The grader accepts any repair that reaches the state: `oc edit`, `oc patch`, `oc apply` of a corrected manifest,
+  or the console. Removing the readiness probe also passes the requirements, but it is the weaker repair: without
+  it, a pod receives traffic before httpd is ready and during every rollout. The requirement to keep the objects
+  stops "delete the project and start again", which is rarely an option in production.
+sre: |
+  Write the incident note in this order: impact (503 for all users since the change), the three causes in the order
+  you found them, the evidence for each (events, probe failures, endpoints on the wrong port), the repair, and a
+  prevention step for each (pin images by digest or test the tag exists in CI; probe the port the container
+  declares; render manifests and compare Service targetPort with containerPort in review).
+questions:
+  - q: "Why could you not see the probe problem before fixing the image?"
+    a: "A container that never starts never runs its readiness probe. Kubernetes reports the first blocking condition (the pull failure) and nothing about later stages."
+  - q: "The pods are Ready and the EndpointSlice lists three addresses, but curl from the client pod is refused. Which field do you compare?"
+    a: "The Service's `targetPort` against the port the container listens on. An EndpointSlice address only proves that the selector matched a pod with an IP (its `conditions.ready` says whether it is eligible for traffic), not that the port is right."
+references:
+  - {title: "Kubernetes: Debug Pods", url: "https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/"}
+  - {title: "Kubernetes: Debug Services", url: "https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/"}
+  - {title: "Kubernetes: Images (pull errors)", url: "https://kubernetes.io/docs/concepts/containers/images/"}

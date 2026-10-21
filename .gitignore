@@ -1,0 +1,11 @@
+.venv/
+node_modules/
+frontend/dist/
+data/
+__pycache__/
+.pytest_cache/
+*.log
+.env
+*.kubeconfig
+
+docs/design/screens/

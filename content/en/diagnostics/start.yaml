@@ -1,0 +1,282 @@
+track: start
+title: "Kubernetes: find your gaps"
+intro: >-
+  Fourteen questions on the Linux evidence you will rely on, Kubernetes objects and controllers, and what OpenShift
+  adds. Allow about 15 minutes. Nothing is marked complete and nothing is graded for a certificate: the results only
+  suggest which lessons to start with.
+minutes: 15
+items:
+  # ---------- f0-prereqs ----------
+  - id: node-lost-replica-replaced
+    targets: [a.what-kubernetes-does, b.reconciliation]
+    prompt: "A Deployment declares 3 replicas, spread over several nodes. One node is switched off for good and you do nothing. What happens to the replica that ran there?"
+    choices:
+      - "It stays down until you recreate it, because a pod belongs to the node it was started on"
+      - "The running container is moved, memory and all, to another healthy node within seconds"
+      - "After a few minutes it is evicted, and a new pod is created on a healthy node"
+      - "The two remaining pods each start an extra container to make up for the lost capacity"
+    answer: 2
+    feedback:
+      - "Pods are tied to a node, but the Deployment is not: its desired count is still 3, so its controllers create a new pod elsewhere instead of waiting for you."
+      - "Kubernetes never migrates a running container. Pods are replaced, not moved: the replacement is a new pod with a new name and IP."
+      - "The node's pods tolerate an unreachable node for 300 seconds by default; then they are evicted and the ReplicaSet sees 2 instead of 3 and creates a new pod, which the scheduler places on a healthy node."
+      - "Replicas are whole pods created from the template. Nothing adds containers to existing pods to compensate."
+    explain: "You declare a result (3 replicas) and controllers keep making it true. A lost node's pods are evicted after the default 5-minute toleration, and the ReplicaSet creates replacements elsewhere."
+
+  - id: exit-137-slow-shutdown
+    targets: [f0.linux-essentials, a.container-is-a-process]
+    prompt: "On every rollout, old pods stay Terminating for about 30 seconds. The application's 'shutting down' log line never appears, and the container ends with exit code 137 and no OOMKilled reason. What is the most likely story?"
+    choices:
+      - "The container went over its memory limit while it was shutting down"
+      - "The application chose exit code 137 to report that its shutdown had failed"
+      - "It ignored SIGTERM and was killed with SIGKILL at the end of the grace period"
+      - "Kubernetes always stops containers with SIGKILL, so 137 is the normal result of any stop"
+    answer: 2
+    feedback:
+      - "A memory kill would carry the reason OOMKilled. Without it, 137 only says 'killed by signal 9', and the 30-second wait points to the grace period."
+      - "128 + N is the convention for death by signal N. The missing shutdown message and the 30-second delay say the process never ran its own exit path."
+      - "137 is 128 + 9 (SIGKILL). The 30 s is the default grace period. A common cause is a shell script as PID 1 that does not pass SIGTERM on: start the app with `exec`."
+      - "Kubernetes sends SIGTERM (or the image's STOPSIGNAL) first and only sends SIGKILL after the grace period. A process that handles SIGTERM exits with its own code, often 0."
+    explain: "Exit code 128 + N means 'killed by signal N'. A 137 without OOMKilled, after a full grace period, means SIGTERM was ignored and SIGKILL ended the process."
+
+  - id: arbitrary-uid-group-zero-write
+    targets: [f0.linux-essentials, a.container-security]
+    prompt: "A container runs on OpenShift under the restricted-v2 SCC. In which of the three directories below can the process create files?"
+    evidence: |
+      $ id
+      uid=1003080000(1003080000) gid=0(root) groups=0(root),1003080000
+      $ ls -lnd /opt/app/data /opt/app/logs /opt/app/tmp
+      drwxr-xr-x. 2 1001    0 6 Oct 13 21:00 /opt/app/data
+      drwxrwxr-x. 2 1001    0 6 Oct 13 21:00 /opt/app/logs
+      drwxrwx---. 2 1001 1001 6 Oct 13 21:00 /opt/app/tmp
+    choices:
+      - "data and logs, because both directories belong to group 0"
+      - "Only logs, the one that is group 0 and group-writable"
+      - "All three, because group 0 is the root group and bypasses the mode bits"
+      - "None of them, because the process's UID is not 1001"
+    answer: 1
+    feedback:
+      - "Group ownership is not enough: data is mode 755, so its group has r-x only. Write needs the w bit for the class that applies to you."
+      - "The UID matches no owner, so the group bits decide: logs is group 0 with rwx. tmp belongs to group 1001, which the process is not in, and 'others' get nothing."
+      - "Group 0 grants no privileges by itself. The kernel compares numbers and mode bits exactly as for any other group."
+      - "Not owning a file only rules out the owner bits. Group and 'others' bits still apply, which is why OpenShift images make writable paths group 0 and group-writable."
+    explain: "The kernel checks numeric IDs against mode bits. Under restricted-v2 the UID is arbitrary but the primary group is always 0, so writable paths must be group 0 with group write."
+
+  - id: no-matches-for-kind
+    targets: [f0.objects-api]
+    prompt: "Applying a manifest copied from an old tutorial fails as shown. What is the right next step?"
+    evidence: |
+      $ oc apply -f web.yaml
+      error: resource mapping not found for name: "web" namespace: "" from "web.yaml": no matches for kind "Ingress" in version "extensions/v1beta1"
+      ensure CRDs are installed first
+    choices:
+      - "Check which version serves Ingress (`oc api-resources`) and fix apiVersion"
+      - "Ask an administrator for permission to create Ingress objects in this project"
+      - "Ask an administrator to install a CustomResourceDefinition for the Ingress kind"
+      - "Fix the indentation, because kind and apiVersion were parsed as a single field"
+    answer: 0
+    feedback:
+      - "The kind exists, but not in that group and version on this cluster. Discovery shows what is served (Ingress is `networking.k8s.io/v1` today), and `oc explain` shows its fields."
+      - "A permission problem is answered with Forbidden by the server. 'No matches for kind' means the client could not even map the type to an API endpoint."
+      - "The hint about CRDs is generic. Ingress is a built-in kind; only the old `extensions/v1beta1` version is gone, so installing anything is the wrong fix."
+      - "The error names both the kind and the version correctly, so they were parsed as separate fields. The problem is that this pair is not served."
+    explain: "An object's type is group, version and kind. When the cluster does not serve a version, discovery (`oc api-resources`, `oc explain`) tells you which one to use instead."
+
+  - id: projects-versus-namespaces
+    targets: [f0.objects-api]
+    prompt: "As the developer user you see the output below. Why does one command fail while the other lists your projects?"
+    evidence: |
+      $ oc get namespaces
+      Error from server (Forbidden): namespaces is forbidden: User "developer" cannot list resource "namespaces" in API group "" at the cluster scope
+      $ oc get projects
+      NAME           DISPLAY NAME   STATUS
+      academy-apps                  Active
+      academy-cli                   Active
+    choices:
+      - "Projects are separate objects, stored apart from namespaces and with their own permissions"
+      - "The namespaces only exist in the web console until an administrator publishes them to the API"
+      - "Your oc client is older than the cluster and cannot read the namespaces API any more"
+      - "Listing namespaces needs a cluster-wide grant; projects list only the ones you can access"
+    answer: 3
+    feedback:
+      - "Every Project is a Namespace seen through the OpenShift API; nothing is stored twice. The difference is in how the list request is authorized."
+      - "The console uses the same API with the same token. Your namespaces exist; you are just not allowed to list all namespaces of the cluster."
+      - "Version skew shows up as unknown flags or kinds. Forbidden is the authorizer's answer: you were identified and refused."
+      - "Namespaces are cluster-scoped, so listing them needs a cluster-wide grant. The projects API filters the list down to the namespaces where you have a role."
+    explain: "A Project is a view of a Namespace. Listing projects shows only those you have access to; listing namespaces requires permission at the cluster scope."
+
+  # ---------- f1-containers ----------
+  - id: api-server-outage-effects
+    targets: [b.architecture]
+    prompt: "The API server is unreachable for ten minutes. During that time a container in a running pod crashes. What happens?"
+    choices:
+      - "Every pod stops, because the nodes can no longer reach the control plane to report status"
+      - "Pods keep serving and the kubelet restarts the container; scheduling and scaling wait"
+      - "Pods keep serving, but the crashed container stays down until the API server is back"
+      - "Every pod is evicted from its node after 30 seconds without contact with the API server"
+    answer: 1
+    feedback:
+      - "Containers are processes on the nodes. Losing the API stops decisions, not running processes."
+      - "Restarting a container per its restartPolicy is the kubelet's local job. What stops is everything that needs the API: new pods, scheduling, scaling, replacing deleted pods."
+      - "The kubelet already knows the pods bound to its node and restarts their containers itself; it does not ask the API server for permission."
+      - "Nothing evicts pods because the API is unreachable. Node-loss eviction is done by a control-plane controller, which is exactly what is unavailable here."
+    explain: "Control-plane outages stop changes, not running workloads: the kubelet keeps containers alive locally, while anything that needs a decision through the API waits."
+
+  - id: etcd-four-members
+    targets: [b.architecture]
+    prompt: "A team proposes running 4 etcd members instead of 3, 'for more safety'. How many member failures can a 4-member etcd cluster survive while still accepting writes?"
+    choices:
+      - "Two, because each extra member adds one more tolerated failure"
+      - "Three, because a single surviving member is enough to keep accepting writes"
+      - "None, because etcd only works with an odd number of members"
+      - "One, same as three members: a majority of four is three"
+    answer: 3
+    feedback:
+      - "Writes need a majority. Four members need three, so losing two leaves only two: no quorum."
+      - "One member alone is never a majority of four. Without quorum, writes stop."
+      - "Four members do run; they simply add no tolerance compared with three, while adding one more machine that can fail."
+      - "3 members tolerate 1 failure, 4 still tolerate 1, 5 tolerate 2. That is why clusters use 3 or 5."
+    explain: "etcd needs a quorum (majority) to accept writes. Odd sizes give the same failure tolerance with fewer members."
+
+  - id: observed-generation-lag
+    targets: [b.reconciliation]
+    prompt: "Right after you change a Deployment's image, you read the fields below. What can you conclude?"
+    evidence: |
+      metadata:
+        generation: 7
+      status:
+        observedGeneration: 6
+        readyReplicas: 3
+        updatedReplicas: 3
+    choices:
+      - "The new image is already running on all three replicas, since updatedReplicas says 3"
+      - "The rollout has failed, because generation and observedGeneration differ"
+      - "The controller has not acted on your change yet; status describes the old spec"
+      - "Someone else changed the Deployment again after you, raising the generation"
+    answer: 2
+    feedback:
+      - "updatedReplicas refers to the spec the controller last observed (generation 6), not your new one."
+      - "A gap is normal for a moment after any spec change. Failure shows as a condition, such as Progressing=False with ProgressDeadlineExceeded."
+      - "Generation counts spec changes; observedGeneration is the last one the controller acted on. `oc rollout status` waits for them to match before it reads the replica counts."
+      - "Your own change is what moved generation to 7. Nothing here suggests a second writer."
+    explain: "spec is a wish, status is a report. Only trust status once status.observedGeneration has caught up with metadata.generation."
+
+  - id: scaled-replicaset-reverts
+    targets: [b.reconciliation, lab.deployment-reconciliation]
+    prompt: "In a lab, a Deployment declares 3 replicas. You scale its ReplicaSet directly and look again a moment later. Why is it back at 3?"
+    evidence: |
+      $ oc scale rs/web-7ddfddcc56 --replicas=5 -n academy-deploy
+      replicaset.apps/web-7ddfddcc56 scaled
+      $ oc get rs -n academy-deploy
+      NAME             DESIRED   CURRENT   READY   AGE
+      web-7ddfddcc56   3         3         3       23s
+    choices:
+      - "Its owning Deployment declares 3, and that controller set it back"
+      - "The API server accepted the command but silently ignored the new replica count"
+      - "A ResourceQuota in the project capped the ReplicaSet at three pods, undoing the scale"
+      - "The scheduler found room for only 3 pods on the single node of the cluster"
+    answer: 0
+    feedback:
+      - "The write succeeded, then reconciliation compared desired (3, from the Deployment) with actual (5) and corrected it. Change the Deployment if you want 5."
+      - "The command reported success, and it did change the object; the change was then reconciled away."
+      - "A quota refusal would appear as FailedCreate events, and DESIRED would still read 5. Here the desired count itself went back to 3."
+      - "Scheduling problems leave pods Pending; they do not change a ReplicaSet's desired count."
+    explain: "Children are managed by their owners. A change made below the source of truth is overwritten by the owner's controller; fix the owner."
+
+  - id: daemonset-per-node
+    targets: [b.workloads]
+    prompt: "A log collector must run exactly one pod on every node, including nodes added to the cluster later. Which workload kind fits?"
+    choices:
+      - "A Deployment"
+      - "A DaemonSet"
+      - "A StatefulSet"
+      - "A CronJob"
+    answer: 1
+    feedback:
+      - "A Deployment keeps N interchangeable replicas wherever they fit. Even with N set to the node count, it must be edited whenever nodes change, and nothing guarantees exactly one pod per node."
+      - "A DaemonSet runs one pod on each matching node and adds one automatically when a node joins."
+      - "StatefulSet ordinals give stable names and per-replica storage; they know nothing about nodes."
+      - "A CronJob creates short-lived Jobs on a schedule, not a long-running agent per node."
+    explain: "Each workload kind is a controller with one guarantee: Deployment (interchangeable replicas), StatefulSet (identity), DaemonSet (one per node), Job (run to completion), CronJob (Jobs on a schedule)."
+
+  - id: cronjob-overlap-default
+    targets: [b.workloads]
+    prompt: "A CronJob is scheduled every 10 minutes with default settings. One run takes 25 minutes. What happens meanwhile?"
+    choices:
+      - "The next scheduled runs are skipped until the slow Job has finished"
+      - "The slow Job is stopped and replaced by a new one at the next scheduled time"
+      - "The CronJob suspends itself after the first schedule it could not honour"
+      - "New Jobs start on schedule while the slow one runs, so runs overlap"
+    answer: 3
+    feedback:
+      - "That is concurrencyPolicy: Forbid, which you must set explicitly."
+      - "That is concurrencyPolicy: Replace, which you must set explicitly."
+      - "A CronJob is only suspended when someone sets spec.suspend. Overlap does not suspend it."
+      - "The default concurrencyPolicy is Allow. Set Forbid or Replace when two copies at once would be unsafe."
+    explain: "CronJobs allow concurrent runs by default. Choose concurrencyPolicy (Allow, Forbid, Replace) deliberately for jobs that must not overlap."
+
+  # ---------- f3-openshift ----------
+  - id: kubectl-on-openshift
+    targets: [k.kubectl-to-oc]
+    prompt: "On an OpenShift cluster, which of these needs `oc` rather than `kubectl`?"
+    choices:
+      - "Listing all the Routes in your own project"
+      - "Requesting a new project as an ordinary user"
+      - "Reading the logs of a running pod"
+    answer: 1
+    feedback:
+      - "Routes are objects in the cluster's API, and `kubectl get routes` lists them. The difference between the tools is in the commands, not in what they can read."
+      - "`oc new-project` is an OpenShift command that sends a project request. `kubectl create namespace` is a different operation, which ordinary users are usually not allowed to do."
+      - "`kubectl logs` and `oc logs` are the same command: logs are plain Kubernetes."
+    explain: "`oc` contains `kubectl`'s commands and adds OpenShift ones, such as `oc new-project` and `oc expose`. Any client can read any kind the API serves."
+
+  - id: clusteroperator-degraded-available
+    targets: [c.openshift-extends, lab.cluster-health]
+    prompt: "`oc get clusteroperators` shows the line below. What does it tell you, and what do you do first?"
+    evidence: |
+      NAME             VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE
+      image-registry   4.21.8    True        False         True       2h
+    choices:
+      - "It still works but keeps failing to reach its desired state; read the message"
+      - "The registry is down for every user; restart its pods to bring it back quickly"
+      - "An update of the registry is rolling out; wait until it has finished"
+      - "The Cluster Version Operator is about to remove the registry component"
+    answer: 0
+    feedback:
+      - "Available=True means it is functional; Degraded=True means it has failed to match its desired state for a period. `oc describe clusteroperator image-registry` gives the reason and where to look next."
+      - "Available=True says it is serving. Restarting pods that an operator manages rarely fixes the cause and is reverted by the operator anyway."
+      - "That would be Progressing=True. Here Progressing is False: nothing is rolling out."
+      - "Conditions report health; they do not schedule removals. Removing a component is not something Degraded triggers."
+    explain: "ClusterOperators report Available, Progressing and Degraded. Degraded with Available=True is a persistent problem, not an outage: read the message before acting."
+
+  - id: crd-deletion-scope
+    targets: [b.crds-operators]
+    prompt: "One stale `Backup` object in namespace team-a will not go away, and a colleague suggests deleting the CustomResourceDefinition `backups.example.com` to get rid of it. What else would that do?"
+    choices:
+      - "Nothing else: a CRD only holds the schema, not the objects"
+      - "It deletes every Backup object, in every namespace"
+      - "It uninstalls the operator that handles backups"
+      - "It deletes the Backup objects of team-a only"
+    answer: 1
+    feedback:
+      - "Custom objects are served through the CRD's API endpoint. Remove the definition and the server deletes everything stored under it."
+      - "Deleting a CRD removes the API and all its custom objects cluster-wide; re-creating the CRD later starts empty."
+      - "The operator is a separate Deployment (often installed through OLM). It stays, with nothing left to reconcile."
+      - "A CRD is cluster-scoped; its deletion is not limited to one namespace."
+    explain: "A CRD adds a kind to the API and an operator is a controller for it. Deleting the CRD deletes every object of that kind in the cluster."
+
+  - id: change-operator-config-not-output
+    targets: [c.openshift-extends, b.crds-operators]
+    prompt: "As an administrator you scale the Deployment `router-default` in openshift-ingress from 2 to 3 with `oc scale`. A minute later it is back at 2. Where should the change be made?"
+    choices:
+      - "On the router pods, by creating a third router pod by hand next to the two others"
+      - "On the ReplicaSet of router-default, which actually creates the router pods"
+      - "On the IngressController resource (spec.replicas), which the operator reconciles"
+      - "Nowhere: the number of router replicas is fixed by the release payload"
+    answer: 2
+    feedback:
+      - "A hand-made pod is not managed by anything and would not survive. The operator owns the Deployment's replica count."
+      - "The ReplicaSet is owned by the Deployment, which is owned by the operator: two layers that would undo the change."
+      - "OpenShift components are managed by operators from configuration objects. Change the custom resource or the `cluster` config object and let the operator roll it out."
+      - "The release fixes component versions, not every setting. The IngressController exposes replicas precisely so that you can change them."
+    explain: "On OpenShift, platform components are outputs of operators. Edit the operator's input (a custom resource or a `cluster` config object), never its generated Deployments."

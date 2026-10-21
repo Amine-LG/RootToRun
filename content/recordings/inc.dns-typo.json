@@ -1,0 +1,154 @@
+{
+ "lab": "inc.dns-typo",
+ "kind": "incident",
+ "lab_hash": "15609419902343c7",
+ "recorded_at": "2026-10-14T17:17:13+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc logs deploy/checkout --tail=4 -n academy-inc-dns",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "17:17:42 GET http://payments-web:8080/\ncurl: (6) Could not resolve host: payments-web\nHTTP 000\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get svc -n academy-inc-dns",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE\nweb    ClusterIP   10.217.4.57   <none>        8080/TCP   31s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/checkout -n academy-inc-dns -- cat /etc/resolv.conf",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "search academy-inc-dns.svc.cluster.local svc.cluster.local cluster.local crc.testing\nnameserver 10.217.4.10\noptions ndots:5\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/checkout -n academy-inc-dns -- getent hosts payments-web",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 2,
+   "stdout": "",
+   "stderr": "command terminated with exit code 2\n",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/checkout -n academy-inc-dns -- getent hosts web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.4.57     web.academy-inc-dns.svc.cluster.local\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set env deploy/checkout -n academy-inc-dns TARGET=http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/checkout updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/checkout -n academy-inc-dns --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"checkout\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"checkout\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"checkout\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "target",
+    "title": "TARGET points at the web Service",
+    "expect": "http://web:8080/",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].env[?name=TARGET].value = 'http://payments-web:8080/'"
+   },
+   {
+    "id": "client-ready",
+    "title": "checkout is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "resolves",
+    "title": "The client reaches the portal through its TARGET",
+    "expect": "the portal page",
+    "status": "fail",
+    "observed": "curl: (6) Could not resolve host: payments-web\ncommand terminated with exit code 6"
+   }
+  ],
+  "at": 1791998265.2243462
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "target",
+    "title": "TARGET points at the web Service",
+    "expect": "http://web:8080/",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].env[?name=TARGET].value = 'http://web:8080/'"
+   },
+   {
+    "id": "client-ready",
+    "title": "checkout is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "resolves",
+    "title": "The client reaches the portal through its TARGET",
+    "expect": "the portal page",
+    "status": "pass",
+    "observed": "<h1>payments portal</h1>"
+   }
+  ],
+  "at": 1791998279.906773
+ },
+ "seconds": 47,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-dns: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

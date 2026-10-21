@@ -1,0 +1,174 @@
+{
+ "lab": "lesson.p.event-router",
+ "kind": "lesson",
+ "lab_hash": "285276cddcbb1558",
+ "recorded_at": "2026-10-20T14:54:26+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-p-event-router",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\\.yaml}' | jq -c '.apiServerArguments[\"event-ttl\"]'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[\"3h\"]\n",
+   "stderr": "",
+   "combined": "[\"3h\"]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc project -q > ns.txt && oc create serviceaccount eventrouter && oc create configmap eventrouter --from-file=config.json",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/eventrouter created\nconfigmap/eventrouter created\n",
+   "stderr": "",
+   "combined": "serviceaccount/eventrouter created\nconfigmap/eventrouter created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sed \"s/NAMESPACE/$(cat ns.txt)/\" event-reader.yaml | oc apply -f -",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/academy-event-reader created\nclusterrolebinding.rbac.authorization.k8s.io/academy-event-reader created\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/academy-event-reader created\nclusterrolebinding.rbac.authorization.k8s.io/academy-event-reader created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f eventrouter.yaml && oc rollout status deploy/eventrouter --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/eventrouter created\nWaiting for deployment \"eventrouter\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"eventrouter\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/eventrouter created\nWaiting for deployment \"eventrouter\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"eventrouter\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run broken --image=registry.access.redhat.com/ubi9/does-not-exist:1.0 --restart=Never && sleep 20 && oc get events --field-selector involvedObject.name=broken -o custom-columns=REASON:.reason,MESSAGE:.message | cut -c1-110",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/broken created\nREASON           MESSAGE\nScheduled        Successfully assigned academy-lesson-p-event-router/broken to crc\nAddedInterface   Add eth0 [10.217.0.65/23] from ovn-kubernetes\nPulling          Pulling image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\"\nFailed           Failed to pull image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\": unable to pull ima\nFailed           Error: ErrImagePull\nBackOff          Back-off pulling image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\"\nFailed           Error: ImagePullBackOff\n",
+   "stderr": "",
+   "combined": "pod/broken created\nREASON           MESSAGE\nScheduled        Successfully assigned academy-lesson-p-event-router/broken to crc\nAddedInterface   Add eth0 [10.217.0.65/23] from ovn-kubernetes\nPulling          Pulling image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\"\nFailed           Failed to pull image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\": unable to pull ima\nFailed           Error: ErrImagePull\nBackOff          Back-off pulling image \"registry.access.redhat.com/ubi9/does-not-exist:1.0\"\nFailed           Error: ImagePullBackOff\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/eventrouter | grep -m 3 '\"name\":\"broken' | jq -c '{verb, reason: .event.reason, object: .event.involvedObject.name, namespace: .event.involvedObject.namespace, message: (.event.message[0:70])}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"verb\":\"ADDED\",\"reason\":\"Scheduled\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Successfully assigned academy-lesson-p-event-router/broken to crc\"}\n{\"verb\":\"ADDED\",\"reason\":\"AddedInterface\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Add eth0 [10.217.0.65/23] from ovn-kubernetes\"}\n{\"verb\":\"ADDED\",\"reason\":\"Pulling\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Pulling image \\\"registry.access.redhat.com/ubi9/does-not-exist:1.0\\\"\"}\n",
+   "stderr": "",
+   "combined": "{\"verb\":\"ADDED\",\"reason\":\"Scheduled\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Successfully assigned academy-lesson-p-event-router/broken to crc\"}\n{\"verb\":\"ADDED\",\"reason\":\"AddedInterface\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Add eth0 [10.217.0.65/23] from ovn-kubernetes\"}\n{\"verb\":\"ADDED\",\"reason\":\"Pulling\",\"object\":\"broken\",\"namespace\":\"academy-lesson-p-event-router\",\"message\":\"Pulling image \\\"registry.access.redhat.com/ubi9/does-not-exist:1.0\\\"\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/eventrouter | grep '^{' | jq -r '.event.involvedObject.namespace' | sort | uniq -c | sort -rn | head -5",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    156 console-demo\n    143 openshift-marketplace\n     79 openshift-operator-lifecycle-manager\n     46 openshift-multus\n     36 openshift-machine-config-operator\n",
+   "stderr": "",
+   "combined": "    156 console-demo\n    143 openshift-marketplace\n     79 openshift-operator-lifecycle-manager\n     46 openshift-multus\n     36 openshift-machine-config-operator\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete pod broken && oc get events --field-selector involvedObject.name=broken -o name | wc -l && oc logs deploy/eventrouter | grep -c '\"name\":\"broken'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod \"broken\" deleted from academy-lesson-p-event-router namespace\n7\n10\n",
+   "stderr": "",
+   "combined": "pod \"broken\" deleted from academy-lesson-p-event-router namespace\n7\n10\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete clusterrolebinding academy-event-reader && oc delete clusterrole academy-event-reader",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrolebinding.rbac.authorization.k8s.io \"academy-event-reader\" deleted\nclusterrole.rbac.authorization.k8s.io \"academy-event-reader\" deleted\n",
+   "stderr": "",
+   "combined": "clusterrolebinding.rbac.authorization.k8s.io \"academy-event-reader\" deleted\nclusterrole.rbac.authorization.k8s.io \"academy-event-reader\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 45,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-OBS-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete clusterrolebinding academy-event-reader --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete clusterrole academy-event-reader --ignore-not-found",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc get clusterrole academy-event-reader",
+    "code": 1,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get clusterrolebindings -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterroles -o name | grep -c academy- || true",
+    "same": true
+   }
+  ]
+ }
+}

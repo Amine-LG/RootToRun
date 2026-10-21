@@ -1,0 +1,321 @@
+{
+ "lab": "lab.deployment-reconciliation",
+ "kind": "lab",
+ "lab_hash": "014ade8ebf023908",
+ "recorded_at": "2026-10-20T17:14:39+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc get deploy,rs,pods -n academy-deploy -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES                                            SELECTOR\ndeployment.apps/web   2/2     2            2           8s    httpd        registry.access.redhat.com/ubi9/httpd-24:latest   app=web\n\nNAME                             DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES                                            SELECTOR\nreplicaset.apps/web-7ddfddcc56   2         2         2       8s    httpd        registry.access.redhat.com/ubi9/httpd-24:latest   app=web,pod-template-hash=7ddfddcc56\n\nNAME                       READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\npod/web-7ddfddcc56-45qjr   1/1     Running   0          8s    10.217.0.87   crc    <none>           <none>\npod/web-7ddfddcc56-59kz6   1/1     Running   0          8s    10.217.0.88   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc get pod <pod> -n academy-deploy -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc get pod web-7ddfddcc56-45qjr -n academy-deploy -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'",
+   "code": 0,
+   "stdout": "ReplicaSet/web-7ddfddcc56",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc rollout history deploy/web -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web \nREVISION  CHANGE-CAUSE\n1         <none>\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc rollout undo deploy/web -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "layers",
+   "cmd": "oc get deploy,rs,pods -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/web   2/2     2            2           12s\n\nNAME                             DESIRED   CURRENT   READY   AGE\nreplicaset.apps/web-7ddfddcc56   2         2         2       12s\n\nNAME                       READY   STATUS    RESTARTS   AGE\npod/web-7ddfddcc56-45qjr   1/1     Running   0          12s\npod/web-7ddfddcc56-59kz6   1/1     Running   0          12s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "owners",
+   "cmd": "oc get pods -n academy-deploy -o custom-columns=POD:.metadata.name,OWNER:.metadata.ownerReferences[0].name",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "POD                    OWNER\nweb-7ddfddcc56-45qjr   web-7ddfddcc56\nweb-7ddfddcc56-59kz6   web-7ddfddcc56\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "owners",
+   "cmd": "oc get rs -n academy-deploy -o custom-columns=RS:.metadata.name,OWNER:.metadata.ownerReferences[0].name,CONTROLLER:.metadata.ownerReferences[0].controller",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RS               OWNER   CONTROLLER\nweb-7ddfddcc56   web     true\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "delete-pod",
+   "cmd": "oc delete pod <one-pod-name> -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc delete pod web-7ddfddcc56-45qjr -n academy-deploy",
+   "code": 0,
+   "stdout": "pod \"web-7ddfddcc56-45qjr\" deleted from academy-deploy namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "delete-pod",
+   "cmd": "oc get pods -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS              RESTARTS   AGE\nweb-7ddfddcc56-59kz6   1/1     Running             0          17s\nweb-7ddfddcc56-bvsxm   0/1     ContainerCreating   0          2s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale deploy/web --replicas=3 -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc get rs -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             DESIRED   CURRENT   READY   AGE\nweb-7ddfddcc56   3         3         2       23s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fight",
+   "cmd": "oc scale rs/<replicaset-name> --replicas=5 -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": "oc scale rs/web-7ddfddcc56 --replicas=5 -n academy-deploy",
+   "code": 0,
+   "stdout": "replicaset.apps/web-7ddfddcc56 scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fight",
+   "cmd": "oc get rs -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             DESIRED   CURRENT   READY   AGE\nweb-7ddfddcc56   3         3         3       31s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rollout",
+   "cmd": "oc set env deploy/web GREETING=v2 -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rollout",
+   "cmd": "oc rollout status deploy/web -n academy-deploy --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 2 out of 3 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rollout",
+   "cmd": "oc get rs -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             DESIRED   CURRENT   READY   AGE\nweb-7ddfddcc56   0         0         0       50s\nweb-7fd559b975   3         3         3       17s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "rollout",
+   "cmd": "oc rollout history deploy/web -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web \nREVISION  CHANGE-CAUSE\n1         <none>\n2         <none>\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "undo",
+   "cmd": "oc rollout undo deploy/web -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web rolled back\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "undo",
+   "cmd": "oc set env deploy/web --list -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "# deployments/web, container httpd\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "undo",
+   "cmd": "oc rollout history deploy/web -n academy-deploy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web \nREVISION  CHANGE-CAUSE\n2         <none>\n3         <none>\n\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "ready2",
+    "title": "Deployment web is ready",
+    "expect": "all replicas ready and updated",
+    "status": "fail",
+    "observed": "spec.replicas 2, ready 1/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "ready3",
+    "title": "Deployment web runs 3 ready replicas",
+    "expect": "3/3 ready",
+    "status": "fail",
+    "observed": "spec.replicas 2, ready 1/3, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "rs-history",
+    "title": "A rollout happened (at least 2 ReplicaSets kept)",
+    "expect": ">= 2 ReplicaSets",
+    "status": "fail",
+    "observed": "1 matching replicasets"
+   },
+   {
+    "id": "undone",
+    "title": "GREETING is no longer in the template",
+    "expect": "no GREETING env var",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].env[?name=GREETING] = None"
+   },
+   {
+    "id": "revision",
+    "title": "Deployment revision is at least 3",
+    "expect": "revision >= 3",
+    "status": "fail",
+    "observed": "metadata.annotations.deployment\\.kubernetes\\.io/revision = '1'"
+   }
+  ],
+  "at": 1792516491.4973786
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready2",
+    "title": "Deployment web is ready",
+    "expect": "all replicas ready and updated",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "ready3",
+    "title": "Deployment web runs 3 ready replicas",
+    "expect": "3/3 ready",
+    "status": "pass",
+    "observed": "spec.replicas 3, ready 3/3, updated 3, total 3, observedGeneration current: True"
+   },
+   {
+    "id": "rs-history",
+    "title": "A rollout happened (at least 2 ReplicaSets kept)",
+    "expect": ">= 2 ReplicaSets",
+    "status": "pass",
+    "observed": "2 matching replicasets"
+   },
+   {
+    "id": "undone",
+    "title": "GREETING is no longer in the template",
+    "expect": "no GREETING env var",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].env[?name=GREETING] = None"
+   },
+   {
+    "id": "revision",
+    "title": "Deployment revision is at least 3",
+    "expect": "revision >= 3",
+    "status": "pass",
+    "observed": "metadata.annotations.deployment\\.kubernetes\\.io/revision = '3'"
+   }
+  ],
+  "at": 1792516553.930323
+ },
+ "seconds": 74,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-deploy: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

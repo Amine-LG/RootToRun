@@ -1,0 +1,40 @@
+name: Incorrect command or answer check
+description: A command in a lesson, lab, incident or challenge fails, or a practice step accepts a wrong command or rejects a right one.
+labels: [content, commands]
+body:
+  - type: input
+    id: content-type
+    attributes: {label: Kind of content, description: "For example Lesson, Guided lab, Incident or Challenge."}
+  - type: input
+    id: content-id
+    attributes: {label: Content id, description: "Filled in by the page's report link, for example n.console-clis or inc.dns-typo."}
+    validations: {required: true}
+  - type: input
+    id: content-title
+    attributes: {label: Title}
+  - type: input
+    id: area
+    attributes: {label: Path or section of the site}
+  - type: input
+    id: page-url
+    attributes: {label: Page address, description: "The address on the site, without the domain."}
+  - type: input
+    id: section
+    attributes: {label: Section or step}
+  - type: input
+    id: site-version
+    attributes: {label: Site version}
+  - type: textarea
+    id: command
+    attributes: {label: The command, description: Exactly as typed or shown., render: shell}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: What you expected}
+  - type: textarea
+    id: actual
+    attributes: {label: What happened, description: "For a practice step: accepted or refused. On a real cluster: the output and the client version (`oc version`)."}
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes: {label: Evidence, description: "Output from a real shell or cluster, or a documentation link. Remove tokens, passwords and host names.", render: text}

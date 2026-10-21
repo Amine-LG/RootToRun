@@ -1,0 +1,198 @@
+id: lab.placement-rules
+title: "Placement rules that block pods"
+subtitle: "Node selectors, anti-affinity, topology spread and disruption budgets on a single node"
+summary: "Copy four placement rules from a production manifest onto a one-node cluster, read exactly why each pod stays Pending, relax each rule correctly, and see what a disruption budget would allow."
+module: p1-scheduling
+mode: REAL_LAB
+minutes: 35
+level: 3
+supports: "Recorded on OpenShift 4.21.8 (single node). A single node can only show these rules blocking or allowing; spreading across several nodes or zones needs a multi-node cluster."
+concepts: [k8s.scheduler, k8s.workloads]
+prerequisites: [b.scheduler, b.workloads]
+namespace: academy-placement
+objective: |
+  Read FailedScheduling messages for node selectors, required anti-affinity and topology spread constraints, choose
+  the right relaxation for each (fix the selector, prefer instead of require, ScheduleAnyway), and read a
+  PodDisruptionBudget's allowed disruptions.
+background: |
+  Production manifests often carry placement rules written for many nodes and several zones. On a one-node cluster
+  they fail in instructive ways: the scheduler explains, in one event, which rule ruled out the only node. You can
+  read nodes with the read-only identity, but you cannot change them; everything here is done in your project.
+
+  **Where everything comes from.** The project `academy-placement` starts empty; each Deployment and the
+  PodDisruptionBudget come from the YAML in the steps and run `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed). The placement rules are copied from a multi-node
+  production style on purpose. The reader identity reads the node's labels. Clean up deletes the project.
+setup: []
+steps:
+  - id: selector
+    title: "A node selector nobody satisfies"
+    do: "Deploy `picky`, which asks for nodes labelled `disktype=ssd`, read why it is Pending, compare with the node's real labels, then select on a label the node has."
+    commands:
+      - cmd: "oc apply -f - -n academy-placement"
+        meaning: "one pod that may run only on nodes labelled disktype=ssd"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: picky, labels: {app: picky}}
+          spec:
+            replicas: 1
+            selector: {matchLabels: {app: picky}}
+            template:
+              metadata: {labels: {app: picky}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                nodeSelector: {disktype: ssd}
+                containers:
+                - {name: app, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+      - {cmd: "oc wait pod -l app=picky --for=condition=PodScheduled=false --timeout=60s -n academy-placement", meaning: "the scheduler has decided: not schedulable", timeout: 80}
+      - {cmd: "oc get events --field-selector reason=FailedScheduling -n academy-placement", meaning: "the reason, in the scheduler's words"}
+      - {cmd: "oc get nodes --show-labels", as: reader, meaning: "the node's labels: no disktype"}
+      - cmd: "oc patch deploy/picky -n academy-placement --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/nodeSelector\",\"value\":{\"kubernetes.io/os\":\"linux\"}}]'"
+        meaning: "replace the whole selector with a label every Linux node has (a merge patch would keep disktype and add the new key)"
+      - {cmd: "oc rollout status deploy/picky -n academy-placement --timeout=120s", meaning: "scheduled and running", timeout: 140}
+    observe: "`0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector`. The node list shows labels such as `kubernetes.io/hostname=crc` and `kubernetes.io/os=linux`, but no `disktype`. The JSON patch replaces the selector as a whole (a merge patch would merge maps and keep `disktype`); the new pod schedules at once."
+    why: "A nodeSelector is a hard filter: no node with every listed label, no scheduling, and no amount of waiting helps. The fix is either to label nodes (an administrator's decision, done on purpose) or to correct the selector."
+    predict:
+      prompt: "A pod's nodeSelector names a label no node has. What does `oc get pods` show?"
+      choices: ["CrashLoopBackOff", "Pending, with a FailedScheduling event", "Running on any node, ignoring the selector"]
+      answer: 1
+      explain: "Placement rules act before the pod reaches a node: it stays Pending and the scheduler records why."
+    checks: [picky-selector, picky-ready]
+    wait_for: [picky-selector, picky-ready]
+  - id: anti-affinity
+    title: "Required anti-affinity with more replicas than nodes"
+    do: "Deploy `spread` with two replicas that must never share a node, read the event, then change the rule from required to preferred."
+    commands:
+      - cmd: "oc apply -f - -n academy-placement"
+        meaning: "two replicas, each forbidden on a node that already runs one"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: spread, labels: {app: spread}}
+          spec:
+            replicas: 2
+            selector: {matchLabels: {app: spread}}
+            template:
+              metadata: {labels: {app: spread}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                affinity:
+                  podAntiAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                    - labelSelector: {matchLabels: {app: spread}}
+                      topologyKey: kubernetes.io/hostname
+                containers:
+                - {name: app, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+      - {cmd: "oc rollout status deploy/spread --timeout=30s -n academy-placement", meaning: "never completes: one of the two replicas cannot be placed", expect: fail, timeout: 50}
+      - {cmd: "oc get pods -l app=spread -n academy-placement", meaning: "one Running, one Pending"}
+      - {cmd: "oc describe pods -l app=spread -n academy-placement", meaning: "the Pending pod's events name the anti-affinity rule"}
+      - cmd: "oc apply -f - -n academy-placement"
+        meaning: "the same intent as a preference, and the Recreate strategy: the old pod's required rule would otherwise keep the new pods away"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: spread, labels: {app: spread}}
+          spec:
+            replicas: 2
+            strategy: {type: Recreate}
+            selector: {matchLabels: {app: spread}}
+            template:
+              metadata: {labels: {app: spread}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                affinity:
+                  podAntiAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                    - weight: 100
+                      podAffinityTerm:
+                        labelSelector: {matchLabels: {app: spread}}
+                        topologyKey: kubernetes.io/hostname
+                containers:
+                - {name: app, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+      - {cmd: "oc rollout status deploy/spread -n academy-placement --timeout=180s", meaning: "both replicas run on the one node", timeout: 200}
+    observe: "The Pending pod's event says `0/1 nodes are available: 1 node(s) didn't match pod anti-affinity rules`. With the preferred form, both pods run on `crc`: a preference only changes the node's score, never its eligibility. The change uses the Recreate strategy because required anti-affinity works in both directions: the old, still-running pod's rule would keep any new `app=spread` pod off the node, and a rolling update would wait forever."
+    why: "Required anti-affinity on `kubernetes.io/hostname` caps the replicas at the number of eligible nodes. That is right for members of a quorum that must not share a failure domain, and wrong for a web tier that should simply spread when it can. The scheduler also honours the required anti-affinity of pods already running, so relaxing the rule needs the old pods gone first."
+    checks: [spread-preferred, spread-ready]
+    wait_for: [spread-preferred, spread-ready]
+  - id: topology
+    title: "A zone spread rule on a cluster without zones"
+    do: "Deploy `zoned`, which must be spread across zones, read the event, then let it schedule anyway."
+    commands:
+      - cmd: "oc apply -f - -n academy-placement"
+        meaning: "spread over topology.kubernetes.io/zone, and refuse to schedule otherwise"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: zoned, labels: {app: zoned}}
+          spec:
+            replicas: 1
+            selector: {matchLabels: {app: zoned}}
+            template:
+              metadata: {labels: {app: zoned}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                topologySpreadConstraints:
+                - maxSkew: 1
+                  topologyKey: topology.kubernetes.io/zone
+                  whenUnsatisfiable: DoNotSchedule
+                  labelSelector: {matchLabels: {app: zoned}}
+                containers:
+                - {name: app, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+      - {cmd: "oc wait pod -l app=zoned --for=condition=PodScheduled=false --timeout=60s -n academy-placement", meaning: "not schedulable", timeout: 80}
+      - {cmd: "oc get events --field-selector reason=FailedScheduling -n academy-placement", meaning: "the topology spread message"}
+      - cmd: "oc patch deploy/zoned -n academy-placement --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/topologySpreadConstraints/0/whenUnsatisfiable\",\"value\":\"ScheduleAnyway\"}]'"
+        meaning: "keep the preference, stop it from blocking"
+      - {cmd: "oc rollout status deploy/zoned -n academy-placement --timeout=120s", meaning: "scheduled", timeout: 140}
+    observe: "The event reports that the node `didn't match pod topology spread constraints (missing required label)`: the node has no `topology.kubernetes.io/zone` label at all, so with DoNotSchedule it is not a candidate. With ScheduleAnyway the constraint only affects scoring and the pod runs."
+    why: "Nodes without the topology key are excluded by a hard spread constraint. Cloud nodes carry zone labels; bare-metal and single-node clusters often do not. Check the labels your rules depend on before you copy a manifest between clusters."
+    predict:
+      prompt: "A DoNotSchedule zone spread constraint meets a cluster whose nodes have no zone label. What happens?"
+      choices: ["The constraint is ignored", "The pod stays Pending: nodes without the label are not candidates", "All pods go to one zone called default"]
+      answer: 1
+      explain: "Nodes missing the topology key are filtered out for a hard (DoNotSchedule) constraint."
+    checks: [zoned-anyway, zoned-ready]
+    wait_for: [zoned-anyway, zoned-ready]
+  - id: pdb
+    title: "What a disruption budget would allow"
+    do: "Protect `spread` with a PodDisruptionBudget that needs both replicas, read its allowed disruptions, then relax it."
+    commands:
+      - cmd: "oc apply -f - -n academy-placement"
+        meaning: "at least 2 of the 2 spread pods must stay available during voluntary disruptions"
+        stdin: |
+          apiVersion: policy/v1
+          kind: PodDisruptionBudget
+          metadata: {name: spread}
+          spec:
+            minAvailable: 2
+            selector: {matchLabels: {app: spread}}
+      - {cmd: "oc get pdb spread -n academy-placement", meaning: "ALLOWED DISRUPTIONS 0"}
+      - cmd: "oc patch pdb/spread -n academy-placement --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/minAvailable\"},{\"op\":\"add\",\"path\":\"/spec/maxUnavailable\",\"value\":1}]'"
+        meaning: "allow one pod at a time to be evicted"
+      - {cmd: "oc get pdb spread -n academy-placement", meaning: "ALLOWED DISRUPTIONS 1"}
+    observe: "With `minAvailable: 2` and two healthy pods, ALLOWED DISRUPTIONS is 0: a node drain would wait forever on this application. With `maxUnavailable: 1`, it is 1."
+    why: "A PodDisruptionBudget limits voluntary evictions (drains during updates, autoscaler scale-down), not crashes. A budget that allows zero disruptions blocks node maintenance, including the node reboots of a cluster update; that is one of the first things to check when an update stalls. This lab cannot drain the node: on a single node that would stop every workload, including the platform."
+    checks: [pdb-allows]
+    wait_for: [pdb-allows]
+hints: []
+checks:
+  - {id: picky-selector, title: "picky no longer requires disktype", type: field, kind: deployment, name: picky, path: spec.template.spec.nodeSelector.disktype, op: absent, expect_text: "no disktype in the nodeSelector"}
+  - {id: spread-preferred, title: "spread keeps its anti-affinity as a preference, per node, against its own pods", type: count, kind: deployment, where: [{path: metadata.name, op: eq, value: spread}, {path: "spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey", op: eq, value: kubernetes.io/hostname}, {path: "spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels.app", op: eq, value: spread}], op: eq, value: 1, expect_text: "preferred anti-affinity on kubernetes.io/hostname for app=spread"}
+  - {id: zoned-anyway, title: "zoned keeps its spread constraint with ScheduleAnyway", type: field, kind: deployment, name: zoned, path: "spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable", op: eq, value: ScheduleAnyway, expect_text: "ScheduleAnyway"}
+  - {id: picky-ready, title: "picky is scheduled and Ready", type: deployment_ready, name: picky, replicas: 1, expect_text: "1/1 ready"}
+  - {id: spread-ready, title: "spread runs 2 Ready replicas", type: deployment_ready, name: spread, replicas: 2, expect_text: "2/2 ready"}
+  - {id: zoned-ready, title: "zoned is scheduled and Ready", type: deployment_ready, name: zoned, replicas: 1, expect_text: "1/1 ready"}
+  - {id: pdb-allows, title: "the budget allows one disruption", type: field, kind: pdb, name: spread, path: status.disruptionsAllowed, op: eq, value: 1, expect_text: "disruptionsAllowed = 1"}
+questions:
+  - q: "Why does required anti-affinity on kubernetes.io/hostname limit a Deployment's replicas?"
+    a: "Each node may hold only one matching pod, so replicas beyond the number of eligible nodes stay Pending."
+  - q: "What is the difference between DoNotSchedule and ScheduleAnyway in a topology spread constraint?"
+    a: "DoNotSchedule filters out nodes that would break the constraint (or lack the key); ScheduleAnyway only lowers their score."
+  - q: "A cluster update is stuck draining a node. Which object do you check first in the namespaces of the pods that will not leave?"
+    a: "Their PodDisruptionBudgets: one with zero allowed disruptions blocks the eviction."
+references:
+  - {title: "Kubernetes: Assigning pods to nodes", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/"}
+  - {title: "Kubernetes: Pod topology spread constraints", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"}
+  - {title: "Kubernetes: Specifying a disruption budget", url: "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"}
+variations:
+  - "Create a PodDisruptionBudget with `minAvailable: 1` for `picky`, which has one replica. Check: ALLOWED DISRUPTIONS is 0, and you can explain why such a budget on a single-replica application blocks every node drain."

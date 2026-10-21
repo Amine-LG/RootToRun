@@ -1,0 +1,162 @@
+id: lab.jobs-cronjobs
+title: "Jobs, retries, failure policies and CronJobs"
+summary: "Run to completion, watch a Job retry with backoff, fail fast with a pod failure policy, schedule a CronJob and trigger it by hand."
+module: b6-operators-maintenance
+mode: REAL_LAB
+minutes: 35
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (batch/v1 Job with podFailurePolicy, CronJob)."
+concepts: [k8s.workloads, k8s.controllers]
+prerequisites: [o2.jobs-cronjobs]
+namespace: academy-jobs
+objective: |
+  Use Jobs for administrative and batch tasks, understand how retries and failure policies decide when a Job gives
+  up, and schedule recurring work with CronJobs.
+background: |
+  A **Job** creates pods until a number of them succeed. Failed pods are replaced with an exponential backoff (10 s,
+  20 s, 40 s…) until the retries exceed `backoffLimit` (default 6): the first try plus `backoffLimit` retries. The
+  delay is capped at 10 minutes since Kubernetes 1.28: the Kubernetes Jobs page and the Job controller's source for
+  1.34, the version OpenShift 4.21 runs (`MaxJobPodFailureBackOff = 10 * time.Minute`), agree. The OpenShift 4.21 page
+  on Jobs still says six minutes, the cap before 1.28. With the default `backoffLimit`, the six delays add up to about
+  10 minutes and none reaches either cap. A **podFailurePolicy** can end the Job at once for failures that will never succeed (a known
+  exit code). A **CronJob** creates Jobs on a schedule. All of this is plain Kubernetes (batch/v1); OpenShift adds
+  nothing specific here.
+
+  **Where everything comes from.** The project `academy-jobs` starts empty: every Job and the CronJob come from the
+  commands and the YAML in the steps, and all of them run shell commands in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed). The schedule is suspended in the last step; Clean
+  up deletes the project with its Jobs and pods.
+steps:
+  - id: once
+    title: "A Job that succeeds"
+    do: "Run a one-off Job and read its output."
+    commands:
+      - {cmd: "oc create job hello --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-jobs -- sh -c 'echo computing; sleep 2; echo done'", meaning: "one pod, run to completion"}
+      - {cmd: "oc wait --for=condition=Complete job/hello -n academy-jobs --timeout=120s", meaning: "block until done", timeout: 150}
+      - {cmd: "oc get jobs -n academy-jobs", meaning: "STATUS Complete, COMPLETIONS 1/1"}
+      - {cmd: "oc logs job/hello -n academy-jobs", meaning: "computing / done"}
+    observe: "`condition met`, then `hello   Complete   1/1` and the two log lines `computing` and `done`. The pod stays (status Completed) so its logs can still be read."
+    wait_for: [hello-done]
+  - id: retry
+    title: "Retries with backoff"
+    do: "Create a Job whose pod always fails, with `backoffLimit: 2`, and watch it give up."
+    commands:
+      - cmd: "oc apply -f - -n academy-jobs"
+        meaning: "flaky: always exits 1"
+        stdin: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: flaky
+          spec:
+            backoffLimit: 2
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                - name: work
+                  image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                  command: ["sh", "-c", "echo trying; exit 1"]
+    predict:
+      prompt: "With backoffLimit 2, how many pods fail before the Job is marked Failed?"
+      choices: ["1", "3 (the first try plus 2 retries)", "Unlimited"]
+      answer: 1
+      explain: "backoffLimit counts retries; the Job fails when failures exceed it."
+      feedback:
+        - "That would make backoffLimit a count of attempts. It counts retries after the first try, so a limit of 2 allows 3 attempts."
+        - "Right: the first try fails, two retries fail, and the third failure exceeds backoffLimit 2, so the Job is marked Failed with BackoffLimitExceeded."
+        - "A Job's pods do not retry forever: backoffLimit (default 6) bounds the retries. Unlimited restarts are what a Deployment's pods get."
+    wait_for: [flaky-failed]
+  - id: retry-read
+    title: "Read how it gave up"
+    do: "Look at the pods and the Job's conditions."
+    commands:
+      - {cmd: "oc get pods -l job-name=flaky -n academy-jobs", meaning: "three Error pods"}
+      - {cmd: "oc get job flaky -n academy-jobs -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}'", meaning: "BackoffLimitExceeded"}
+    observe: "Three pods in Error (ages 49 s, 35 s and 10 s in the recording: the gaps grow because of the 10 s then 20 s backoff), and the reason `BackoffLimitExceeded`."
+    why: "With `restartPolicy: Never` every retry is a new pod, so the failed pods remain for their logs. With `OnFailure` the same container would be restarted in place instead."
+  - id: fail-fast
+    title: "Fail fast with a pod failure policy"
+    do: "Exit code 42 means 'this will never work': end the Job on the first such failure."
+    commands:
+      - cmd: "oc apply -f - -n academy-jobs"
+        meaning: "fail-fast: podFailurePolicy FailJob on exit code 42"
+        stdin: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: fail-fast
+          spec:
+            backoffLimit: 6
+            podFailurePolicy:
+              rules:
+              - action: FailJob
+                onExitCodes:
+                  containerName: work
+                  operator: In
+                  values: [42]
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                - name: work
+                  image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                  command: ["sh", "-c", "echo bad input; exit 42"]
+    predict:
+      prompt: "backoffLimit is 6. How many pods run before fail-fast fails?"
+      choices: ["7", "1: the policy fails the Job on exit code 42 immediately"]
+      answer: 1
+      explain: "The FailJob rule matches the first failure. Without the rule this Job would run 7 pods and wait 10+20+40+80+160+320 s, about 10 minutes of backoff, before failing (the Kubernetes documentation's own example of this pattern takes at least 9 minutes)."
+      feedback:
+        - "That is what happens without the policy: 1 try plus 6 retries. The FailJob rule is checked on every pod failure and ends the Job on the first exit code 42."
+        - "Right: the first pod exits 42, the rule matches, and the Job fails at once with reason PodFailurePolicy."
+    wait_for: [fast-failed]
+  - id: fail-fast-read
+    title: "Compare the reasons"
+    do: "Read the failure reason and count the pods."
+    commands:
+      - {cmd: "oc get job fail-fast -n academy-jobs -o jsonpath='{.status.conditions[?(@.type==\"Failed\")].reason}'", meaning: "PodFailurePolicy"}
+      - {cmd: "oc get pods -l job-name=fail-fast -n academy-jobs", meaning: "a single pod"}
+    observe: "Reason `PodFailurePolicy` instead of `BackoffLimitExceeded`, and a single pod in Error, although backoffLimit is 6."
+  - id: cron
+    title: "A CronJob, and running it now"
+    do: "Schedule a Job every minute, trigger one immediately from it, then suspend the schedule."
+    commands:
+      - {cmd: "oc create cronjob ticker --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --schedule='*/1 * * * *' -n academy-jobs -- date", meaning: "every minute"}
+      - {cmd: "oc create job ticker-now --from=cronjob/ticker -n academy-jobs", meaning: "run it now, from the CronJob's template"}
+      - {cmd: "oc wait --for=condition=Complete job/ticker-now -n academy-jobs --timeout=120s", meaning: "done", timeout: 150}
+      - {cmd: "oc logs job/ticker-now -n academy-jobs", meaning: "the date"}
+      - {cmd: "oc patch cronjob ticker -n academy-jobs -p '{\"spec\":{\"suspend\":true}}'", meaning: "pause the schedule"}
+      - {cmd: "oc get cronjob ticker -n academy-jobs", meaning: "SUSPEND True"}
+    observe: "ticker-now completes and logs the date. The CronJob shows SUSPEND True and LAST SCHEDULE `<none>`: the manual Job was created from its template but does not count as a scheduled run."
+    why: "`--from=cronjob/...` copies the CronJob's job template, which is the safe way to test or rerun scheduled work. Suspending stops new runs without deleting the CronJob or its history."
+    wait_for: [manual-done, suspended]
+hints:
+  - "A Job's verdict is in `.status.conditions`: type Complete or Failed, with a reason."
+  - "backoffLimit counts retries, not attempts."
+  - "Run a CronJob's work now with `oc create job <name> --from=cronjob/<cronjob>`."
+checks:
+  - {id: hello-done, title: "Job hello succeeded", type: field, kind: job, name: hello, path: status.succeeded, op: eq, value: 1, expect_text: "succeeded 1"}
+  - {id: flaky-failed, title: "flaky failed after its retries", type: field, kind: job, name: flaky, path: "status.conditions[?type=Failed].reason", op: eq, value: BackoffLimitExceeded, expect_text: "BackoffLimitExceeded"}
+  - {id: fast-failed, title: "fail-fast failed by policy", type: field, kind: job, name: fail-fast, path: "status.conditions[?type=Failed].reason", op: eq, value: PodFailurePolicy, expect_text: "PodFailurePolicy"}
+  - {id: fast-one-pod, title: "fail-fast ran a single pod", type: count, kind: pods, selector: job-name=fail-fast, op: eq, value: 1, expect_text: "1 pod"}
+  - {id: manual-done, title: "ticker-now ran", type: field, kind: job, name: ticker-now, path: status.succeeded, op: eq, value: 1, expect_text: "succeeded 1"}
+  - {id: suspended, title: "The CronJob is suspended", type: field, kind: cronjob, name: ticker, path: spec.suspend, op: eq, value: true, expect_text: "suspend true"}
+questions:
+  - q: "When should a Job use a podFailurePolicy?"
+    a: "When some failures are known to be permanent (bad input, a specific exit code), so retrying only wastes time and resources."
+  - q: "How do you run a CronJob's work immediately, without waiting for the schedule?"
+    a: "oc create job <name> --from=cronjob/<cronjob>"
+enterprise: |
+  Administrative automation on OpenShift (certificate checks, image pruning, report generation, backups of
+  application data) is often a CronJob with a dedicated, least-privilege ServiceAccount. Set
+  `concurrencyPolicy: Forbid`, history limits, and alert on failed Jobs.
+references:
+  - {title: "Kubernetes: Jobs", url: "https://kubernetes.io/docs/concepts/workloads/controllers/job/"}
+  - {title: "Kubernetes: Handling retriable and non-retriable pod failures", url: "https://kubernetes.io/docs/tasks/job/pod-failure-policy/"}
+  - {title: "Kubernetes: CronJob", url: "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/"}
+  - {title: "Kubernetes 1.34 source: Job controller back-off constants", url: "https://github.com/kubernetes/kubernetes/blob/release-1.34/pkg/controller/job/job_controller.go"}
+  - {title: "OpenShift 4.21: Setting the maximum number of retries for a Job (still gives six minutes)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/nodes/index#jobs-set-backoff_nodes-nodes-jobs"}
+variations:
+  - "Create a copy of `flaky` with `backoffLimit: 6` and `activeDeadlineSeconds: 15`. Check: the Failed condition's reason is `DeadlineExceeded`, not `BackoffLimitExceeded`."
+  - "Make the CronJob keep only one successful and one failed Job, resume it for a few minutes, then suspend it again. Check: `successfulJobsHistoryLimit` and `failedJobsHistoryLimit` are 1, and only one successful scheduled Job remains."

@@ -1,0 +1,274 @@
+{
+ "lab": "lesson.f0.statefulsets",
+ "kind": "lesson",
+ "lab_hash": "34e675eac0562adf",
+ "recorded_at": "2026-10-16T17:23:26+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-f0-statefulsets",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f web.yaml; oc rollout status statefulset/web --timeout=240s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web created\nstatefulset.apps/web created\nWaiting for 3 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "stderr": "",
+   "combined": "service/web created\nstatefulset.apps/web created\nWaiting for 3 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=web -o custom-columns=NAME:.metadata.name,STARTED:.status.startTime",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    STARTED\nweb-0   2026-10-16T17:21:21Z\nweb-1   2026-10-16T17:21:25Z\nweb-2   2026-10-16T17:21:29Z\n",
+   "stderr": "",
+   "combined": "NAME    STARTED\nweb-0   2026-10-16T17:21:21Z\nweb-1   2026-10-16T17:21:25Z\nweb-2   2026-10-16T17:21:29Z\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get service web",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)    AGE\nweb    ClusterIP   None         <none>        8080/TCP   13s\n",
+   "stderr": "",
+   "combined": "NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)    AGE\nweb    ClusterIP   None         <none>        8080/TCP   13s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec web-0 -- getent hosts web-2.web",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.0.175    web-2.web.academy-lesson-f0-statefulsets.svc.cluster.local\n",
+   "stderr": "",
+   "combined": "10.217.0.175    web-2.web.academy-lesson-f0-statefulsets.svc.cluster.local\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec web-0 -- getent hosts web",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.0.173    web.academy-lesson-f0-statefulsets.svc.cluster.local\n10.217.0.174    web.academy-lesson-f0-statefulsets.svc.cluster.local\n10.217.0.175    web.academy-lesson-f0-statefulsets.svc.cluster.local\n",
+   "stderr": "",
+   "combined": "10.217.0.173    web.academy-lesson-f0-statefulsets.svc.cluster.local\n10.217.0.174    web.academy-lesson-f0-statefulsets.svc.cluster.local\n10.217.0.175    web.academy-lesson-f0-statefulsets.svc.cluster.local\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec web-1 -- sh -c 'echo i-am-web-1 > /data/id; cat /data/id'; oc get pod web-1 -o jsonpath='{.status.podIP}{\"\\n\"}'; oc delete pod web-1; oc wait --for=condition=Ready pod/web-1 --timeout=120s; oc get pod web-1 -o jsonpath='{.status.podIP}{\"\\n\"}'; oc exec web-0 -- getent hosts web-1.web; oc exec web-1 -- cat /data/id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "i-am-web-1\n10.217.0.174\npod \"web-1\" deleted from academy-lesson-f0-statefulsets namespace\npod/web-1 condition met\n10.217.0.176\n10.217.0.176    web-1.web.academy-lesson-f0-statefulsets.svc.cluster.local\n",
+   "stderr": "cat: /data/id: No such file or directory\ncommand terminated with exit code 1\n",
+   "combined": "i-am-web-1\n10.217.0.174\npod \"web-1\" deleted from academy-lesson-f0-statefulsets namespace\npod/web-1 condition met\n10.217.0.176\n10.217.0.176    web-1.web.academy-lesson-f0-statefulsets.svc.cluster.local\ncat: /data/id: No such file or directory\ncommand terminated with exit code 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale statefulset/web --replicas=1; oc wait pod/web-2 pod/web-1 --for=delete --timeout=120s; oc get pods -l app=web; oc get events --field-selector involvedObject.name=web,reason=SuccessfulDelete --sort-by=.lastTimestamp",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/web scaled\npod/web-2 condition met\npod/web-1 condition met\nNAME    READY   STATUS    RESTARTS   AGE\nweb-0   1/1     Running   0          28s\nLAST SEEN   TYPE     REASON             OBJECT            MESSAGE\n7s          Normal   SuccessfulDelete   statefulset/web   delete Pod web-2 in StatefulSet web successful\n4s          Normal   SuccessfulDelete   statefulset/web   delete Pod web-1 in StatefulSet web successful\n",
+   "stderr": "",
+   "combined": "statefulset.apps/web scaled\npod/web-2 condition met\npod/web-1 condition met\nNAME    READY   STATUS    RESTARTS   AGE\nweb-0   1/1     Running   0          28s\nLAST SEEN   TYPE     REASON             OBJECT            MESSAGE\n7s          Normal   SuccessfulDelete   statefulset/web   delete Pod web-2 in StatefulSet web successful\n4s          Normal   SuccessfulDelete   statefulset/web   delete Pod web-1 in StatefulSet web successful\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale statefulset/web --replicas=3; oc rollout status statefulset/web --timeout=240s | tail -n 1; oc patch statefulset web -p '{\"spec\":{\"updateStrategy\":{\"type\":\"RollingUpdate\",\"rollingUpdate\":{\"partition\":2}}}}'; oc set env statefulset/web COLOR=blue; sleep 20; oc rollout status statefulset/web --timeout=120s; oc get pods -l app=web -L controller-revision-hash",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/web scaled\npartitioned roll out complete: 3 new pods have been updated...\nstatefulset.apps/web patched\nstatefulset.apps/web updated\npartitioned roll out complete: 1 new pods have been updated...\nNAME    READY   STATUS    RESTARTS   AGE   CONTROLLER-REVISION-HASH\nweb-0   1/1     Running   0          58s   web-5c8559486\nweb-1   1/1     Running   0          29s   web-5c8559486\nweb-2   1/1     Running   0          16s   web-585969d744\n",
+   "stderr": "",
+   "combined": "statefulset.apps/web scaled\npartitioned roll out complete: 3 new pods have been updated...\nstatefulset.apps/web patched\nstatefulset.apps/web updated\npartitioned roll out complete: 1 new pods have been updated...\nNAME    READY   STATUS    RESTARTS   AGE   CONTROLLER-REVISION-HASH\nweb-0   1/1     Running   0          58s   web-5c8559486\nweb-1   1/1     Running   0          29s   web-5c8559486\nweb-2   1/1     Running   0          16s   web-585969d744\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f db.yaml; oc rollout status statefulset/db --timeout=240s; oc get pvc",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/db created\nstatefulset.apps/db created\nWaiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 2 new pods have been updated...\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 11s\ndata-db-1   Bound    pvc-799b6678-6952-463a-b337-8a2d1d261125   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 5s\n",
+   "stderr": "",
+   "combined": "service/db created\nstatefulset.apps/db created\nWaiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 2 new pods have been updated...\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 11s\ndata-db-1   Bound    pvc-799b6678-6952-463a-b337-8a2d1d261125   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 5s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec db-0 -- sh -c 'echo i-am-db-0 > /data/id'; oc exec db-1 -- sh -c 'echo i-am-db-1 > /data/id'; oc delete pod db-1; oc wait --for=condition=Ready pod/db-1 --timeout=120s; oc exec db-1 -- cat /data/id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod \"db-1\" deleted from academy-lesson-f0-statefulsets namespace\npod/db-1 condition met\ni-am-db-1\n",
+   "stderr": "",
+   "combined": "pod \"db-1\" deleted from academy-lesson-f0-statefulsets namespace\npod/db-1 condition met\ni-am-db-1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale statefulset/db --replicas=1; oc wait pod/db-1 --for=delete --timeout=120s; oc get pvc; oc scale statefulset/db --replicas=2; oc rollout status statefulset/db --timeout=180s; oc exec db-1 -- cat /data/id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/db scaled\npod/db-1 condition met\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 26s\ndata-db-1   Bound    pvc-799b6678-6952-463a-b337-8a2d1d261125   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 20s\nstatefulset.apps/db scaled\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 2 new pods have been updated...\ni-am-db-1\n",
+   "stderr": "",
+   "combined": "statefulset.apps/db scaled\npod/db-1 condition met\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 26s\ndata-db-1   Bound    pvc-799b6678-6952-463a-b337-8a2d1d261125   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 20s\nstatefulset.apps/db scaled\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 2 new pods have been updated...\ni-am-db-1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pvc -n academy-lesson-f0-statefulsets -o jsonpath='{range .items[*]}{.spec.volumeName}{\"\\n\"}{end}' > pvs.txt; oc get pv $(cat pvs.txt) -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,RECLAIM:.spec.persistentVolumeReclaimPolicy,CLAIM:.spec.claimRef.name",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       STATUS   RECLAIM   CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Bound    Retain    data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Bound    Retain    data-db-1\n",
+   "stderr": "",
+   "combined": "NAME                                       STATUS   RECLAIM   CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Bound    Retain    data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Bound    Retain    data-db-1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch statefulset db -p '{\"spec\":{\"persistentVolumeClaimRetentionPolicy\":{\"whenScaled\":\"Delete\",\"whenDeleted\":\"Delete\"}}}'; oc scale statefulset/db --replicas=1; oc wait pod/db-1 --for=delete --timeout=120s; oc wait pvc/data-db-1 --for=delete --timeout=120s; oc get pvc",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/db patched\nstatefulset.apps/db scaled\npod/db-1 condition met\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 40s\n",
+   "stderr": "",
+   "combined": "statefulset.apps/db patched\nstatefulset.apps/db scaled\npod/db-1 condition met\nNAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\ndata-db-0   Bound    pvc-00db025a-2e3f-4918-b9c1-03def0b18d95   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 40s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pv $(cat pvs.txt) -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,RECLAIM:.spec.persistentVolumeReclaimPolicy,CLAIM:.spec.claimRef.name",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       STATUS     RECLAIM   CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Bound      Retain    data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Released   Retain    data-db-1\n",
+   "stderr": "",
+   "combined": "NAME                                       STATUS     RECLAIM   CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Bound      Retain    data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Released   Retain    data-db-1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete statefulset db; oc wait pvc/data-db-0 --for=delete --timeout=120s; oc get pvc",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps \"db\" deleted from academy-lesson-f0-statefulsets namespace\npersistentvolumeclaim/data-db-0 condition met\n",
+   "stderr": "No resources found in academy-lesson-f0-statefulsets namespace.\n",
+   "combined": "statefulset.apps \"db\" deleted from academy-lesson-f0-statefulsets namespace\npersistentvolumeclaim/data-db-0 condition met\nNo resources found in academy-lesson-f0-statefulsets namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pv $(cat pvs.txt) -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,CLAIM:.spec.claimRef.name; for pv in $(cat pvs.txt); do oc patch pv \"$pv\" -p '{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}'; done; for pv in $(cat pvs.txt); do oc wait --for=delete pv/\"$pv\" --timeout=120s; done; echo \"volumes of pvs.txt left=$(oc get pv -o name | grep -c -F -f pvs.txt)\"",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       STATUS     CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Released   data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Released   data-db-1\npersistentvolume/pvc-00db025a-2e3f-4918-b9c1-03def0b18d95 patched\npersistentvolume/pvc-799b6678-6952-463a-b337-8a2d1d261125 patched\nvolumes of pvs.txt left=0\n",
+   "stderr": "",
+   "combined": "NAME                                       STATUS     CLAIM\npvc-00db025a-2e3f-4918-b9c1-03def0b18d95   Released   data-db-0\npvc-799b6678-6952-463a-b337-8a2d1d261125   Released   data-db-1\npersistentvolume/pvc-00db025a-2e3f-4918-b9c1-03def0b18d95 patched\npersistentvolume/pvc-799b6678-6952-463a-b337-8a2d1d261125 patched\nvolumes of pvs.txt left=0\n",
+   "ok": true
+  }
+ ],
+ "seconds": 132,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-STOR-02",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete statefulset db web -n academy-lesson-f0-statefulsets --ignore-not-found && oc delete pvc data-db-0 data-db-1 -n academy-lesson-f0-statefulsets --ignore-not-found --timeout=240s",
+    "code": 0
+   },
+   {
+    "cmd": "pvs=$(oc get pv -o json | jq -r '.items[] | select(.spec.claimRef.namespace == \"academy-lesson-f0-statefulsets\") | .metadata.name') || exit 1\nfor pv in $pvs; do\n  oc patch pv \"$pv\" -p '{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}' || exit 1\n  for i in $(seq 24); do\n    left=$(oc get pv \"$pv\" --ignore-not-found -o name) || exit 1\n    test -z \"$left\" && break\n    sleep 5\n  done\n  left=$(oc get pv \"$pv\" --ignore-not-found -o name) || exit 1\n  if [ -n \"$left\" ]; then oc delete pv \"$pv\" --timeout=60s || exit 1; fi\ndone",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-f0-statefulsets --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "pvs=$(oc get pv -o json | jq -r '.items[] | select(.spec.claimRef.namespace == \"academy-lesson-f0-statefulsets\") | .metadata.name') || exit 1\ntest -z \"$pvs\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get pv -o json | jq -S '[.items[] | {name:.metadata.name,phase:.status.phase,claim:.spec.claimRef.name,ns:.spec.claimRef.namespace,reclaim:.spec.persistentVolumeReclaimPolicy}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get storageclass -o json | jq -S '[.items[] | {name:.metadata.name,provisioner:.provisioner,parameters:.parameters,reclaim:.reclaimPolicy,binding:.volumeBindingMode,expansion:.allowVolumeExpansion,default:.metadata.annotations[\"storageclass.kubernetes.io/is-default-class\"]}]'",
+    "same": true
+   }
+  ]
+ }
+}

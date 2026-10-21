@@ -1,0 +1,295 @@
+{
+ "lab": "lesson.n.policy-governance",
+ "kind": "lesson",
+ "lab_hash": "89c0a9a389591a08",
+ "recorded_at": "2026-10-16T19:03:14+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-policy-governance",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get validatingadmissionpolicies",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                                  VALIDATIONS   PARAMKIND                               AGE\ncustom-machine-config-pool-selector                   1             <unset>                                 200d\ndefault-network-annotation                            1             <unset>                                 200d\nmachine-configuration-guards                          1             <unset>                                 200d\nmanaged-bootimages-platform-check                     1             config.openshift.io/v1/Infrastructure   200d\nmcn-guards                                            2             <unset>                                 200d\nopenshift-ingress-operator-gatewayapi-crd-admission   2             <unset>                                 200d\nopenshift-storage-policy-validation                   2             <unset>                                 200d\nservicecidrs.openshift.io                             1             <unset>                                 200d\nuser-defined-networks-namespace-label                 1             <unset>                                 200d\n",
+   "stderr": "",
+   "combined": "NAME                                                  VALIDATIONS   PARAMKIND                               AGE\ncustom-machine-config-pool-selector                   1             <unset>                                 200d\ndefault-network-annotation                            1             <unset>                                 200d\nmachine-configuration-guards                          1             <unset>                                 200d\nmanaged-bootimages-platform-check                     1             config.openshift.io/v1/Infrastructure   200d\nmcn-guards                                            2             <unset>                                 200d\nopenshift-ingress-operator-gatewayapi-crd-admission   2             <unset>                                 200d\nopenshift-storage-policy-validation                   2             <unset>                                 200d\nservicecidrs.openshift.io                             1             <unset>                                 200d\nuser-defined-networks-namespace-label                 1             <unset>                                 200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f lab-require-owner.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "validatingadmissionpolicy.admissionregistration.k8s.io/lab-require-owner created\n",
+   "stderr": "",
+   "combined": "validatingadmissionpolicy.admissionregistration.k8s.io/lab-require-owner created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label namespace academy-lesson-n-policy-governance lab-tenant=true",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/academy-lesson-n-policy-governance labeled\n",
+   "stderr": "",
+   "combined": "namespace/academy-lesson-n-policy-governance labeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label namespace academy-lesson-n-policy-governance lab-tenant-",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): namespaces \"academy-lesson-n-policy-governance\" is forbidden: User \"developer\" cannot patch resource \"namespaces\" in API group \"\" in the namespace \"academy-lesson-n-policy-governance\"\n",
+   "combined": "Error from server (Forbidden): namespaces \"academy-lesson-n-policy-governance\" is forbidden: User \"developer\" cannot patch resource \"namespaces\" in API group \"\" in the namespace \"academy-lesson-n-policy-governance\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment old-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity && oc rollout status deployment/old-shop --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/old-shop created\nWaiting for deployment \"old-shop\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"old-shop\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/old-shop created\nWaiting for deployment \"old-shop\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"old-shop\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f lab-require-owner-binding.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner created\n",
+   "stderr": "",
+   "combined": "validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "start=$(date +%s); until oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name 2>&1 | grep -q Warning; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'no warning after 2 minutes'; exit 1; }; sleep 2; done; echo \"the binding was in force after $(( $(date +%s) - start )) seconds\"",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "the binding was in force after 2 seconds\n",
+   "stderr": "",
+   "combined": "the binding was in force after 2 seconds\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment new-shop --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/new-shop created\n",
+   "stderr": "Warning: Validation failed for ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner': Deployments need an owner label\n",
+   "combined": "Warning: Validation failed for ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner': Deployments need an owner label\ndeployment.apps/new-shop created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm node-logs crc --path=kube-apiserver/audit.log | grep -F lab-require-owner | jq -c 'select(.objectRef.namespace == \"academy-lesson-n-policy-governance\" and .objectRef.name == \"new-shop\" and .verb == \"create\") | {user: .user.username, verb, resource: .objectRef.resource, name: .objectRef.name, code: .responseStatus.code, failure: .annotations[\"validation.policy.admission.k8s.io/validation_failure\"]}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"user\":\"developer\",\"verb\":\"create\",\"resource\":\"deployments\",\"name\":\"new-shop\",\"code\":201,\"failure\":\"[{\\\"message\\\":\\\"Deployments need an owner label\\\",\\\"policy\\\":\\\"lab-require-owner\\\",\\\"binding\\\":\\\"lab-require-owner\\\",\\\"expressionIndex\\\":0,\\\"validationActions\\\":[\\\"Warn\\\",\\\"Audit\\\"]}]\"}\n{\"user\":\"developer\",\"verb\":\"create\",\"resource\":\"deployments\",\"name\":\"new-shop\",\"code\":201,\"failure\":\"[{\\\"message\\\":\\\"Deployments need an owner label\\\",\\\"policy\\\":\\\"lab-require-owner\\\",\\\"binding\\\":\\\"lab-require-owner\\\",\\\"expressionIndex\\\":0,\\\"validationActions\\\":[\\\"Warn\\\",\\\"Audit\\\"]}]\"}\n",
+   "stderr": "",
+   "combined": "{\"user\":\"developer\",\"verb\":\"create\",\"resource\":\"deployments\",\"name\":\"new-shop\",\"code\":201,\"failure\":\"[{\\\"message\\\":\\\"Deployments need an owner label\\\",\\\"policy\\\":\\\"lab-require-owner\\\",\\\"binding\\\":\\\"lab-require-owner\\\",\\\"expressionIndex\\\":0,\\\"validationActions\\\":[\\\"Warn\\\",\\\"Audit\\\"]}]\"}\n{\"user\":\"developer\",\"verb\":\"create\",\"resource\":\"deployments\",\"name\":\"new-shop\",\"code\":201,\"failure\":\"[{\\\"message\\\":\\\"Deployments need an owner label\\\",\\\"policy\\\":\\\"lab-require-owner\\\",\\\"binding\\\":\\\"lab-require-owner\\\",\\\"expressionIndex\\\":0,\\\"validationActions\\\":[\\\"Warn\\\",\\\"Audit\\\"]}]\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get validatingadmissionpolicybinding lab-require-owner -o yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicyBinding\nmetadata:\n  creationTimestamp: \"2026-10-16T19:02:13Z\"\n  generation: 1\n  name: lab-require-owner\n  resourceVersion: \"620138\"\n  uid: 232b014f-01ae-4364-9229-4c75971e6e93\nspec:\n  matchResources:\n    matchPolicy: Equivalent\n    namespaceSelector:\n      matchLabels:\n        lab-tenant: \"true\"\n    objectSelector: {}\n  policyName: lab-require-owner\n  validationActions:\n  - Warn\n  - Audit\n",
+   "stderr": "",
+   "combined": "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicyBinding\nmetadata:\n  creationTimestamp: \"2026-10-16T19:02:13Z\"\n  generation: 1\n  name: lab-require-owner\n  resourceVersion: \"620138\"\n  uid: 232b014f-01ae-4364-9229-4c75971e6e93\nspec:\n  matchResources:\n    matchPolicy: Equivalent\n    namespaceSelector:\n      matchLabels:\n        lab-tenant: \"true\"\n    objectSelector: {}\n  policyName: lab-require-owner\n  validationActions:\n  - Warn\n  - Audit\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch validatingadmissionpolicybinding lab-require-owner --type=merge -p '{\"spec\":{\"validationActions\":[\"Deny\"]}}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner patched\n",
+   "stderr": "",
+   "combined": "validatingadmissionpolicybinding.admissionregistration.k8s.io/lab-require-owner patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "start=$(date +%s); while oc create deployment probe --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --dry-run=server -o name >/dev/null 2>&1; do [ $(( $(date +%s) - start )) -gt 120 ] && { echo 'still allowed after 2 minutes'; exit 1; }; sleep 2; done; echo \"Deny was in force after $(( $(date +%s) - start )) seconds\"",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Deny was in force after 2 seconds\n",
+   "stderr": "",
+   "combined": "Deny was in force after 2 seconds\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployments",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME       READY   UP-TO-DATE   AVAILABLE   AGE\nnew-shop   1/1     1            1           9s\nold-shop   1/1     1            1           17s\n",
+   "stderr": "",
+   "combined": "NAME       READY   UP-TO-DATE   AVAILABLE   AGE\nnew-shop   1/1     1            1           9s\nold-shop   1/1     1            1           17s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout restart deployment/old-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: failed to patch: deployments.apps \"old-shop\" is forbidden: ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner' denied request: Deployments need an owner label\n",
+   "combined": "error: failed to patch: deployments.apps \"old-shop\" is forbidden: ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner' denied request: Deployments need an owner label\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment cart --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: failed to create deployment: deployments.apps \"cart\" is forbidden: ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner' denied request: Deployments need an owner label\n",
+   "combined": "error: failed to create deployment: deployments.apps \"cart\" is forbidden: ValidatingAdmissionPolicy 'lab-require-owner' with binding 'lab-require-owner' denied request: Deployments need an owner label\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment scope-check --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n default --dry-run=server",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/scope-check created (server dry run)\n",
+   "stderr": "",
+   "combined": "deployment.apps/scope-check created (server dry run)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label deployment old-shop owner=team-shop && oc rollout restart deployment/old-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/old-shop labeled\ndeployment.apps/old-shop restarted\n",
+   "stderr": "",
+   "combined": "deployment.apps/old-shop labeled\ndeployment.apps/old-shop restarted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 75,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-VAP-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete validatingadmissionpolicybinding lab-require-owner --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete validatingadmissionpolicy lab-require-owner --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc label namespace academy-lesson-n-policy-governance lab-tenant- >/dev/null 2>&1 || true",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc get --raw /readyz",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait co/kube-apiserver --for=condition=Available=True --timeout=60s && oc wait co/kube-apiserver --for=condition=Degraded=False --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get validatingadmissionpolicies -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get validatingadmissionpolicybindings -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get namespaces -l lab-tenant -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations -o name",
+    "same": true
+   }
+  ]
+ }
+}

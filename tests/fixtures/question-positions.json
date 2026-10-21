@@ -1,0 +1,213 @@
+{
+ "a.container-is-a-process": [
+  "q89ca4c749d",
+  "qb93967b580"
+ ],
+ "a.container-security": [
+  "qb91979f3ce",
+  "q335423026e"
+ ],
+ "a.images-registries": [
+  "q9753315bf0",
+  "q5eae4b5bb7"
+ ],
+ "a.what-kubernetes-does": [
+  "q7fd8969043",
+  "q5ba8fcbbf2"
+ ],
+ "b.architecture": [
+  "q3c1438b5ca",
+  "q9e10bc0882"
+ ],
+ "b.crds-operators": [
+  "q2dcd0d6428"
+ ],
+ "b.pod-lifecycle": [
+  "q231123d388",
+  "qb01da33719",
+  "q02fd33164f",
+  "q9364cd760f"
+ ],
+ "b.reconciliation": [
+  "q97049b45e5",
+  "q508755bde1"
+ ],
+ "b.resources-qos": [
+  "qdf5080ae59",
+  "q109eb31646",
+  "qc7020a9543"
+ ],
+ "b.scheduler": [
+  "q17a4b59fce",
+  "q8812fbb06f"
+ ],
+ "b.workloads": [
+  "qbd039438df"
+ ],
+ "c.auth": [
+  "q4f461a83dd"
+ ],
+ "c.machineconfig-upgrades": [
+  "q4312d2b483",
+  "q68a540f320"
+ ],
+ "c.olm": [
+  "q6020d5c252"
+ ],
+ "c.openshift-extends": [
+  "qe349b2a6f7"
+ ],
+ "c.projects-builds": [
+  "qaef98f653e",
+  "q7fd0f46e96",
+  "q76a6bee17b"
+ ],
+ "d.networkpolicy-ovn": [
+  "qf80ac27fef",
+  "q73275aa237"
+ ],
+ "d.routes-tls": [
+  "qad75e9ccb7",
+  "q461fec8f91"
+ ],
+ "d.services-dns": [
+  "q962950649c",
+  "qa0c39b8b5a"
+ ],
+ "e.stateful-dr": [
+  "q94b5b439f3"
+ ],
+ "e.storage": [
+  "q8f441ef1b4",
+  "q1b85894d71"
+ ],
+ "f.rbac": [
+  "q1c99776617",
+  "qe476c52a47"
+ ],
+ "f.scc": [
+  "q86fb89ea9d",
+  "qa33148c7e8"
+ ],
+ "f.secrets-supplychain": [
+  "q6017002bd0"
+ ],
+ "g.rollouts-change": [
+  "q25137e13c8",
+  "qf5ed973d3c"
+ ],
+ "h.observability": [
+  "q05457e2d69"
+ ],
+ "h.slo-incidents": [
+  "qfa5f9ef777"
+ ],
+ "i.day2-backup": [
+  "q6902113a87"
+ ],
+ "i.ha-architecture": [
+  "q748b46ee65"
+ ],
+ "l.access-can-come-back": [
+  "q3dfaa4ad18"
+ ],
+ "l.access-paths": [
+  "q7658da5a0d",
+  "qd29473ff8f"
+ ],
+ "l.image-pullers": [
+  "q888800d2a1"
+ ],
+ "n.cicd": [
+  "q8394a62415",
+  "qfef0788350"
+ ],
+ "n.cluster-updates": [
+  "q8c5e7b5905"
+ ],
+ "n.console-clis": [
+  "q2bfc6ac365",
+  "qc6ed58022d"
+ ],
+ "n.htpasswd-users": [
+  "qc2b7ed00e5",
+  "q5e34364f5b"
+ ],
+ "n.ingress-dns-certs": [
+  "q9db6b15e3d",
+  "q9f9aa21f8b"
+ ],
+ "n.installation": [
+  "qc7caa47d23",
+  "q58017a7168"
+ ],
+ "n.logging": [
+  "q6403d60ae5",
+  "q99083fd47a"
+ ],
+ "n.monitoring": [
+  "qda676dd077",
+  "qbbb6cdc534"
+ ],
+ "n.nodes-capacity": [
+  "q09fcc0eb62",
+  "q3de6af92fa"
+ ],
+ "n.operators-lifecycle": [
+  "q359db7f9ca"
+ ],
+ "n.policy-governance": [
+  "q83af3df6c7",
+  "q9ee1b38cd2"
+ ],
+ "n.selinux-node": [
+  "q124069a86e",
+  "q2c398298ed"
+ ],
+ "n.supply-chain": [
+  "qe314f9b6c9",
+  "q3baf22d201"
+ ],
+ "n.templates": [
+  "q49ae76da45",
+  "qcde8826585"
+ ],
+ "o1.cli": [
+  "qa5ce16b175",
+  "q28f9d26b40"
+ ],
+ "o1.config-secrets": [
+  "q6d29f2bb07",
+  "q7262e9e183"
+ ],
+ "o1.deploy-apps": [
+  "qdbb05482c7",
+  "qb7cc34f513"
+ ],
+ "o1.troubleshooting": [
+  "q33def653d4",
+  "q6766cab243"
+ ],
+ "o2.groups": [],
+ "o2.jobs-cronjobs": [
+  "q0ab22e281e",
+  "q85a7304684"
+ ],
+ "o2.kustomize-helm": [
+  "qbe1e87bbe6",
+  "q19a1a7cac8"
+ ],
+ "o2.quotas-limits": [
+  "q52e40e13e4",
+  "qa3cf06cb87",
+  "q371545e0c7"
+ ],
+ "o2.service-accounts": [
+  "q420370da3c",
+  "qa86a3dec89"
+ ],
+ "o2.tls-exposure": [
+  "qf06a9f383f",
+  "qb19feb1ef9"
+ ]
+}

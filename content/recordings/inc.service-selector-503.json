@@ -1,0 +1,140 @@
+{
+ "lab": "inc.service-selector-503",
+ "kind": "incident",
+ "lab_hash": "aa0dc81868cd080a",
+ "recorded_at": "2026-10-14T17:30:12+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get route,svc,pods -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                           HOST/PORT                                   PATH   SERVICES   PORT   TERMINATION   WILDCARD\nroute.route.openshift.io/web   web-academy-inc-selector.apps-crc.testing          web        8080                 None\n\nNAME          TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nservice/web   ClusterIP   10.217.4.228   <none>        8080/TCP   29s\n\nNAME                       READY   STATUS    RESTARTS   AGE\npod/web-7ddfddcc56-js5qw   1/1     Running   0          29s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS     ENDPOINTS   AGE\nweb-pqkzr   IPv4          <unset>   <unset>     30s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc describe svc web -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:                     web\nNamespace:                academy-inc-selector\nLabels:                   <none>\nAnnotations:              <none>\nSelector:                 app=payments-web\nType:                     ClusterIP\nIP Family Policy:         SingleStack\nIP Families:              IPv4\nIP:                       10.217.4.228\nIPs:                      10.217.4.228\nPort:                     <unset>  8080/TCP\nTargetPort:               8080/TCP\nEndpoints:                \nSession Affinity:         None\nInternal Traffic Policy:  Cluster\nEvents:                   <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get pods --show-labels -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE   LABELS\nweb-7ddfddcc56-js5qw   1/1     Running   0          32s   app=web,pod-template-hash=7ddfddcc56\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -l app=payments-web -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-inc-selector namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set selector svc/web app=web -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web selector updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-selector",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nweb-pqkzr   IPv4          8080    10.217.1.130   35s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "endpoints",
+    "title": "Service web has a ready endpoint",
+    "expect": "≥ 1 ready endpoint",
+    "status": "fail",
+    "observed": "0 ready endpoint address(es), ports -"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-selector.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791999042.7758079
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "endpoints",
+    "title": "Service web has a ready endpoint",
+    "expect": "≥ 1 ready endpoint",
+    "status": "pass",
+    "observed": "1 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-selector.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791999051.8668165
+ },
+ "seconds": 40,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-selector: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

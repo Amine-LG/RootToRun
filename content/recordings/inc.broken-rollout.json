@@ -1,0 +1,209 @@
+{
+ "lab": "inc.broken-rollout",
+ "kind": "incident",
+ "lab_hash": "1864a5c39ce91d71",
+ "recorded_at": "2026-10-14T17:10:49+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc rollout status deploy/web -n academy-inc-rollout --timeout=10s",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get rs -l app=web -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             DESIRED   CURRENT   READY   AGE\nweb-7ddfddcc56   1         1         1       42s\nweb-9889cfbb     1         1         0       42s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -l app=web -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS         RESTARTS   AGE\nweb-7ddfddcc56-6px8f   1/1     Running        0          44s\nweb-9889cfbb-898fc     0/1     ErrImagePull   0          44s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-rollout -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} {.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "web-9889cfbb-898fc 10.217.1.107 ready=false\nweb-7ddfddcc56-6px8f 10.217.1.106 ready=true\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy web -n academy-inc-rollout -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{\"\\n\"}{end}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Available=True MinimumReplicasAvailable\nProgressing=True ReplicaSetUpdated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc rollout history deploy/web -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web \nREVISION  CHANGE-CAUSE\n1         release 2.2\n2         release 2.3\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc wait deploy/web --for=condition=Progressing=False --timeout=90s -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy web -n academy-inc-rollout -o jsonpath='{.status.conditions[?(@.type==\"Progressing\")].reason}: {.status.conditions[?(@.type==\"Progressing\")].message}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ProgressDeadlineExceeded: ReplicaSet \"web-9889cfbb\" has timed out progressing.\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc rollout status deploy/web -n academy-inc-rollout --timeout=15s",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: deployment \"web\" exceeded its progress deadline\n",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout undo deploy/web -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web rolled back\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-rollout --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout history deploy/web -n academy-inc-rollout",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web \nREVISION  CHANGE-CAUSE\n2         release 2.3\n3         release 2.2\n\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "image",
+    "title": "web runs the last good image",
+    "expect": "httpd-24:latest",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].image = 'registry.access.redhat.com/ubi9/httpd-24:2.3-release'"
+   },
+   {
+    "id": "progressing",
+    "title": "The Deployment's rollout is complete",
+    "expect": "NewReplicaSetAvailable",
+    "status": "fail",
+    "observed": "status.conditions[?type=Progressing].reason = 'ReplicaSetUpdated'"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-rollout.apps-crc.testing/ → HTTP 200 · payments portal 2.2"
+   }
+  ],
+  "at": 1791997884.3993194
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "image",
+    "title": "web runs the last good image",
+    "expect": "httpd-24:latest",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].image = 'registry.access.redhat.com/ubi9/httpd-24:latest'"
+   },
+   {
+    "id": "progressing",
+    "title": "The Deployment's rollout is complete",
+    "expect": "NewReplicaSetAvailable",
+    "status": "pass",
+    "observed": "status.conditions[?type=Progressing].reason = 'NewReplicaSetAvailable'"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-rollout.apps-crc.testing/ → HTTP 200 · payments portal 2.2"
+   }
+  ],
+  "at": 1791997931.906199
+ },
+ "seconds": 82,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-rollout: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

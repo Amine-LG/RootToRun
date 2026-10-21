@@ -1,0 +1,168 @@
+{
+ "lab": "lesson.o3.init-sidecars",
+ "kind": "lesson",
+ "lab_hash": "d9f2ff4d3215678d",
+ "recorded_at": "2026-10-15T22:36:07+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o3-init-sidecars",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f app.yaml; oc rollout status deployment/app --timeout=180s; oc get pods -l app=app",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app created\nWaiting for deployment \"app\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"app\" successfully rolled out\nNAME                   READY   STATUS    RESTARTS   AGE\napp-666bbc7f5f-v7nl4   2/2     Running   0          18s\n",
+   "stderr": "",
+   "combined": "deployment.apps/app created\nWaiting for deployment \"app\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"app\" successfully rolled out\nNAME                   READY   STATUS    RESTARTS   AGE\napp-666bbc7f5f-v7nl4   2/2     Running   0          18s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/app -c app -- cat /work/app.conf; oc logs deploy/app -c render-config",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod=app-666bbc7f5f-v7nl4\nrendered /work/app.conf\n",
+   "stderr": "",
+   "combined": "pod=app-666bbc7f5f-v7nl4\nrendered /work/app.conf\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/app -c log-shipper",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Thu Oct 15 22:34:06 UTC 2026\n",
+   "stderr": "",
+   "combined": "Thu Oct 15 22:34:06 UTC 2026\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f stop-order.yaml; oc wait --for=condition=Ready pod/stop-order --timeout=120s >/dev/null; (oc logs -f --timestamps stop-order -c shipper > shipper.log 2>&1 &); (oc logs -f --timestamps stop-order -c app > app.log 2>&1 &); sleep 2; oc delete pod stop-order >/dev/null; sleep 3; cat shipper.log app.log | sort",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/stop-order created\n2026-10-15T22:34:18.157974898Z shipper started\n2026-10-15T22:34:22.931564999Z app started\n2026-10-15T22:34:26.613154217Z app got SIGTERM\n2026-10-15T22:34:32.636309110Z app done\n2026-10-15T22:34:32.947483898Z shipper got SIGTERM\n",
+   "stderr": "",
+   "combined": "pod/stop-order created\n2026-10-15T22:34:18.157974898Z shipper started\n2026-10-15T22:34:22.931564999Z app started\n2026-10-15T22:34:26.613154217Z app got SIGTERM\n2026-10-15T22:34:32.636309110Z app done\n2026-10-15T22:34:32.947483898Z shipper got SIGTERM\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f jobs.yaml; sleep 45; oc get jobs; oc get pods -l 'job-name in (classic-helper,native-sidecar)'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "job.batch/classic-helper created\njob.batch/native-sidecar created\nNAME             STATUS     COMPLETIONS   DURATION   AGE\nclassic-helper   Running    0/1           45s        45s\nnative-sidecar   Complete   1/1           27s        45s\nNAME                   READY   STATUS      RESTARTS   AGE\nclassic-helper-wh25d   1/2     NotReady    0          46s\nnative-sidecar-zsp9z   0/2     Completed   0          46s\n",
+   "stderr": "",
+   "combined": "job.batch/classic-helper created\njob.batch/native-sidecar created\nNAME             STATUS     COMPLETIONS   DURATION   AGE\nclassic-helper   Running    0/1           45s        45s\nnative-sidecar   Complete   1/1           27s        45s\nNAME                   READY   STATUS      RESTARTS   AGE\nclassic-helper-wh25d   1/2     NotReady    0          46s\nnative-sidecar-zsp9z   0/2     Completed   0          46s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f wait.yaml; sleep 15; oc get pods -l app=needs-db",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/needs-db created\nNAME                        READY   STATUS     RESTARTS   AGE\nneeds-db-86b5fbfcfb-jsw2h   0/1     Init:0/1   0          16s\n",
+   "stderr": "",
+   "combined": "deployment.apps/needs-db created\nNAME                        READY   STATUS     RESTARTS   AGE\nneeds-db-86b5fbfcfb-jsw2h   0/1     Init:0/1   0          16s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/needs-db",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Defaulted container \"app\" out of: app, wait-for-db (init)\nError from server (BadRequest): container \"app\" in pod \"needs-db-86b5fbfcfb-jsw2h\" is waiting to start: PodInitializing\n",
+   "combined": "Defaulted container \"app\" out of: app, wait-for-db (init)\nError from server (BadRequest): container \"app\" in pod \"needs-db-86b5fbfcfb-jsw2h\" is waiting to start: PodInitializing\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/needs-db -c wait-for-db",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "waiting for db\nwaiting for db\nwaiting for db\nwaiting for db\n",
+   "stderr": "",
+   "combined": "waiting for db\nwaiting for db\nwaiting for db\nwaiting for db\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create service clusterip db --tcp=5432:5432; oc wait --for=condition=Ready pod -l app=needs-db --timeout=120s; oc get pods -l app=needs-db; oc logs deploy/needs-db -c wait-for-db | tail -n 2",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/db created\npod/needs-db-86b5fbfcfb-jsw2h condition met\nNAME                        READY   STATUS    RESTARTS   AGE\nneeds-db-86b5fbfcfb-jsw2h   1/1     Running   0          27s\nwaiting for db\n10.217.5.62     db.academy-lesson-o3-init-sidecars.svc.cluster.local\n",
+   "stderr": "",
+   "combined": "service/db created\npod/needs-db-86b5fbfcfb-jsw2h condition met\nNAME                        READY   STATUS    RESTARTS   AGE\nneeds-db-86b5fbfcfb-jsw2h   1/1     Running   0          27s\nwaiting for db\n10.217.5.62     db.academy-lesson-o3-init-sidecars.svc.cluster.local\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug --help | grep -A1 -E '^    --(keep-init-containers|one-container)='",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    --keep-init-containers=true:\n\tRun the init containers for the pod. Defaults to true.\n--\n    --one-container=false:\n\tIf true, run only the selected container, remove all others\n",
+   "stderr": "",
+   "combined": "    --keep-init-containers=true:\n\tRun the init containers for the pod. Defaults to true.\n--\n    --one-container=false:\n\tIf true, run only the selected container, remove all others\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/app -c app -- sh -c 'id -u; id -G; ls -ld /work'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1001300000\n0 1001300000\ndrwxrwsrwx. 2 root 1001300000 37 Oct 15 22:34 /work\n",
+   "stderr": "",
+   "combined": "1001300000\n0 1001300000\ndrwxrwsrwx. 2 root 1001300000 37 Oct 15 22:34 /work\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f chown-init.yaml 2>/dev/null; sleep 6; oc get deployment chown-init; oc get events --field-selector reason=FailedCreate -o jsonpath='{.items[-1:].message}{\"\\n\"}' | grep -oP 'provider restricted-v2: \\S+ Invalid value: 0: must be in the ranges: \\[[0-9, ]+\\]'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/chown-init created\nNAME         READY   UP-TO-DATE   AVAILABLE   AGE\nchown-init   0/1     0            0           7s\nprovider restricted-v2: .initContainers[0].runAsUser: Invalid value: 0: must be in the ranges: [1001300000, 1001309999]\n",
+   "stderr": "",
+   "combined": "deployment.apps/chown-init created\nNAME         READY   UP-TO-DATE   AVAILABLE   AGE\nchown-init   0/1     0            0           7s\nprovider restricted-v2: .initContainers[0].runAsUser: Invalid value: 0: must be in the ranges: [1001300000, 1001309999]\n",
+   "ok": true
+  }
+ ],
+ "seconds": 144,
+ "ok": true,
+ "problems": []
+}

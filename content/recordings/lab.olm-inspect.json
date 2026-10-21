@@ -1,0 +1,124 @@
+{
+ "lab": "lab.olm-inspect",
+ "kind": "lab",
+ "lab_hash": "6b2e88ea464aac47",
+ "recorded_at": "2026-10-13T22:17:16+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "catalogs",
+   "cmd": "oc get catalogsources -n openshift-marketplace",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  DISPLAY               TYPE   PUBLISHER   AGE\ncertified-operators   Certified Operators   grpc   Red Hat     197d\ncommunity-operators   Community Operators   grpc   Red Hat     197d\nredhat-marketplace    Red Hat Marketplace   grpc   Red Hat     197d\nredhat-operators      Red Hat Operators     grpc   Red Hat     197d\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "catalogs",
+   "cmd": "oc get packagemanifest openshift-gitops-operator -n openshift-marketplace -o jsonpath='{.status.defaultChannel}'",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "latest",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "catalogs",
+   "cmd": "oc get packagemanifest openshift-gitops-operator -n openshift-marketplace -o jsonpath='{range .status.channels[*]}{.name}{\"\\n\"}{end}'",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "gitops-1.10\ngitops-1.11\ngitops-1.12\ngitops-1.13\ngitops-1.14\ngitops-1.15\ngitops-1.16\ngitops-1.17\ngitops-1.18\ngitops-1.19\ngitops-1.20\ngitops-1.21\ngitops-1.22\ngitops-1.6\ngitops-1.7\ngitops-1.8\ngitops-1.9\nlatest\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "installed",
+   "cmd": "oc get subscriptions -A",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found\n",
+   "ok": true
+  },
+  {
+   "step": "installed",
+   "cmd": "oc get csv -n openshift-operator-lifecycle-manager",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            DISPLAY          VERSION          REPLACES   PHASE\npackageserver   Package Server   0.0.1-snapshot              Succeeded\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "installed",
+   "cmd": "oc get clusteroperator operator-lifecycle-manager",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE\noperator-lifecycle-manager   4.21.8    True        False         False      197d    \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "plans",
+   "cmd": "oc get installplans -A",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found\n",
+   "ok": true
+  },
+  {
+   "step": "plans",
+   "cmd": "oc get operatorgroups -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,TARGET_NAMESPACES:.spec.targetNamespaces,SELECTOR:.spec.selector.matchLabels",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAMESPACE                              NAME                           TARGET_NAMESPACES                        SELECTOR\nopenshift-monitoring                   openshift-cluster-monitoring   <none>                                   map[openshift.io/cluster-monitoring:true]\nopenshift-operator-lifecycle-manager   olm-operators                  [openshift-operator-lifecycle-manager]   <none>\nopenshift-operators                    global-operators               <none>                                   <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "plans",
+   "cmd": "oc describe csv packageserver -n openshift-operator-lifecycle-manager",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         packageserver\nNamespace:    openshift-operator-lifecycle-manager\nLabels:       olm.clusteroperator.name=operator-lifecycle-manager-packageserver\n              olm.version=0.0.1-snapshot\nAnnotations:  include.release.openshift.io/hypershift: true\n              include.release.openshift.io/ibm-cloud-managed: true\n              include.release.openshift.io/self-managed-high-availability: true\n              olm.operatorGroup: olm-operators\n              olm.operatorNamespace: openshift-operator-lifecycle-manager\n              olm.targetNamespaces: openshift-operator-lifecycle-manager\nAPI Version:  operators.coreos.com/v1alpha1\nKind:         ClusterServiceVersion\nMetadata:\n  Creation Timestamp:  2026-03-30T12:29:49Z\n  Finalizers:\n    operators.coreos.com/csv-cleanup\n  Generation:        1\n  Resource Version:  86542\n  UID:               2bbb103a-4808-4dae-b31a-60f49b29bf80\nSpec:\n  Apiservicedefinitions:\n    Owned:\n      Container Port:   5443\n      Deployment Name:  packageserver\n      Description:      A PackageManifest is a resource generated from existing CatalogSources and their ConfigMaps\n      Display Name:     PackageManifest\n      Group:            packages.operators.coreos.com\n      Kind:             PackageManifest\n      Name:             packagemanifests\n      Version:          v1\n  Cleanup:\n    Enabled:  false\n  Customresourcedefinitions:\n  Description:   Represents an Operator package that is available from a given CatalogSource which will resolve to a ClusterServiceVersion.\n  Display Name:  Package Server\n  Install:\n    Spec:\n      Cluster Permissions:\n        Rules:\n          API Groups:\n            authorization.k8s.io\n          Resources:\n            subjectaccessreviews\n          Verbs:\n            create\n            get\n          API Groups:\n            \n          Resources:\n            configmaps\n          Verbs:\n            get\n            list\n            watch\n          API Groups:\n            operators.coreos.com\n          Resources:\n            catalogsources\n          Verbs:\n            get\n            list\n            watch\n          API Groups:\n            packages.operators.coreos.com\n          Resources:\n            packagemanifests\n          Verbs:\n            get\n            list\n        Service Account Name:  olm-operator-serviceaccount\n      Deployments:\n        Name:  packageserver\n        Spec:\n          Replicas:  1\n          Selector:\n            Match Labels:\n              App:  packageserver\n          Strategy:\n            Rolling Update:\n            Type:  RollingUpdate\n          Template:\n            Metadata:\n              Annotations:\n                openshift.io/required-scc:                restricted-v2\n                target.workload.openshift.io/management:  {\"effect\": \"PreferredDuringScheduling\"}\n              Labels:\n                App:  packageserver\n            Spec:\n              Affinity:\n              Containers:\n                Command:\n                  /bin/package-server\n                  -v=4\n                  --secure-port\n                  5443\n                  --global-namespace\n                  openshift-marketplace\n                Image:              quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:ec4ecabda7cb0a7dde3d85307fae859ec945445655bdcdef6d303d6fe393795e\n                Image Pull Policy:  IfNotPresent\n                Liveness Probe:\n                  Http Get:\n                    Path:    /healthz\n                    Port:    5443\n                    Scheme:  HTTPS\n                Name:        packageserver\n                Ports:\n                  Container Port:  5443\n                  Protocol:        TCP\n                Readiness Probe:\n                  Http Get:\n                    Path:    /healthz\n                    Port:    5443\n                    Scheme:  HTTPS\n                Resources:\n                  Requests:\n                    Cpu:     10m\n                    Memory:  50Mi\n                Security Context:\n                  Allow Privilege Escalation:  false\n                  Capabilities:\n                    Drop:\n                      ALL\n                  Read Only Root Filesystem:  true\n                Termination Message Policy:   FallbackToLogsOnError\n                Volume Mounts:\n                  Mount Path:  /tmp\n                  Name:        tmpfs\n              Node Selector:\n                kubernetes.io/os:                linux\n                node-role.kubernetes.io/master:  \n              Priority Class Name:               system-cluster-critical\n              Security Context:\n                Run As Non Root:  true\n                Seccomp Profile:\n                  Type:              RuntimeDefault\n              Service Account Name:  olm-operator-serviceaccount\n              Tolerations:\n                Effect:              NoSchedule\n                Key:                 node-role.kubernetes.io/master\n                Operator:            Exists\n                Effect:              NoExecute\n                Key:                 node.kubernetes.io/unreachable\n                Operator:            Exists\n                Toleration Seconds:  120\n                Effect:              NoExecute\n                Key:                 node.kubernetes.io/not-ready\n                Operator:            Exists\n                Toleration Seconds:  120\n              Volumes:\n                Empty Dir:\n                Name:  tmpfs\n    Strategy:          deployment\n  Install Modes:\n    Supported:  true\n    Type:       OwnNamespace\n    Supported:  true\n    Type:       SingleNamespace\n    Supported:  true\n    Type:       MultiNamespace\n    Supported:  true\n    Type:       AllNamespaces\n  Keywords:\n    packagemanifests\n    olm\n    packages\n  Links:\n    Name:  Package Server\n    URL:   https://github.com/operator-framework/operator-lifecycle-manager/tree/master/pkg/package-server\n  Maintainers:\n    Email:           openshift-operators@redhat.com\n    Name:            Red Hat\n  Maturity:          alpha\n  Min Kube Version:  1.11.0\n  Provider:\n    Name:   Red Hat\n  Version:  0.0.1-snapshot\nStatus:\n  Certs Last Updated:  2026-03-30T12:30:12Z\n  Certs Rotate At:     2028-03-28T12:30:11Z\n  Cleanup:\n  Conditions:\n    Last Transition Time:  2026-10-12T13:07:20Z\n    Last Update Time:      2026-10-12T13:07:20Z\n    Message:               waiting for install components to report healthy\n    Phase:                 Installing\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-12T13:07:20Z\n    Last Update Time:      2026-10-12T13:07:24Z\n    Message:               apiServices not installed\n    Phase:                 Installing\n    Reason:                InstallWaiting\n    Last Transition Time:  2026-10-12T13:08:49Z\n    Last Update Time:      2026-10-12T13:08:49Z\n    Message:               install strategy completed with no errors\n    Phase:                 Succeeded\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-12T13:20:18Z\n    Last Update Time:      2026-10-12T13:20:18Z\n    Message:               apiServices not installed\n    Phase:                 Failed\n    Reason:                ComponentUnhealthy\n    Last Transition Time:  2026-10-12T13:20:18Z\n    Last Update Time:      2026-10-12T13:20:18Z\n    Message:               apiServices not installed\n    Phase:                 Pending\n    Reason:                NeedsReinstall\n    Last Transition Time:  2026-10-12T13:20:18Z\n    Last Update Time:      2026-10-12T13:20:18Z\n    Message:               all requirements found, attempting install\n    Phase:                 InstallReady\n    Reason:                AllRequirementsMet\n    Last Transition Time:  2026-10-12T13:20:19Z\n    Last Update Time:      2026-10-12T13:20:19Z\n    Message:               waiting for install components to report healthy\n    Phase:                 Installing\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-12T13:20:19Z\n    Last Update Time:      2026-10-12T13:20:29Z\n    Message:               apiServices not installed\n    Phase:                 Installing\n    Reason:                InstallWaiting\n    Last Transition Time:  2026-10-12T13:24:11Z\n    Last Update Time:      2026-10-12T13:24:11Z\n    Message:               install strategy completed with no errors\n    Phase:                 Succeeded\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-13T17:32:43Z\n    Last Update Time:      2026-10-13T17:32:43Z\n    Message:               apiServices not installed\n    Phase:                 Failed\n    Reason:                ComponentUnhealthy\n    Last Transition Time:  2026-10-13T17:32:58Z\n    Last Update Time:      2026-10-13T17:32:58Z\n    Message:               apiServices not installed\n    Phase:                 Pending\n    Reason:                NeedsReinstall\n    Last Transition Time:  2026-10-13T17:32:59Z\n    Last Update Time:      2026-10-13T17:32:59Z\n    Message:               all requirements found, attempting install\n    Phase:                 InstallReady\n    Reason:                AllRequirementsMet\n    Last Transition Time:  2026-10-13T17:32:59Z\n    Last Update Time:      2026-10-13T17:32:59Z\n    Message:               waiting for install components to report healthy\n    Phase:                 Installing\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-13T17:32:59Z\n    Last Update Time:      2026-10-13T17:33:01Z\n    Message:               apiServices not installed\n    Phase:                 Installing\n    Reason:                InstallWaiting\n    Last Transition Time:  2026-10-13T17:37:58Z\n    Last Update Time:      2026-10-13T17:37:58Z\n    Message:               install timeout\n    Phase:                 Failed\n    Reason:                InstallCheckFailed\n    Last Transition Time:  2026-10-13T17:37:59Z\n    Last Update Time:      2026-10-13T17:37:59Z\n    Message:               installing: waiting for deployment packageserver to become ready: waiting for spec update of deployment \"packageserver\" to be observed...\n    Phase:                 Pending\n    Reason:                NeedsReinstall\n    Last Transition Time:  2026-10-13T17:38:07Z\n    Last Update Time:      2026-10-13T17:38:07Z\n    Message:               all requirements found, attempting install\n    Phase:                 InstallReady\n    Reason:                AllRequirementsMet\n    Last Transition Time:  2026-10-13T17:38:09Z\n    Last Update Time:      2026-10-13T17:38:09Z\n    Message:               waiting for install components to report healthy\n    Phase:                 Installing\n    Reason:                InstallSucceeded\n    Last Transition Time:  2026-10-13T17:38:09Z\n    Last Update Time:      2026-10-13T17:38:13Z\n    Message:               installing: waiting for deployment packageserver to become ready: waiting for spec update of deployment \"packageserver\" to be observed...\n    Phase:                 Installing\n    Reason:                InstallWaiting\n    Last Transition Time:  2026-10-13T17:38:29Z\n    Last Update Time:      2026-10-13T17:38:29Z\n    Message:               install strategy completed with no errors\n    Phase:                 Succeeded\n    Reason:                InstallSucceeded\n  Last Transition Time:    2026-10-13T17:38:29Z\n  Last Update Time:        2026-10-13T17:38:29Z\n  Message:                 install strategy completed with no errors\n  Phase:                   Succeeded\n  Reason:                  InstallSucceeded\n  Requirement Status:\n    Group:    operators.coreos.com\n    Kind:     ClusterServiceVersion\n    Message:  CSV minKubeVersion (1.11.0) less than server version (v1.34.5)\n    Name:     packageserver\n    Status:   Present\n    Version:  v1alpha1\n    Group:    apiregistration.k8s.io\n    Kind:     APIService\n    Message:  \n    Name:     v1.packages.operators.coreos.com\n    Status:   DeploymentFound\n    Version:  v1\n    Dependents:\n      Group:    rbac.authorization.k8s.io\n      Kind:     PolicyRule\n      Message:  cluster rule:{\"verbs\":[\"create\",\"get\"],\"apiGroups\":[\"authorization.k8s.io\"],\"resources\":[\"subjectaccessreviews\"]}\n      Status:   Satisfied\n      Version:  v1\n      Group:    rbac.authorization.k8s.io\n      Kind:     PolicyRule\n      Message:  cluster rule:{\"verbs\":[\"get\",\"list\",\"watch\"],\"apiGroups\":[\"\"],\"resources\":[\"configmaps\"]}\n      Status:   Satisfied\n      Version:  v1\n      Group:    rbac.authorization.k8s.io\n      Kind:     PolicyRule\n      Message:  cluster rule:{\"verbs\":[\"get\",\"list\",\"watch\"],\"apiGroups\":[\"operators.coreos.com\"],\"resources\":[\"catalogsources\"]}\n      Status:   Satisfied\n      Version:  v1\n      Group:    rbac.authorization.k8s.io\n      Kind:     PolicyRule\n      Message:  cluster rule:{\"verbs\":[\"get\",\"list\"],\"apiGroups\":[\"packages.operators.coreos.com\"],\"resources\":[\"packagemanifests\"]}\n      Status:   Satisfied\n      Version:  v1\n    Group:      \n    Kind:       ServiceAccount\n    Message:    \n    Name:       olm-operator-serviceaccount\n    Status:     Present\n    Version:    v1\nEvents:         <none>\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "unavailable",
+  "results": [],
+  "at": 1791929840.756948
+ },
+ "verify_after": {
+  "verdict": "not-applicable",
+  "results": []
+ },
+ "seconds": 7,
+ "ok": true,
+ "problems": []
+}

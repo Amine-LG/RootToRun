@@ -1,0 +1,327 @@
+{
+ "lab": "lab.cli-tour",
+ "kind": "lab",
+ "lab_hash": "97762eee63d472aa",
+ "recorded_at": "2026-10-14T17:33:22+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc whoami",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "developer\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc api-resources --api-group=apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  SHORTNAMES   APIVERSION   NAMESPACED   KIND\ncontrollerrevisions                apps/v1      true         ControllerRevision\ndaemonsets            ds           apps/v1      true         DaemonSet\ndeployments           deploy       apps/v1      true         Deployment\nreplicasets           rs           apps/v1      true         ReplicaSet\nstatefulsets          sts          apps/v1      true         StatefulSet\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc explain deployment.spec.strategy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: strategy <DeploymentStrategy>\n\n\nDESCRIPTION:\n    The deployment strategy to use to replace existing pods with new ones.\n    DeploymentStrategy describes how to replace existing pods with new ones.\n    \nFIELDS:\n  rollingUpdate\t<RollingUpdateDeployment>\n    Rolling update config params. Present only if DeploymentStrategyType =\n    RollingUpdate.\n\n  type\t<string>\n  enum: Recreate, RollingUpdate\n    Type of deployment. Can be \"Recreate\" or \"RollingUpdate\". Default is\n    RollingUpdate.\n    \n    Possible enum values:\n     - `\"Recreate\"` Kill all existing pods before creating new ones.\n     - `\"RollingUpdate\"` Replace the old ReplicaSets by new one using rolling\n    update i.e gradually scale down the old ReplicaSets and scale up the new\n    one.\n\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc get deploy web -n academy-cli -o jsonpath='{.spec.template.spec.containers[0].image}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "registry.access.redhat.com/ubi9/httpd-24:latest",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "identity",
+   "cmd": "oc whoami",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "developer\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "identity",
+   "cmd": "oc whoami --show-server",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "https://api.crc.testing:6443\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "identity",
+   "cmd": "oc version",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Client Version: 4.21.8\nKustomize Version: v5.7.1\nKubernetes Version: v1.34.5\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "identity",
+   "cmd": "oc projects",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "You have one project on this server: \"Academy: A tour of the oc CLI (academy-cli)\".\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "discover",
+   "cmd": "oc api-resources --api-group=apps",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  SHORTNAMES   APIVERSION   NAMESPACED   KIND\ncontrollerrevisions                apps/v1      true         ControllerRevision\ndaemonsets            ds           apps/v1      true         DaemonSet\ndeployments           deploy       apps/v1      true         Deployment\nreplicasets           rs           apps/v1      true         ReplicaSet\nstatefulsets          sts          apps/v1      true         StatefulSet\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "discover",
+   "cmd": "oc api-resources --api-group=route.openshift.io",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     SHORTNAMES   APIVERSION              NAMESPACED   KIND\nroutes                route.openshift.io/v1   true         Route\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "discover",
+   "cmd": "oc explain deployment.spec.strategy.rollingUpdate",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "GROUP:      apps\nKIND:       Deployment\nVERSION:    v1\n\nFIELD: rollingUpdate <RollingUpdateDeployment>\n\n\nDESCRIPTION:\n    Rolling update config params. Present only if DeploymentStrategyType =\n    RollingUpdate.\n    Spec to control the desired behavior of rolling update.\n    \nFIELDS:\n  maxSurge\t<IntOrString>\n    The maximum number of pods that can be scheduled above the desired number of\n    pods. Value can be an absolute number (ex: 5) or a percentage of desired\n    pods (ex: 10%). This can not be 0 if MaxUnavailable is 0. Absolute number is\n    calculated from percentage by rounding up. Defaults to 25%. Example: when\n    this is set to 30%, the new ReplicaSet can be scaled up immediately when the\n    rolling update starts, such that the total number of old and new pods do not\n    exceed 130% of desired pods. Once old pods have been killed, new ReplicaSet\n    can be scaled up further, ensuring that total number of pods running at any\n    time during the update is at most 130% of desired pods.\n\n  maxUnavailable\t<IntOrString>\n    The maximum number of pods that can be unavailable during the update. Value\n    can be an absolute number (ex: 5) or a percentage of desired pods (ex: 10%).\n    Absolute number is calculated from percentage by rounding down. This can not\n    be 0 if MaxSurge is 0. Defaults to 25%. Example: when this is set to 30%,\n    the old ReplicaSet can be scaled down to 70% of desired pods immediately\n    when the rolling update starts. Once new pods are ready, old ReplicaSet can\n    be scaled down further, followed by scaling up the new ReplicaSet, ensuring\n    that the total number of pods available at all times during the update is at\n    least 70% of desired pods.\n\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc get deploy -n academy-cli -o wide",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES                                            SELECTOR\nweb    2/2     2            2           58s   httpd        registry.access.redhat.com/ubi9/httpd-24:latest   app=web\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc get deploy web -n academy-cli -o yaml",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  annotations:\n    deployment.kubernetes.io/revision: \"1\"\n    kubectl.kubernetes.io/last-applied-configuration: |\n      {\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{},\"labels\":{\"app\":\"web\",\"tier\":\"frontend\"},\"name\":\"web\",\"namespace\":\"academy-cli\"},\"spec\":{\"replicas\":2,\"selector\":{\"matchLabels\":{\"app\":\"web\"}},\"template\":{\"metadata\":{\"labels\":{\"app\":\"web\",\"tier\":\"frontend\"}},\"spec\":{\"containers\":[{\"image\":\"registry.access.redhat.com/ubi9/httpd-24:latest\",\"name\":\"httpd\",\"ports\":[{\"containerPort\":8080}],\"readinessProbe\":{\"httpGet\":{\"path\":\"/healthz\",\"port\":8080},\"periodSeconds\":5},\"resources\":{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}},\"volumeMounts\":[{\"mountPath\":\"/var/www/html\",\"name\":\"content\"}]}],\"volumes\":[{\"configMap\":{\"name\":\"web-content\"},\"name\":\"content\"}]}}}}\n  creationTimestamp: \"2026-10-14T17:33:29Z\"\n  generation: 1\n  labels:\n    app: web\n    tier: frontend\n  name: web\n  namespace: academy-cli\n  resourceVersion: \"301076\"\n  uid: e6e13236-96cf-47c7-af7f-2943a1e261ca\nspec:\n  progressDeadlineSeconds: 600\n  replicas: 2\n  revisionHistoryLimit: 10\n  selector:\n    matchLabels:\n      app: web\n  strategy:\n    rollingUpdate:\n      maxSurge: 25%\n      maxUnavailable: 25%\n    type: RollingUpdate\n  template:\n    metadata:\n      labels:\n        app: web\n        tier: frontend\n    spec:\n      containers:\n      - image: registry.access.redhat.com/ubi9/httpd-24:latest\n        imagePullPolicy: Always\n        name: httpd\n        ports:\n        - containerPort: 8080\n          protocol: TCP\n        readinessProbe:\n          failureThreshold: 3\n          httpGet:\n            path: /healthz\n            port: 8080\n            scheme: HTTP\n          periodSeconds: 5\n          successThreshold: 1\n          timeoutSeconds: 1\n        resources:\n          limits:\n            memory: 128Mi\n          requests:\n            cpu: 10m\n            memory: 32Mi\n        terminationMessagePath: /dev/termination-log\n        terminationMessagePolicy: File\n        volumeMounts:\n        - mountPath: /var/www/html\n          name: content\n      dnsPolicy: ClusterFirst\n      restartPolicy: Always\n      schedulerName: default-scheduler\n      securityContext: {}\n      terminationGracePeriodSeconds: 30\n      volumes:\n      - configMap:\n          defaultMode: 420\n          name: web-content\n        name: content\nstatus:\n  availableReplicas: 2\n  conditions:\n  - lastTransitionTime: \"2026-10-14T17:33:47Z\"\n    lastUpdateTime: \"2026-10-14T17:33:47Z\"\n    message: Deployment has minimum availability.\n    reason: MinimumReplicasAvailable\n    status: \"True\"\n    type: Available\n  - lastTransitionTime: \"2026-10-14T17:33:30Z\"\n    lastUpdateTime: \"2026-10-14T17:33:47Z\"\n    message: ReplicaSet \"web-94b5d75d\" has successfully progressed.\n    reason: NewReplicaSetAvailable\n    status: \"True\"\n    type: Progressing\n  observedGeneration: 1\n  readyReplicas: 2\n  replicas: 2\n  updatedReplicas: 2\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc get deploy web -n academy-cli -o jsonpath='{.spec.template.spec.containers[0].image}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "registry.access.redhat.com/ubi9/httpd-24:latest",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc get pods -n academy-cli -o custom-columns=NAME:.metadata.name,IP:.status.podIP,NODE:.spec.nodeName",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                 IP             NODE\nweb-94b5d75d-q6lhp   10.217.1.137   crc\nweb-94b5d75d-wqhn7   10.217.1.136   crc\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc describe deploy web -n academy-cli",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:                   web\nNamespace:              academy-cli\nCreationTimestamp:      Wed, 14 Oct 2026 17:33:29 +0000\nLabels:                 app=web\n                        tier=frontend\nAnnotations:            deployment.kubernetes.io/revision: 1\nSelector:               app=web\nReplicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable\nStrategyType:           RollingUpdate\nMinReadySeconds:        0\nRollingUpdateStrategy:  25% max unavailable, 25% max surge\nPod Template:\n  Labels:  app=web\n           tier=frontend\n  Containers:\n   httpd:\n    Image:      registry.access.redhat.com/ubi9/httpd-24:latest\n    Port:       8080/TCP\n    Host Port:  0/TCP\n    Limits:\n      memory:  128Mi\n    Requests:\n      cpu:        10m\n      memory:     32Mi\n    Readiness:    http-get http://:8080/healthz delay=0s timeout=1s period=5s #success=1 #failure=3\n    Environment:  <none>\n    Mounts:\n      /var/www/html from content (rw)\n  Volumes:\n   content:\n    Type:          ConfigMap (a volume populated by a ConfigMap)\n    Name:          web-content\n    Optional:      false\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nConditions:\n  Type           Status  Reason\n  ----           ------  ------\n  Available      True    MinimumReplicasAvailable\n  Progressing    True    NewReplicaSetAvailable\nOldReplicaSets:  <none>\nNewReplicaSet:   web-94b5d75d (2/2 replicas created)\nEvents:\n  Type    Reason             Age   From                   Message\n  ----    ------             ----  ----                   -------\n  Normal  ScalingReplicaSet  72s   deployment-controller  Scaled up replica set web-94b5d75d from 0 to 2\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "labels",
+   "cmd": "oc get pods -n academy-cli --show-labels",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                 READY   STATUS    RESTARTS   AGE   LABELS\nweb-94b5d75d-q6lhp   1/1     Running   0          73s   app=web,pod-template-hash=94b5d75d,tier=frontend\nweb-94b5d75d-wqhn7   1/1     Running   0          73s   app=web,pod-template-hash=94b5d75d,tier=frontend\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "labels",
+   "cmd": "oc get pods -n academy-cli -l tier=frontend",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                 READY   STATUS    RESTARTS   AGE\nweb-94b5d75d-q6lhp   1/1     Running   0          75s\nweb-94b5d75d-wqhn7   1/1     Running   0          75s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "labels",
+   "cmd": "oc get pods -n academy-cli -l 'app in (web,api)'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                 READY   STATUS    RESTARTS   AGE\nweb-94b5d75d-q6lhp   1/1     Running   0          77s\nweb-94b5d75d-wqhn7   1/1     Running   0          77s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "labels",
+   "cmd": "oc get pods -n academy-cli --sort-by=.metadata.creationTimestamp",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                 READY   STATUS    RESTARTS   AGE\nweb-94b5d75d-q6lhp   1/1     Running   0          79s\nweb-94b5d75d-wqhn7   1/1     Running   0          79s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "events",
+   "cmd": "oc get events -n academy-cli --sort-by=.lastTimestamp",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON              OBJECT                    MESSAGE\n81s         Normal    Scheduled           pod/web-94b5d75d-q6lhp    Successfully assigned academy-cli/web-94b5d75d-q6lhp to crc\n81s         Normal    Scheduled           pod/web-94b5d75d-wqhn7    Successfully assigned academy-cli/web-94b5d75d-wqhn7 to crc\n81s         Normal    ScalingReplicaSet   deployment/web            Scaled up replica set web-94b5d75d from 0 to 2\n81s         Normal    SuccessfulCreate    replicaset/web-94b5d75d   Created pod: web-94b5d75d-q6lhp\n81s         Normal    SuccessfulCreate    replicaset/web-94b5d75d   Created pod: web-94b5d75d-wqhn7\n78s         Normal    AddedInterface      pod/web-94b5d75d-q6lhp    Add eth0 [10.217.1.137/23] from ovn-kubernetes\n77s         Normal    Pulling             pod/web-94b5d75d-q6lhp    Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n77s         Normal    AddedInterface      pod/web-94b5d75d-wqhn7    Add eth0 [10.217.1.136/23] from ovn-kubernetes\n77s         Normal    Pulling             pod/web-94b5d75d-wqhn7    Pulling image \"registry.access.redhat.com/ubi9/httpd-24:latest\"\n74s         Normal    Pulled              pod/web-94b5d75d-wqhn7    Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 3.717s (3.717s including waiting). Image size: 309803777 bytes.\n73s         Normal    Created             pod/web-94b5d75d-q6lhp    Created container: httpd\n73s         Normal    Created             pod/web-94b5d75d-wqhn7    Created container: httpd\n73s         Normal    Started             pod/web-94b5d75d-wqhn7    Started container httpd\n73s         Normal    Pulled              pod/web-94b5d75d-q6lhp    Successfully pulled image \"registry.access.redhat.com/ubi9/httpd-24:latest\" in 4.532s (4.532s including waiting). Image size: 309803777 bytes.\n72s         Normal    Started             pod/web-94b5d75d-q6lhp    Started container httpd\n71s         Warning   Unhealthy           pod/web-94b5d75d-wqhn7    Readiness probe failed: Get \"http://10.217.1.136:8080/healthz\": dial tcp 10.217.1.136:8080: connect: connection refused\n70s         Warning   Unhealthy           pod/web-94b5d75d-q6lhp    Readiness probe failed: Get \"http://10.217.1.137:8080/healthz\": dial tcp 10.217.1.137:8080: connect: connection refused\n49s         Warning   Unhealthy           pod/web-94b5d75d-wqhn7    Readiness probe failed: Get \"http://10.217.1.136:8080/healthz\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "label-it",
+   "cmd": "oc label deploy web team=payments -n academy-cli",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web labeled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "label-it",
+   "cmd": "oc annotate deploy web owner=platform-team -n academy-cli",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web annotated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "label-it",
+   "cmd": "oc get deploy -n academy-cli -l team=payments",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           89s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "team",
+    "title": "web is labelled team=payments",
+    "expect": "team=payments",
+    "status": "fail",
+    "observed": "metadata.labels.team = None"
+   },
+   {
+    "id": "owner",
+    "title": "web is annotated owner=platform-team",
+    "expect": "owner=platform-team",
+    "status": "fail",
+    "observed": "metadata.annotations.owner = None"
+   }
+  ],
+  "at": 1791999227.881869
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "team",
+    "title": "web is labelled team=payments",
+    "expect": "team=payments",
+    "status": "pass",
+    "observed": "metadata.labels.team = 'payments'"
+   },
+   {
+    "id": "owner",
+    "title": "web is annotated owner=platform-team",
+    "expect": "owner=platform-team",
+    "status": "pass",
+    "observed": "metadata.annotations.owner = 'platform-team'"
+   }
+  ],
+  "at": 1791999299.6248765
+ },
+ "seconds": 97,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-cli: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

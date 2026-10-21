@@ -1,0 +1,773 @@
+track: practice
+title: "Practice arena: troubleshooting triage"
+intro: >-
+  Twenty-three short investigations, most built from output recorded on OpenShift Local during the course's challenges and
+  incidents (object names changed). For each one, decide the most likely cause, the most useful next command or the
+  safest fix, the way you would on call. It takes about 35 minutes; nothing is marked complete, and the results
+  only suggest which incidents and challenges to practise first.
+minutes: 35
+items:
+  # ---------------------------------------------------------------- r1-app-challenges
+  - id: triage-ready-pods-no-traffic
+    targets: [ch.ship-web-app, d.services-dns]
+    prompt: >-
+      You have just created a ConfigMap, a Deployment, a Service and a Route for the `shop` app. Both pods are Running
+      and Ready, but the Route returns 503 and a test from the client pod fails as shown. What is the most useful next
+      command?
+    evidence: |
+      $ oc get deploy shop -n store
+      NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+      shop   2/2     2            2           40s
+      $ oc exec deploy/client -n store -- curl -sS -m 3 http://shop:8080/
+      command terminated with exit code 7
+      $ curl -s -o /dev/null -w '%{http_code}\n' http://shop-store.apps-crc.testing/
+      503
+    choices:
+      - "`oc logs deploy/shop`, to find the error the application returns for each request."
+      - "`oc rollout restart deploy/shop`, to give the pods a fresh start."
+      - "`oc describe svc shop`, to check the Service's selector and endpoints."
+      - "`oc delete route shop` and `oc expose svc shop` again, because the Route was created too early."
+    answer: 2
+    feedback:
+      - "With healthy pods and a 503 from the router, the requests most likely never reach httpd, so its logs will be silent."
+      - "Restarting healthy pods changes nothing between the Service and them; it only costs time."
+      - "Ready pods plus refused connections to the Service and a router 503 point at the Service. In the recorded case its selector was `app: store` while the pods were labelled `app: shop`: zero endpoints."
+      - "A Route follows its Service by name at any time; creation order does not matter."
+    explain: >-
+      Follow the request path: Route, Service, endpoints, pod. When pods are Ready but traffic fails, check the Service's
+      selector and endpoints before touching the application.
+
+  - id: triage-three-layered-faults
+    targets: [ch.recover-and-scale, o1.troubleshooting]
+    prompt: >-
+      The `api` Deployment had a missing image tag and a readiness probe on the wrong port. You fixed both and scaled to
+      3. The grader now reports the results below. What is still wrong?
+    evidence: |
+      ready      pass  spec.replicas 3, ready 3/3, updated 3, total 3
+      endpoints  fail  3 ready endpoint address(es), ports [8081]
+      inside     fail  command terminated with exit code 7
+      outside    fail  http://api-orders.apps-crc.testing/status -> HTTP 503 · Application is not available
+    choices:
+      - "The Service's `targetPort` is 8081, where nothing listens."
+      - "The readiness probe still fails, so the pods are not yet in the endpoints."
+      - "The Route points at the wrong Service, so the router has no backend."
+      - "Three replicas exceed the project's quota, so one pod is missing from the endpoints."
+    answer: 0
+    feedback:
+      - "Three ready endpoints exist, but on port 8081, and curl's exit code 7 means connection refused. httpd listens on 8080: fix the Service's `targetPort`."
+      - "The grader shows 3/3 Ready and three ready endpoint addresses; readiness is fixed."
+      - "The failure also happens inside the project (`http://api:8080/` refused), so the Route is not the cause."
+      - "All three replicas exist and are Ready; nothing was refused at creation."
+    explain: >-
+      Layered faults hide each other: an image error hides a probe error, which hides a port error. Re-check the whole
+      path after every repair, and scale only once one pod works.
+
+  - id: triage-cpu-fixed-memory-next
+    targets: [ch.right-size, b.resources-qos]
+    prompt: >-
+      The `report` worker's pods are Pending with the event below. It loads about 64 MiB into memory at start-up. You
+      lower only the CPU request to 200m and leave the memory settings as they are. What happens next?
+    evidence: |
+      $ oc get events -n reports --field-selector reason=FailedScheduling
+      Warning   FailedScheduling   pod/report-5d9c7f8b6-k2x4q   0/1 nodes are available: 1 Insufficient cpu. ...
+      $ oc get deploy report -n reports -o jsonpath='{.spec.template.spec.containers[0].resources}'
+      {"limits":{"memory":"48Mi"},"requests":{"cpu":"64","memory":"48Mi"}}
+    choices:
+      - "The pods run normally: the scheduler accepts them now, and a memory limit is only a hint for the scheduler."
+      - "The pods stay Pending, because their 48Mi memory request is now the resource that does not fit."
+      - "The pods are scheduled, then OOMKilled (exit 137) and restarted, because 64 MiB exceeds the 48Mi limit."
+      - "The pods run but are throttled, because a pod without a CPU limit is BestEffort and gets no CPU time."
+    answer: 2
+    feedback:
+      - "Requests are for the scheduler; limits are enforced by the kernel through cgroups. The scheduler never sees the 64 MiB the program needs."
+      - "48Mi fits easily on the node; memory was never the scheduling problem."
+      - "Two mechanisms at two different times: the CPU request blocked scheduling, and the memory limit kills the container at run time. Size the memory limit above the peak (and equal requests and limits for Guaranteed QoS)."
+      - "With requests set the pod is Burstable, not BestEffort, and a missing CPU limit means no throttling at all."
+    explain: >-
+      The scheduler reads requests; the kernel enforces limits. Fixing a scheduling failure can uncover a run-time one,
+      so check the memory a workload really needs before setting its limit.
+
+  - id: triage-slow-start-liveness
+    targets: [ch.slow-start, b.health-probes]
+    prompt: >-
+      The `shop` pods warm a cache for about 25 seconds before httpd listens on 8080. Since a liveness probe was added,
+      they restart again and again and never become Ready. Which change fixes the start and keeps the protection against
+      a hung httpd?
+    evidence: |
+      livenessProbe: {httpGet: {path: /, port: 8080}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 2}
+
+      Warning  Unhealthy  pod/shop-6f7c9d8b5-p4r7t  Liveness probe failed: Get "http://10.217.0.88:8080/": dial tcp 10.217.0.88:8080: connect: connection refused
+      Normal   Killing    pod/shop-6f7c9d8b5-p4r7t  Container httpd failed liveness probe, will be restarted
+    choices:
+      - "Remove the liveness probe; the readiness probe alone will keep traffic away from a hung httpd."
+      - "Add a startup probe on port 8080 allowing a minute to start; keep the liveness probe."
+      - "Add a readiness probe on port 8080, so the pods receive no traffic until httpd answers."
+      - "Raise the memory limit, because a cache warm-up that slow is usually short of memory."
+    answer: 1
+    feedback:
+      - "A hung httpd would stay Running forever; readiness only removes it from the endpoints and never restarts it. The probe was added for exactly that case."
+      - "Liveness and readiness checks wait until the startup probe succeeds, so a 25-second start is protected (for example period 5 s, failure threshold 12). Add a readiness probe too: it gates traffic, while liveness still catches hangs later."
+      - "Readiness does not stop the liveness probe from killing the container during the warm-up; the restarts continue."
+      - "The event states the reason for each restart: the liveness probe. Memory kills would show OOMKilled."
+    explain: >-
+      Give each probe one job: startup protects a slow start, readiness gates traffic, liveness restarts a hung process.
+
+  # ---------------------------------------------------------------- r2-admin-challenges
+  - id: triage-named-secret-grant
+    targets: [ch.deploy-bot-access, f.rbac]
+    prompt: >-
+      The pipeline's author proposes this Role for `ci-bot` and shows `oc auth can-i get secrets
+      --as=system:serviceaccount:delivery:ci-bot -n delivery` answering `no` as proof that it cannot read credentials.
+      Does the Role meet the requirement "ci-bot cannot read Secrets"?
+    evidence: |
+      rules:
+      - apiGroups: [apps]
+        resources: [deployments]
+        verbs: [get, list, watch, patch, update]
+      - apiGroups: [""]
+        resources: [pods, pods/log]
+        verbs: [get, list]
+      - apiGroups: [""]
+        resources: [secrets]
+        resourceNames: [db-credentials]
+        verbs: [get]
+    choices:
+      - "`can-i` evaluates every rule bound to the ServiceAccount and answered no."
+      - "Rules with `resourceNames` are ignored unless `list` is also granted on the resource."
+      - "No, but only because `pods/log` exposes Secrets mounted as environment variables."
+      - "No: it can get `db-credentials`; an unnamed check misses named rules."
+    answer: 3
+    feedback:
+      - "The check asked about secrets in general. A rule limited to one name does not answer that request, so the reply was no, while the named Secret stays readable."
+      - "A `resourceNames` rule is fully effective for `get` on that object; nothing makes it ignored."
+      - "Logs show what the application prints, not its environment. The Role has a direct path to a Secret."
+      - "Effective permissions must be checked with the specifics the workload will use. This trial is recorded in the challenge as a grant that looks least-privilege but is not."
+    explain: >-
+      An unnamed `can-i` check can miss a rule restricted by `resourceNames`. Review the rules themselves, or test each
+      named object the workload might touch.
+
+  - id: triage-shared-tier-label
+    targets: [ch.protect-traffic, d.networkpolicy-ovn]
+    prompt: >-
+      This policy was applied to keep the `batch` workload away from the `api` pods. `batch` can still call
+      `http://api:8080/`. Why?
+    evidence: |
+      $ oc get networkpolicy api-from-web -n orders -o yaml   (spec excerpt)
+      spec:
+        podSelector: {matchLabels: {app: api}}
+        ingress:
+        - from:
+          - podSelector: {matchLabels: {tier: web}}
+
+      $ oc get pods -n orders --show-labels
+      NAME                        READY   STATUS    LABELS
+      api-6d4f9c7b55-x7k2m        1/1     Running   app=api,tier=backend,pod-template-hash=6d4f9c7b55
+      batch-7b8c9d6f4-q2w8e       1/1     Running   app=batch,tier=web,pod-template-hash=7b8c9d6f4
+      frontend-5f6d8b9c7-m3n4p    1/1     Running   app=frontend,tier=web,pod-template-hash=5f6d8b9c7
+    choices:
+      - "The policy has no `policyTypes`, so it is ignored until `Ingress` is listed."
+      - "`batch` also carries `tier=web`, so the rule allows it too."
+      - "Policies take a few minutes to reach OVN-Kubernetes; test again later."
+      - "Same-namespace traffic is never filtered by NetworkPolicy."
+    answer: 1
+    feedback:
+      - "When `policyTypes` is omitted, a policy with an `ingress` section applies to ingress. It is in force."
+      - "The rule allows whatever matches `tier=web`, and that includes `batch`. Allowed sources must be identified by a label that only the intended client has."
+      - "Policies apply within seconds; the recorded challenge shows the same result whenever it is tested."
+      - "Pods in the same namespace are filtered like any others once a policy selects the target pods."
+    explain: >-
+      A NetworkPolicy allows exactly what its selectors match. Check every pod that carries the allowed labels, not just
+      the one you meant.
+
+  - id: triage-cleanup-job-forbidden
+    targets: [ch.bounded-cleanup, o2.jobs-cronjobs]
+    prompt: >-
+      A CronJob runs `oc delete pods -l debug=true` as the dedicated ServiceAccount `debug-cleaner`, bound to a Role that
+      allows only `delete` on pods. A Job started from it fails with this log. What is the narrowest fix?
+    evidence: |
+      $ oc logs job/cleanup-now -n sandbox
+      Error from server (Forbidden): pods is forbidden: User "system:serviceaccount:sandbox:debug-cleaner" cannot list resource "pods" in API group "" in the namespace "sandbox"
+    choices:
+      - "Add `list` on pods to the Role: deleting by label lists the matching pods first."
+      - "Add `deletecollection` on pods, which is the verb `oc delete -l` uses for a label selector."
+      - "Bind the `edit` role instead; administrative jobs need it to work reliably."
+      - "Run the CronJob as the `default` ServiceAccount, which can already list pods in its namespace."
+    answer: 0
+    feedback:
+      - "The error names the missing verb: `list`. Deleting by label first lists the matching pods, then deletes each one. With `list` and `delete` on pods, and nothing else, the job works and cannot touch Deployments, Secrets or RBAC."
+      - "The denied verb in the error is `list`; the client lists the matching pods and deletes them one by one."
+      - "`edit` would also let the job change Deployments and read every Secret in the project: far beyond removing debug pods."
+      - "`default` has no such permission by default, and a grant made to it would apply to every pod that does not name a ServiceAccount."
+    explain: >-
+      Least privilege is found from the evidence: read the verb and resource a 403 names, grant exactly that, and keep the
+      grant on a dedicated ServiceAccount.
+
+  # ---------------------------------------------------------------- r3-incidents
+  - id: triage-503-empty-endpoints
+    targets: [inc.service-selector-503, d.services-dns]
+    prompt: >-
+      Since a release that "only renamed some labels", the portal's Route answers 503. Here is what you see. What is the
+      most useful next command?
+    evidence: |
+      $ oc get route,svc,pods -n payments
+      NAME                           HOST/PORT                                SERVICES   PORT
+      route.route.openshift.io/web   web-payments.apps-crc.testing            web        8080
+
+      NAME          TYPE        CLUSTER-IP     PORT(S)
+      service/web   ClusterIP   10.217.5.118   8080/TCP
+
+      NAME                       READY   STATUS    RESTARTS   AGE
+      pod/web-7ddfddcc56-wchgb   1/1     Running   0          28s
+
+      $ oc get endpointslices -l kubernetes.io/service-name=web -n payments
+      NAME        ADDRESSTYPE   PORTS     ENDPOINTS   AGE
+      web-gzbqw   IPv4          <unset>   <unset>     28s
+    choices:
+      - "`oc logs pod/web-7ddfddcc56-wchgb`, to see why the application itself answers 503."
+      - "`oc get pods -n openshift-ingress`, to check whether the router pods are healthy."
+      - "`oc rollout restart deploy/web`, so the pod registers itself with the Service again."
+      - "`oc describe svc web` and `oc get pods --show-labels`, to compare labels."
+    answer: 3
+    feedback:
+      - "With no endpoints, the router answers 503 itself; the application never sees the requests."
+      - "The router is doing its job: it has no backend to send traffic to. The gap is between the Service and the pod."
+      - "Pods do not register with Services; the Service selects them by label. A restart keeps the same labels."
+      - "A Ready pod and an EndpointSlice with no endpoints means the selector matches nothing. In the recorded incident the selector was `app=payments-web`, the pod label `app=web`."
+    explain: >-
+      An empty EndpointSlice next to a Ready pod is a selector problem. Compare the selector with the labels, then fix
+      the Service (`oc set selector`).
+
+  - id: triage-refused-with-endpoints
+    targets: [inc.wrong-targetport, d.services-dns]
+    prompt: >-
+      After a move to an unprivileged image, the Route answers 503 again. This time the Service has an endpoint and the
+      pod is Ready. What is the most likely cause?
+    evidence: |
+      $ oc get endpointslices -l kubernetes.io/service-name=web -n payments
+      NAME        ADDRESSTYPE   PORTS   ENDPOINTS      AGE
+      web-fglsf   IPv4          80      10.217.0.244   30s
+      $ oc exec deploy/web -n payments -- curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/healthz
+      200
+      $ oc exec deploy/web -n payments -- curl -sS -m 3 http://web:8080/
+      curl: (7) Failed to connect to web port 8080: Connection refused
+    choices:
+      - "A NetworkPolicy blocks traffic to the pod from every source except localhost."
+      - "The Service forwards to `targetPort: 80`; the image listens on 8080."
+      - "The pod is not Ready yet, so the Service has nowhere to route the traffic."
+      - "Cluster DNS still returns an old address for `web` after the image change."
+    answer: 1
+    feedback:
+      - "Dropped packets show as timeouts (curl exit 28). A refusal means a host answered and nothing listened on that port."
+      - "The EndpointSlice lists port 80, the old root image's port. The app answers on 8080 locally, so fix the Service's `targetPort` (or name the container port and target the name)."
+      - "The pod is in the EndpointSlice and answers on localhost; readiness is fine."
+      - "curl reached an address and was refused, so name resolution worked."
+    explain: >-
+      Endpoints present but connections refused: compare the EndpointSlice's port with the port the container really
+      listens on.
+
+  - id: triage-repo-not-found
+    targets: [inc.imagepull, o1.troubleshooting]
+    prompt: >-
+      A new Deployment's pod alternates between ErrImagePull and ImagePullBackOff. What does this event tell you?
+    evidence: |
+      $ oc get events -n portal --field-selector reason=Failed
+      Warning   Failed   pod/web-8c9c54f74-hlwdm   Failed to pull image "registry.access.redhat.com/ubi9/htpd-24:latest":
+      ... reading manifest latest in registry.access.redhat.com/ubi9/htpd-24: name unknown: Repo not found
+      Warning   Failed   pod/web-8c9c54f74-hlwdm   Error: ErrImagePull
+      Warning   Failed   pod/web-8c9c54f74-hlwdm   Error: ImagePullBackOff
+    choices:
+      - "The registry needs credentials: create a pull secret and link it to the ServiceAccount."
+      - "The node cannot reach the registry; check the cluster's proxy and DNS settings."
+      - "The repository path is wrong (`htpd-24`); fix the image with `oc set image`."
+      - "The `latest` tag was removed from the repository; switch to a pinned tag instead."
+    answer: 2
+    feedback:
+      - "This registry answered, and said the repository does not exist. (Some registries answer `unauthorized` for a missing repository, so always check the name first.)"
+      - "A network failure would not produce a registry answer like `name unknown`."
+      - "`name unknown: Repo not found` is about the repository (`ubi9/htpd-24`), a typo. The kubelet keeps retrying with growing back-off until the reference is fixed."
+      - "A missing tag would be reported against the tag; here the registry says the repository name itself is unknown."
+    explain: >-
+      Read the registry's answer in the pull event: an unknown repository is a typo, an unknown tag is a missing tag,
+      and only an authentication error calls for a pull secret.
+
+  - id: triage-crashloop-next-command
+    targets: [inc.crashloop-config, o1.troubleshooting]
+    prompt: >-
+      After a "hardening" change to the httpd configuration ConfigMap, the pod restarts again and again. What is the
+      most useful next command?
+    evidence: |
+      $ oc describe pod web-655d5dd659-9ch5h -n portal   (excerpt)
+          State:          Waiting
+            Reason:       CrashLoopBackOff
+          Last State:     Terminated
+            Reason:       Error
+            Exit Code:    1
+          Restart Count:  1
+          Mounts:
+            /etc/httpd/conf.d/academy.conf from extra (rw,path="academy.conf")
+      Events:
+        Warning  BackOff   15s (x2 over 16s)  kubelet  Back-off restarting failed container httpd ...
+    choices:
+      - "`oc logs web-655d5dd659-9ch5h --previous`, to read what the crashed container printed before exiting."
+      - "`oc exec web-655d5dd659-9ch5h -- cat /etc/httpd/conf.d/academy.conf`, to check the file inside the container."
+      - "`oc get events --field-selector reason=OOMKilling`, to see whether the container ran out of memory."
+      - "`oc delete pod web-655d5dd659-9ch5h`, so that a fresh pod starts without the back-off."
+    answer: 0
+    feedback:
+      - "The application exited with code 1 by itself; its reason is in its own output. In the recorded incident the previous log showed `AH00526: Syntax error ... Invalid command 'ServerTokenz'`."
+      - "The container is waiting in back-off, so there is usually nothing running to exec into; and reading the file does not tell you which line httpd rejected."
+      - "The last state says Error with exit code 1. An out-of-memory kill would show OOMKilled and exit code 137."
+      - "The new pod mounts the same ConfigMap and crashes the same way."
+    explain: >-
+      For CrashLoopBackOff, read the last state (reason and exit code), then the crashed container's own log with
+      `--previous`.
+
+  - id: triage-missing-configmap-fix
+    targets: [inc.configmap-missing, o1.config-secrets]
+    prompt: >-
+      The portal was promoted from the test project with `oc apply` on its Deployment only. Its pod never starts. What
+      is the safest fix?
+    evidence: |
+      $ oc get pods -n portal-prod
+      NAME                   READY   STATUS                       RESTARTS   AGE
+      web-7d57fcfc79-z2bv9   0/1     CreateContainerConfigError   0          27s
+      $ oc get events -n portal-prod --field-selector reason=Failed
+      Warning   Failed   pod/web-7d57fcfc79-z2bv9   Error: configmap "web-settings" not found
+    choices:
+      - "Remove the `envFrom` reference so the container can start without the settings."
+      - "Create `web-settings` here with the expected values, and promote it with the app."
+      - "Delete the pod so the Deployment recreates it with a fresh configuration."
+      - "Mark the reference `optional: true`, so a missing ConfigMap no longer blocks the start."
+    answer: 1
+    feedback:
+      - "The container would start, but without its settings. That hides the defect instead of fixing it."
+      - "The kubelet retries on its own: once the ConfigMap exists, the same pod starts with no change to the Deployment. Shipping the app as one unit (overlay, chart or GitOps Application) stops it recurring."
+      - "A new pod references the same missing ConfigMap and fails the same way."
+      - "That is only safe if the application has safe defaults; you would be guessing in production."
+    explain: >-
+      CreateContainerConfigError means the kubelet cannot build the container's configuration. Supply what is missing;
+      the kubelet retries by itself.
+
+  - id: triage-running-not-ready
+    targets: [inc.readiness-503, b.health-probes]
+    prompt: >-
+      After health checks were "standardised" across services, the portal's pod runs without restarting but never
+      becomes Ready, and users get 503. What is the most likely cause?
+    evidence: |
+      $ oc get pods -n portal
+      NAME                  READY   STATUS    RESTARTS   AGE
+      web-84dbc4cb4-lcg4p   0/1     Running   0          27s
+      $ oc get events -n portal --field-selector reason=Unhealthy
+      Warning   Unhealthy   pod/web-84dbc4cb4-lcg4p   Readiness probe failed: HTTP probe failed with statuscode: 404
+      $ oc exec deploy/web -n portal -- curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/healthz
+      200
+    choices:
+      - "The readiness probe asks for a path the app does not serve (404)."
+      - "The application is overloaded and answers too slowly for the probe's timeout."
+      - "The liveness probe fails, so the kubelet keeps the container from receiving traffic."
+      - "The Service's selector no longer matches the pod's labels."
+    answer: 0
+    feedback:
+      - "404 means the server answered and the path does not exist; the app answers on `/healthz`. A failing readiness probe never restarts anything, it only removes the pod from the endpoints."
+      - "A timeout would read as a timeout, not as status code 404."
+      - "A failing liveness probe restarts the container; this one has 0 restarts. Readiness is what gates traffic."
+      - "Even with a matching selector, an unready pod receives no Service traffic; the event shows the probe is the problem."
+    explain: >-
+      Not Ready but not restarting means readiness fails. Read the probe's failure message and test the same URL from
+      inside the container.
+
+  - id: triage-restarts-without-errors
+    targets: [inc.liveness-restarts, b.health-probes]
+    prompt: >-
+      The portal's restart count climbs steadily since someone "cleaned up" the probe ports, but the application logs
+      show only normal starts. What is the safest fix?
+    evidence: |
+      $ oc get events -n portal --field-selector reason=Killing
+      Normal   Killing   pod/web-77ddf8c459-9nlfr   Container httpd failed liveness probe, will be restarted
+      $ oc get deploy web -n portal -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet}'
+      {"path":"/healthz","port":8081,"scheme":"HTTP"}
+    choices:
+      - "Raise the liveness `failureThreshold` so the probe tolerates more failures before a restart."
+      - "Remove the liveness probe, since the application never actually fails."
+      - "Point the liveness probe at port 8080, where httpd listens."
+      - "Raise the memory limit, because restarts without errors usually mean out-of-memory kills."
+    answer: 2
+    feedback:
+      - "Nothing listens on 8081, so the probe will always fail; a higher threshold only spaces the restarts out."
+      - "That stops the restarts but throws away the protection against a hung process. Fix the probe instead."
+      - "The kubelet kills the container after the configured failures on port 8081, where nothing listens. A named port keeps probes in step with the container definition."
+      - "The event says why the container was killed: the liveness probe. An out-of-memory kill would show OOMKilled."
+    explain: >-
+      The Killing event names its reason. A liveness probe aimed at the wrong port turns a healthy application into a
+      restart loop.
+
+  - id: triage-oomkilled-limit
+    targets: [inc.oomkilled, b.resources-qos]
+    prompt: >-
+      The cache worker's memory limit was lowered "to save quota". It now restarts constantly and its logs stop after
+      the first line. What is the right fix?
+    evidence: |
+      $ oc get pod worker-6b66fffc98-6c97v -n cache -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}'
+      OOMKilled exit=137
+      $ oc logs deploy/worker --previous -n cache
+      warming cache (about 64 MiB)
+      $ oc get deploy worker -n cache -o jsonpath='{.spec.template.spec.containers[0].resources}'
+      {"limits":{"memory":"32Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}
+    choices:
+      - "Raise the CPU request, so the warm-up finishes before the kernel intervenes."
+      - "Raise only the memory request to 96Mi and keep the 32Mi limit, so the scheduler reserves more memory."
+      - "Add a long `initialDelaySeconds` to the liveness probe, so the warm-up is not interrupted."
+      - "Set the memory limit above the warm-up peak (say request 96Mi, limit 160Mi)."
+    answer: 3
+    feedback:
+      - "CPU does not change how much memory the warm-up needs; the kernel kills at the memory limit however fast it gets there."
+      - "A request cannot exceed its limit, so the API rejects that spec; and the limit is what the kernel enforces."
+      - "There is no probe involved: exit code 137 with OOMKilled is the kernel's out-of-memory killer."
+      - "The limit becomes the cgroup's memory maximum; the warm-up needs about 64 MiB. Set the request near steady use and the limit above the peak, then measure."
+    explain: >-
+      OOMKilled with exit code 137 means the container hit its memory limit. No application error is logged because the
+      process is killed outright.
+
+  - id: triage-could-not-resolve-host
+    targets: [inc.dns-typo, d.services-dns]
+    prompt: >-
+      Since its `TARGET` variable was edited, the `checkout` client fails every call. The portal itself is fine. What is
+      the most likely cause?
+    evidence: |
+      $ oc logs deploy/checkout --tail=3 -n shop
+      20:54:33 GET http://payments-web:8080/
+      curl: (6) Could not resolve host: payments-web
+      $ oc get svc -n shop
+      NAME   TYPE        CLUSTER-IP    PORT(S)
+      web    ClusterIP   10.217.4.92   8080/TCP
+      $ oc exec deploy/checkout -n shop -- getent hosts web
+      10.217.4.92     web.shop.svc.cluster.local
+    choices:
+      - "Cluster DNS is failing; check the DNS operator and its pods in `openshift-dns`."
+      - "A NetworkPolicy blocks the client's DNS queries to the `openshift-dns` pods."
+      - "`TARGET` names `payments-web`, but the Service is called `web`."
+      - "The client's `ndots:5` setting stops short names from resolving; use the fully qualified name."
+    answer: 2
+    feedback:
+      - "The same pod resolves `web` instantly, so cluster DNS works."
+      - "If DNS were blocked, `getent hosts web` from the same pod would fail too."
+      - "DNS answers only for Services that exist. The variable has the wrong name; set it to `http://web:8080/`."
+      - "`ndots:5` adds search-domain attempts but short names still resolve, as `web` shows."
+    explain: >-
+      Before suspecting the platform's DNS, resolve a name you know exists from the same pod. Most "DNS problems" are a
+      wrong name or namespace.
+
+  - id: triage-pvc-unknown-class
+    targets: [inc.pvc-pending, e.storage]
+    prompt: >-
+      The ledger service was deployed with manifests written for the production cluster. Its pod and its claim have been
+      Pending since creation. You are a project admin, not a cluster admin. What is the safest fix?
+    evidence: |
+      $ oc get pvc -n ledger
+      NAME          STATUS    STORAGECLASS   AGE
+      ledger-data   Pending   fast-ssd       21s
+      $ oc get events -n ledger --field-selector involvedObject.kind=PersistentVolumeClaim
+      Warning   ProvisioningFailed   persistentvolumeclaim/ledger-data   storageclass.storage.k8s.io "fast-ssd" not found
+      $ oc get storageclass
+      NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE
+      crc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer
+    choices:
+      - "Patch `ledger-data` to use `crc-csi-hostpath-provisioner`, so the existing claim binds."
+      - "Use a new claim on this cluster's class, then delete the old one."
+      - "Delete the pod, so the scheduler retries and the claim is provisioned."
+      - "Add a nodeSelector so the pod lands on a node that has fast SSDs."
+    answer: 1
+    feedback:
+      - "A claim's storage class cannot be changed once set; the API rejects the patch."
+      - "Nothing here provides `fast-ssd`, so the claim can never bind. A new claim on an existing class (or the default) lets the pod schedule. For portable manifests, omit the class or set it per environment."
+      - "The pod is Pending because its claim is unbound; a new pod waits for the same claim."
+      - "Placement is not the problem: no volume exists, because no provisioner serves that class."
+    explain: >-
+      A Pending claim with ProvisioningFailed names its cause. The storage class is immutable, so the repair is a new
+      claim, not an edit.
+
+  - id: triage-stuck-rollout
+    targets: [inc.broken-rollout, g.rollouts-change]
+    prompt: >-
+      The pipeline failed with `exceeded its progress deadline`. The release manager asks: are users affected, and how
+      do we get back to a clean state?
+    evidence: |
+      $ oc get pods -l app=web -n portal
+      NAME                   READY   STATUS         RESTARTS   AGE
+      web-7ddfddcc56-k9f8q   1/1     Running        0          44s
+      web-9889cfbb-xrmd8     0/1     ErrImagePull   0          43s
+      $ oc get deploy web -n portal -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+      Available=True MinimumReplicasAvailable
+      Progressing=False ProgressDeadlineExceeded
+      $ oc rollout history deploy/web -n portal
+      REVISION  CHANGE-CAUSE
+      1         release 2.2
+      2         release 2.3
+    choices:
+      - "Users are down; delete the Deployment and re-apply release 2.2 from the repository."
+      - "Users are down until the new pod pulls its image; wait for the back-off to retry."
+      - "Not affected: the old pod still serves. Run `oc rollout undo deploy/web`."
+      - "Users are not affected; delete the new ReplicaSet, and the Deployment will stop trying."
+    answer: 2
+    feedback:
+      - "Available=True and a Running 1/1 old pod say otherwise; deleting the Deployment would create the outage you are trying to avoid."
+      - "The new image tag does not exist; retries will never succeed, and in the meantime the old pod is serving."
+      - "With one replica the rolling update keeps the old pod until the new one is Ready, so release 2.2 is still serving. Undo makes the old template current again (it becomes revision 3)."
+      - "The Deployment controller recreates a ReplicaSet for its current template; only changing the template ends the attempt."
+    explain: >-
+      ProgressDeadlineExceeded means stuck, not down: read Available and the ready endpoints. `oc rollout undo` (or
+      fixing the image forward) gets back to a clean state.
+
+  - id: triage-timeout-after-hardening
+    targets: [inc.networkpolicy-block, d.networkpolicy-ovn]
+    prompt: >-
+      This morning the security team applied "default deny plus explicit allows". The reporting client now times out
+      calling the portal. What is the safest fix?
+    evidence: |
+      $ oc exec deploy/reporting -n portal -- curl -sS -m 3 http://web:8080/
+      curl: (28) Connection timed out after 3000 milliseconds
+      $ oc describe networkpolicy allow-frontend-to-web -n portal   (excerpt)
+        PodSelector:     app=web
+        Allowing ingress traffic:
+          To Port: 8080/TCP
+          From:
+            PodSelector: tier=frontend
+      $ oc get pods -n portal --show-labels
+      reporting-6d85dc7949-wph7q   1/1   Running   app=reporting,tier=backoffice,...
+      web-7ddfddcc56-qq42h         1/1   Running   app=web,...
+    choices:
+      - "Delete the `default-deny` policy so traffic flows again."
+      - "Label the reporting pods `tier=frontend` so the existing rule matches them."
+      - "Restart the portal pods so OVN-Kubernetes reprograms their flows."
+      - "Allow `app=reporting` as a source in an allow policy."
+    answer: 3
+    feedback:
+      - "Even without it, `allow-frontend-to-web` alone isolates the web pods. And removing the hardening undoes the security review."
+      - "That gives the reporting client the identity of the frontend, so every rule written for the frontend now trusts it too."
+      - "The policy works as written; packets from `tier=backoffice` are dropped on purpose."
+      - "Once a policy selects the web pods, only listed sources get in. Add the missing client explicitly; a separate policy reads more clearly in reviews."
+    explain: >-
+      A timeout (exit 28) after a policy change means dropped packets. Find the policy that selects the target, then
+      compare its allowed sources with the client's labels.
+
+  - id: triage-binding-still-403
+    targets: [inc.rbac-denied, f.rbac]
+    prompt: >-
+      The `reporter` deployment gets HTTP 403 listing pods. The ticket says "RoleBinding already created, still broken".
+      What is the cause?
+    evidence: |
+      $ oc logs deploy/reporter --tail=2 -n reports
+      pods is forbidden: User "system:serviceaccount:reports:reporter" cannot list resource "pods" in API group "" in the namespace "reports"
+      $ oc get rolebinding reporter-view -n reports -o wide
+      NAME            ROLE               AGE   USERS   GROUPS   SERVICEACCOUNTS
+      reporter-view   ClusterRole/view   29s                    reports/reportr
+      $ oc get serviceaccounts -n reports
+      NAME       SECRETS   AGE
+      builder    1         32s
+      default    1         32s
+      deployer   1         32s
+      reporter   1         30s
+    choices:
+      - "RBAC changes take a few minutes to propagate; the binding will start working soon."
+      - "The pod still uses a token issued before the binding; restart it to get a new one."
+      - "The built-in `view` role does not include listing pods."
+      - "The binding names the ServiceAccount `reportr`, which does not exist."
+    answer: 3
+    feedback:
+      - "RBAC is evaluated on every request against the current bindings; there is nothing to wait for."
+      - "Tokens prove identity; permissions are looked up per request. A restart changes nothing."
+      - "`view` allows get, list and watch on pods; the 403 is about who received it."
+      - "RBAC accepts bindings to subjects that do not exist. Replace it with one for `reporter` (for example `oc policy add-role-to-user view -z reporter`) and verify with `oc auth can-i --as`. The misspelt binding would also be a dormant grant for anyone who creates `reportr`."
+    explain: >-
+      The 403 names the denied identity. Compare it character by character with the binding's subjects, and test with
+      `oc auth can-i --as=system:serviceaccount:<ns>:<name>`.
+
+  - id: triage-deployment-no-pods
+    targets: [inc.scc-root, f.scc]
+    prompt: >-
+      A vendor's manifest was applied as-is. `oc get pods` shows nothing, and the event below appears (trimmed). The
+      image is a Red Hat UBI httpd image. What is the safest fix?
+    evidence: |
+      $ oc get deploy,rs -n vendor-app
+      NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+      deployment.apps/web   0/1     0            0           21s
+      NAME                             DESIRED   CURRENT   READY   AGE
+      replicaset.apps/web-6c966884bf   1         0         0       21s
+      $ oc get events -n vendor-app --field-selector reason=FailedCreate
+      Warning   FailedCreate   replicaset/web-6c966884bf   Error creating: pods "web-6c966884bf-" is forbidden: unable to
+      validate against any security context constraint: [provider "anyuid": Forbidden: not usable by user or
+      serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges:
+      [1002400000, 1002409999], ...]
+    choices:
+      - "Remove `runAsUser: 0` and let `restricted-v2` assign a UID from the range."
+      - "Grant `anyuid` to the project's `default` ServiceAccount, which the pods run as."
+      - "Set `runAsUser: 1000` instead, a common non-root UID."
+      - "Grant the `privileged` SCC to the ServiceAccount, so every security context is accepted."
+    answer: 0
+    feedback:
+      - "UBI images run under an arbitrary UID, so the root request is unnecessary. After the change the recorded pod was admitted by `restricted-v2` with uid 1002400000."
+      - "Every pod in the project without its own ServiceAccount would inherit the exception. If root were really needed, use a dedicated ServiceAccount and a reviewed grant."
+      - "1000 is outside the project's range, so admission rejects it in the same way."
+      - "That grants far more than root (host access, all capabilities) to fix a setting the image does not need."
+    explain: >-
+      Fix the workload before the policy: drop the security context the image does not need, and keep SCC exceptions
+      for reviewed cases on dedicated ServiceAccounts.
+
+  - id: triage-manual-drift
+    targets: [inc.gitops-drift, gx.declarative]
+    prompt: >-
+      At 02:00 an engineer "temporarily" changed the portal by hand and went home; it is still down in the morning. The
+      declared state is in `desired/web.yaml`. `oc diff` exits with code 1 and shows the excerpt below. What is the
+      safest way back?
+    evidence: |
+      $ oc diff -f desired/web.yaml -n portal   (excerpt)
+      -  replicas: 0
+      +  replicas: 2
+      ...
+               - name: PORTAL_MODE
+      -          value: maintenance
+      +          value: live
+    choices:
+      - "`oc scale deploy/web --replicas=2`, which is the change that took the portal down."
+      - "`oc apply -f desired/web.yaml`, then `oc diff` again until it exits 0."
+      - "`oc rollout undo deploy/web`, to return to the previous revision."
+      - "`oc delete deploy/web` and re-create it from the file, to be sure nothing is left over."
+    answer: 1
+    feedback:
+      - "That restores replicas but leaves the portal in maintenance mode: the diff shows two drifted fields."
+      - "Applying the declared state reverts the drifted fields this manifest manages, and `oc diff` exiting 0 then confirms that applying it again would change nothing. It does not prove that every live field matches Git: fields the manifest never set are not compared."
+      - "Rollout history tracks template changes, and the previous template may be anything; it does not know what the repository declares."
+      - "Deleting causes a full outage and loses the object's history for no benefit over `oc apply`."
+    explain: >-
+      Drift is repaired by re-applying the declared state and verified with `oc diff` (exit 0). With GitOps self-heal,
+      it would have been reverted automatically.
+
+  - id: triage-pending-no-logs
+    targets: [inc.pending-resources, b.scheduler]
+    prompt: >-
+      A manifest copied from the batch team was used for the portal. The pod has been Pending since creation and has no
+      logs. What is the cause?
+    evidence: |
+      $ oc get events -n portal --field-selector reason=FailedScheduling
+      Warning   FailedScheduling   pod/web-5c75dcbdf7-tfv87   0/1 nodes are available: 1 Insufficient cpu. ...
+      preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.
+      $ oc get node -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu
+      NODE   CPU
+      crc    3800m
+      $ oc get deploy web -n portal -o jsonpath='{.spec.template.spec.containers[0].resources.requests}'
+      {"cpu":"6","memory":"32Mi"}
+    choices:
+      - "It requests 6 CPUs, more than any node offers; lower the request."
+      - "The project's quota is exhausted, so the scheduler keeps the pod waiting."
+      - "The image is still being pulled; Pending covers the download time."
+      - "The node is busy right now; the pod will start when other pods finish."
+    answer: 0
+    feedback:
+      - "The scheduler places a pod only where its requests fit in allocatable capacity. 6 CPUs can never fit in 3800m, and preemption cannot help."
+      - "A quota refuses pod creation (FailedCreate on the ReplicaSet); this pod exists and was refused by the scheduler."
+      - "Image pulls happen after scheduling; this pod has not been assigned to a node."
+      - "Even an empty node offers only 3800m; no amount of waiting fits 6 CPUs."
+    explain: >-
+      Pending with FailedScheduling means no node fits. Read the reason (`Insufficient cpu`), compare requests with
+      allocatable capacity, and size requests to real usage.
+
+  - id: capstone-route-redirect
+    targets: [ch.production-ready, d.routes-tls]
+    prompt: >-
+      A new service must be reachable only over HTTPS from outside, and anyone typing `http://` should land on the
+      HTTPS page instead of getting an error. Its Route is below. What do you change?
+    evidence: |
+      $ oc get route store -n shop -o jsonpath='{.spec.tls}'
+      {"termination":"edge"}
+      $ curl -s -o /dev/null -w '%{http_code}\n' http://store-shop.apps-crc.testing/
+      503
+    choices:
+      - "Switch the Route to passthrough termination, so the pod handles both schemes."
+      - "Create a second, unsecured Route for the same host that serves plain HTTP."
+      - "Set `insecureEdgeTerminationPolicy: Redirect` on the edge Route."
+      - "Add a NetworkPolicy that allows port 80 into the pods."
+    answer: 2
+    feedback:
+      - "Passthrough sends the encrypted stream to the pod, which would need its own certificate and TLS listener; httpd here serves plain HTTP on 8080."
+      - "That serves the page over plain HTTP, which the requirement forbids; it does not redirect anyone."
+      - "With the default policy (None) the router does not serve plain HTTP for that host; Redirect answers with a 302 to HTTPS."
+      - "The router talks to the pods on the Service port; the plain-HTTP request is refused at the router, before any pod is involved."
+    explain: >-
+      An edge Route terminates TLS at the router. `insecureEdgeTerminationPolicy` decides what plain HTTP gets: None
+      (the default, not served), Allow (served unencrypted) or Redirect (a 302 to HTTPS).
+
+  - id: capstone-scc-proof
+    targets: [ch.production-ready, f.scc]
+    prompt: >-
+      A production-readiness review asks you to prove that the new Deployment's running pods were admitted under the
+      default security constraint. Which evidence answers that directly?
+    choices:
+      - "The `openshift.io/scc` annotation on each running pod, showing `restricted-v2`."
+      - "The Deployment's YAML, because it contains no `securityContext` block."
+      - "`oc auth can-i create pods` for your own user returning yes."
+      - "The image's `USER` instruction, showing a non-root user."
+    answer: 0
+    feedback:
+      - "SCC admission records the constraint it chose on every pod it admits; that is the authoritative record."
+      - "A spec without a securityContext can still be admitted by a more permissive SCC if the ServiceAccount may use one (priority decides)."
+      - "That is about your permission to create pods, not about which constraint admitted them."
+      - "restricted-v2 ignores the image's USER and assigns a UID from the project range; the image says nothing about admission."
+    explain: >-
+      Prove controls with evidence from the running objects: the `openshift.io/scc` annotation names the SCC that
+      admitted each pod. Proving that no exception is granted is a separate audit: who may `use` which SCC (RBAC and
+      the SCCs' own users and groups lists), because a pod pinned to restricted-v2 can run while its ServiceAccount
+      still holds anyuid.
+
+  - id: triage-helm-ownership
+    targets: [ch.helm-release, o2.kustomize-helm]
+    prompt: >-
+      `helm install shop lab/chart` fails as shown. The ConfigMap was created by hand last week to test a page. What is
+      the most appropriate next step?
+    evidence: |
+      Error: INSTALLATION FAILED: Unable to continue with install: ConfigMap "shop-web" in namespace "shop"
+      exists and cannot be imported into the current release: invalid ownership metadata; label validation
+      error: missing key "app.kubernetes.io/managed-by": must be set to "Helm"; annotation validation error:
+      missing key "meta.helm.sh/release-name": must be set to "shop"; annotation validation error: missing key
+      "meta.helm.sh/release-namespace": must be set to "shop"
+    choices:
+      - "Retry with `--force`, which makes Helm overwrite any existing object."
+      - "Decide who owns it: delete the test object, or adopt it on purpose."
+      - "Install under another release name, so the objects do not collide."
+      - "Wait: Helm retries the import once the ConfigMap is older than the release."
+    answer: 1
+    feedback:
+      - "`--force` changes how resources are updated (by replacement); it does not settle ownership. Helm 3.17 and later also have `--take-ownership`, which skips the check, but that adopts the object without anyone deciding it should be adopted."
+      - "Helm protects objects it does not own. Removing a test leftover or deliberately adopting it (adding the label and annotations shown in the error) are both valid; adopting an object another release or an operator owns is not."
+      - "The objects are named after the release, so they would not collide, but the result is a second copy under the wrong name, and the team asked for release shop."
+      - "Nothing is retried: the install failed and created nothing."
+    explain: >-
+      Helm installs only over objects carrying its ownership metadata for that release. Treat the error as an
+      ownership question, record the decision, and either remove the stray object or adopt it explicitly.
+
+  - id: triage-env-shadowed
+    targets: [ch.config-out-of-spec, o1.config-secrets]
+    prompt: >-
+      The team changed `GREETING` to `Bonjour` in the ConfigMap and restarted the Deployment. The pods still print
+      `Hello`. Given the evidence, what is the cause?
+    evidence: |
+      $ oc set env deploy/app --list -n shop
+      # deployments/app, container app
+      GREETING=Hello
+      # GREETING from configmap app-settings
+      # LOG_LEVEL from configmap app-settings
+      $ oc get configmap app-settings -n shop -o jsonpath='{.data.GREETING}'
+      Bonjour
+    choices:
+      - "The restart did not happen: environment variables only change when pods are recreated."
+      - "A literal `GREETING` in the Deployment's `env` overrides the value that `envFrom` takes from the ConfigMap."
+      - "ConfigMap changes take up to a minute to reach environment variables; wait and check again."
+      - "The ConfigMap was edited in the wrong project, so the pods still read an older copy."
+    answer: 1
+    feedback:
+      - "The restart did happen; the new pods simply receive the same shadowed value."
+      - "For the same name, an explicit `env` entry takes precedence over `envFrom`. Remove the literal (`oc set env deploy/app GREETING-`), which also rolls out new pods."
+      - "That delay applies to files from a ConfigMap volume. Environment variables never update in a running container."
+      - "The jsonpath output shows the ConfigMap in the same project already says Bonjour."
+    explain: >-
+      `oc set env --list` shows each variable's source. A literal entry shadows the same name from `envFrom`, and
+      environment values are fixed when a container starts.

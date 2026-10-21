@@ -1,0 +1,175 @@
+id: lab.request-path
+title: "Follow a request"
+subtitle: "DNS, Service, EndpointSlice, Route and TLS"
+summary: "Resolve and call a Service from inside the cluster, then expose it yourself with an edge TLS Route and test it from outside."
+module: a5-network
+mode: REAL_LAB
+minutes: 40
+level: 1
+supports: "Verified on CRC / OpenShift 4.21.8: CoreDNS (dns operator), OVN-Kubernetes, default IngressController, *.apps-crc.testing."
+concepts: [net.services, net.dns, net.endpointslices, net.routes]
+prerequisites: [d.services-dns]
+namespace: academy-net
+objective: |
+  Walk the whole path a request takes, test each hop separately, and create the external entry point (an edge
+  TLS Route with HTTP redirect) yourself.
+background: |
+  The project contains `web` (two httpd pods behind a Service on port 8080) and `toolbox` (a pod with `curl`
+  and `getent`, for testing from inside the cluster). There is **no Route yet**: you will create it.
+  Testing hop by hop is the core troubleshooting skill: if `getent` fails, it is DNS; if DNS works but curl to
+  the Service fails, look at endpoints and ports; if the Service works but the Route fails, look at the Route,
+  the router and NetworkPolicies. DNS, Services and EndpointSlices are Kubernetes; Routes and the HAProxy router
+  are OpenShift's own way in from outside.
+
+  **Where everything comes from.** The app creates the project `academy-net` and applies the objects shown below:
+  `web` (two pods) runs Red Hat's UBI 9 Apache httpd image (`registry.access.redhat.com/ubi9/httpd-24`) and serves the
+  page from the ConfigMap `web-content`; `toolbox` runs `sleep` in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` so that you can test from inside the cluster. Both images come from
+  Red Hat's public registry, which needs no login. The Route is yours. Clean up deletes the project.
+commands:
+  - {cmd: "oc exec deploy/toolbox -n academy-net -- getent hosts web", meaning: "DNS from the app's point of view (search domains apply)"}
+  - {cmd: "oc exec deploy/toolbox -n academy-net -- curl -s -m 3 http://web:8080/", meaning: "call the Service by name"}
+  - {cmd: "oc create route edge web --service=web --insecure-policy=Redirect -n academy-net", meaning: "expose the Service with TLS terminated at the router"}
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data:
+      index.html: "<h1>academy request path</h1>"
+      healthz: "ok"
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{name: http, port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: toolbox, labels: {app: toolbox}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: toolbox}}
+      template:
+        metadata: {labels: {app: toolbox}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: toolbox
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+steps:
+  - id: dns
+    title: "Hop 1: DNS"
+    do: "Resolve the Service name three ways from the toolbox pod, and look at its resolver configuration."
+    commands:
+      - {cmd: "oc exec deploy/toolbox -n academy-net -- getent hosts web", meaning: "short name"}
+      - {cmd: "oc exec deploy/toolbox -n academy-net -- getent hosts web.academy-net.svc.cluster.local", meaning: "fully qualified"}
+      - {cmd: "oc exec deploy/toolbox -n academy-net -- cat /etc/resolv.conf", meaning: "nameserver and search domains"}
+      - {cmd: "oc get svc web -n academy-net", meaning: "compare the CLUSTER-IP"}
+    predict:
+      prompt: "Which IP does `getent hosts web` return?"
+      choices: ["One of the pod IPs", "The Service's ClusterIP", "The node IP"]
+      answer: 1
+      explain: "A normal (non-headless) Service name resolves to its virtual ClusterIP; load balancing to pods happens after."
+      feedback:
+        - "Pod IPs come back only for a headless Service (`clusterIP: None`). A normal Service has one stable virtual IP in front of its pods."
+        - "Right: the name resolves to the ClusterIP (10.217.4.202 in the recording, the same as `oc get svc`), and the network plugin load-balances from there."
+        - "Node IPs are what NodePort clients use from outside. Cluster DNS never returns them for a ClusterIP Service."
+    wait_for: [endpoints]
+    observe: "Both names resolve to the same address, the Service's CLUSTER-IP (10.217.4.202 in the recording); `getent` prints the expanded name `web.academy-net.svc.cluster.local` even for the short name. resolv.conf has `search academy-net.svc.cluster.local svc.cluster.local cluster.local crc.testing` (the last one comes from the node), `nameserver 10.217.4.10` (the cluster DNS Service) and `options ndots:5`."
+    why: "Search domains let `web` resolve within the namespace. With `ndots:5`, any name with fewer than five dots is tried with each search suffix before being sent as is, which is why short names work and why external names cost a few extra lookups."
+  - id: service
+    title: "Hop 2: Service and EndpointSlice"
+    do: "Call the Service, then look at what is behind it."
+    commands:
+      - {cmd: "oc exec deploy/toolbox -n academy-net -- curl -s -m 3 http://web:8080/", meaning: "via the ClusterIP"}
+      - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-net -o wide", meaning: "the pod IPs and port behind the Service"}
+      - {cmd: "oc get pods -l app=web -n academy-net -o wide", meaning: "compare IPs"}
+    observe: "The page HTML; the EndpointSlice lists the two pod IPs (10.217.0.101 and 10.217.0.102 in the recording) on port 8080, the same IPs `oc get pods -o wide` shows."
+    why: "OVN-Kubernetes load-balances ClusterIP:8080 to the ready endpoints, rewriting the destination to podIP:targetPort."
+    checks: [svc-from-pod, endpoints]
+  - id: route
+    title: "Hop 3: create the Route yourself"
+    do: |
+      Expose `web` with TLS terminated at the router and plain HTTP redirected to HTTPS. Then read the Route.
+    commands:
+      - {cmd: "oc create route edge web --service=web --insecure-policy=Redirect -n academy-net", meaning: "edge termination, redirect HTTP"}
+      - {cmd: "oc get route web -n academy-net -o yaml", meaning: "spec.host, spec.tls.termination, spec.tls.insecureEdgeTerminationPolicy"}
+    predict:
+      prompt: "You open `http://<host>/` (plain HTTP). What happens?"
+      choices: ["The page is served over HTTP", "A redirect to https://", "Connection refused"]
+      answer: 1
+      explain: "insecureEdgeTerminationPolicy: Redirect makes the router answer HTTP with a 302 to HTTPS."
+      feedback:
+        - "That is the `Allow` policy. With `Redirect`, plain HTTP gets only a redirect, never the page."
+        - "Right: the router answers plain HTTP with a redirect (302) to the https:// URL, where it terminates TLS."
+        - "The router listens on port 80 for every Route; the policy decides what it answers there (`None` would give an error page, not a refused connection)."
+    observe: "`spec.host: web-academy-net.apps-crc.testing` (generated: `<route>-<project>.<apps domain>`), `tls.termination: edge`, `insecureEdgeTerminationPolicy: Redirect`, `port.targetPort: http` (the Service port name), and `status.ingress` shows the default router `Admitted` it. The lab's checks then request the Route from this machine: plain HTTP gets a 302 whose `Location` starts with `https://`, and HTTPS gets HTTP 200 with the page."
+    why: "The router (HAProxy in openshift-ingress) watches Routes, terminates TLS with the default wildcard certificate, and forwards plain HTTP directly to ready pod IPs."
+    checks: [route-edge, route-redirect, route-https]
+    wait_for: [route-redirect, route-https]
+  - id: scale
+    title: "Scale and watch the endpoints follow"
+    do: "Scale web to 3 replicas and check the EndpointSlice again."
+    commands:
+      - {cmd: "oc scale deploy/web --replicas=3 -n academy-net", meaning: "more endpoints"}
+      - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-net", meaning: "the addresses listed at this instant; the check waits for 3 ready endpoints"}
+    observe: "Right after scaling, the EndpointSlice lists two addresses at that instant (that is what the recording caught). Run the command again a few seconds later: once the new pod has an IP it can appear in the slice, at first with `ready=false`, and it turns `ready=true` when its readiness probe passes. The lab check waits for 3 ready endpoints."
+    why: "A pod becomes a ready endpoint only after it passes its readiness probe, so Services and Routes never send traffic to a pod that is still starting."
+    checks: [three-endpoints]
+    wait_for: [three-endpoints]
+hints:
+  - "Test one hop at a time from the toolbox pod: `getent hosts`, then `curl` to the Service, then the Route."
+  - "An edge Route with an HTTP redirect: `oc create route edge web --service=web --insecure-policy=Redirect`."
+checks:
+  - {id: svc-from-pod, title: "The Service answers from inside the cluster", type: exec, from: app=toolbox, command: ["curl", "-s", "-m", "3", "http://web:8080/"], expect_output: "academy request path", expect_text: "page content via http://web:8080/"}
+  - {id: dns-fqdn, title: "The FQDN resolves", type: exec, from: app=toolbox, command: ["getent", "hosts", "web.academy-net.svc.cluster.local"], expect_output: "^10\\.", expect_text: "a 10.x ClusterIP"}
+  - {id: endpoints, title: "web has ready endpoints", type: endpoints, service: web, op: gte, value: 2, expect_text: ">= 2 ready"}
+  - {id: route-edge, title: "Route web uses edge termination", type: field, kind: route, name: web, path: spec.tls.termination, op: eq, value: edge, expect_text: "edge"}
+  - {id: route-redirect, title: "Plain HTTP is redirected to HTTPS (checked from this machine)", type: route_http, route: web, path: /, scheme: http, expect_status: 302, location_prefix: "https://", expect_text: "HTTP 302 → https://"}
+  - {id: route-https, title: "The Route serves the app over HTTPS from this machine", type: route_http, route: web, expect_status: 200, contains: "academy request path", expect_text: "HTTPS 200"}
+  - {id: three-endpoints, title: "Three ready endpoints after scaling", type: endpoints, service: web, op: eq, value: 3, expect_text: "3 ready"}
+variations:
+  - "Create a second Route `web-plain` without TLS (`oc expose svc/web --name=web-plain`) and compare `curl -I` on both."
+  - "Make the Service headless (a new Service with `clusterIP: None`) and compare `getent hosts`: you get pod IPs."
+  - "From the toolbox, call another namespace's Service by `name.namespace` (for example a different lab project)."
+troubleshooting:
+  - problem: "The HTTPS check fails with a certificate error."
+    hint: "The CRC router uses the cluster's own ingress CA, which this machine does not trust; the academy's check skips verification for lab routes. In a browser, accept the warning."
+  - problem: "`curl` from the toolbox times out."
+    hint: "Check `oc get endpointslices` (are pods ready?) and whether a NetworkPolicy exists in the project."
+questions:
+  - q: "The router sends traffic to pod IPs, not to the ClusterIP. Why does the Route still need a Service?"
+    a: "The Service's selector defines the set of endpoints (EndpointSlices) the router reads, and its port mapping."
+  - q: "Name the hop where each fails: 'Could not resolve host', 'connection timed out', HTTP 503 from the router."
+    a: "DNS; packets dropped between client and pods, most often a NetworkPolicy (a wrong targetPort gives 'connection refused' instead); the Route has no ready endpoints behind it (or the router cannot reach the pods)."
+enterprise: |
+  Teach this path to every developer once: most "OpenShift networking" tickets are solved by testing hop by
+  hop from a toolbox pod. In large enterprises the path continues outside: corporate DNS, firewall, WAF, external
+  load balancer, then the router: same method, more hops, more teams.
+references:
+  - {title: "OpenShift 4.21: Creating advanced routes (edge, passthrough, re-encrypt)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes#creating-advanced-routes"}
+  - {title: "Kubernetes: EndpointSlices", url: "https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/"}
+  - {title: "Kubernetes: DNS for Services and Pods", url: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"}

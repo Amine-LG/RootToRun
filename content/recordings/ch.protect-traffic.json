@@ -1,0 +1,488 @@
+{
+ "lab": "ch.protect-traffic",
+ "kind": "challenge",
+ "lab_hash": "62af265b928c1dfa",
+ "recorded_at": "2026-10-14T16:39:58+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc apply -f - -n academy-ch-traffic",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/api-ingress created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc exec deploy/batch -n academy-ch-traffic -- curl -s -m 3 http://api:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "command terminated with exit code 28\n",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "frontend-ok",
+    "title": "frontend reaches the api",
+    "expect": "the api page",
+    "status": "pass",
+    "observed": "<h1>orders api</h1>"
+   },
+   {
+    "id": "batch-blocked",
+    "title": "batch is blocked",
+    "expect": "curl exit 28 (timeout)",
+    "status": "fail",
+    "observed": "<h1>orders api</h1>"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route still answers",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+   },
+   {
+    "id": "batch-egress",
+    "title": "batch can still open outbound connections (the API server's health endpoint)",
+    "expect": "ok (egress and DNS still work)",
+    "status": "pass",
+    "observed": "ok"
+   },
+   {
+    "id": "no-egress",
+    "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+    "expect": "no policy that limits egress",
+    "status": "pass",
+    "observed": "0 matching networkpolicies"
+   }
+  ],
+  "at": 1791996010.3577297
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "frontend-ok",
+    "title": "frontend reaches the api",
+    "expect": "the api page",
+    "status": "pass",
+    "observed": "<h1>orders api</h1>"
+   },
+   {
+    "id": "batch-blocked",
+    "title": "batch is blocked",
+    "expect": "curl exit 28 (timeout)",
+    "status": "pass",
+    "observed": "command terminated with exit code 28"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route still answers",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+   },
+   {
+    "id": "batch-egress",
+    "title": "batch can still open outbound connections (the API server's health endpoint)",
+    "expect": "ok (egress and DNS still work)",
+    "status": "pass",
+    "observed": "ok"
+   },
+   {
+    "id": "no-egress",
+    "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+    "expect": "no policy that limits egress",
+    "status": "pass",
+    "observed": "0 matching networkpolicies"
+   }
+  ],
+  "at": 1791996020.8119366
+ },
+ "trials": [
+  {
+   "id": "wrong-selector",
+   "title": "A policy that selects the callers instead of the api",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "pass",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "fail",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "pass",
+     "observed": "ok"
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "pass",
+     "observed": "0 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:wrong-selector",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/frontend-only created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "tier-label",
+   "title": "Allows the tier: web label, which batch also carries",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "pass",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "fail",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "pass",
+     "observed": "ok"
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "pass",
+     "observed": "0 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:tier-label",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/api-from-web created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "deny-all",
+   "title": "Default deny for the whole project, nothing allowed",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "fail",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "pass",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "pass",
+     "observed": "ok"
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "pass",
+     "observed": "0 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:deny-all",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/deny-all created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "two-policies",
+   "title": "A correct alternative: default deny plus two separate allow policies",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "pass",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "pass",
+     "observed": "command terminated with exit code 28"
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "pass",
+     "observed": "ok"
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "pass",
+     "observed": "0 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:two-policies",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/deny-all-ingress created\nnetworkpolicy.networking.k8s.io/allow-frontend-to-api created\nnetworkpolicy.networking.k8s.io/allow-router created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-06-egress-shortcut",
+   "title": "leave api ingress public, disable ordinary batch egress",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "pass",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "error",
+     "observed": "timed out"
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "error",
+     "observed": "timed out"
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "fail",
+     "observed": "1 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-06-egress-shortcut",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "networkpolicy.networking.k8s.io/batch-egress-shortcut created\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "v2-07-fake-client",
+   "title": "extra labelled client forges curl verdicts",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "frontend-ok",
+     "title": "frontend reaches the api",
+     "expect": "the api page",
+     "status": "pass",
+     "observed": "<h1>orders api</h1>"
+    },
+    {
+     "id": "batch-blocked",
+     "title": "batch is blocked",
+     "expect": "curl exit 28 (timeout)",
+     "status": "fail",
+     "observed": "test pod aaa-fake-batch (app=batch) cannot be trusted: it is not managed by the lab's own Deployment. Restore the lab's test clients (start the challenge again) and re-grade."
+    },
+    {
+     "id": "route-ok",
+     "title": "The Route still answers",
+     "expect": "HTTP 200",
+     "status": "pass",
+     "observed": "http://api-academy-ch-traffic.apps-crc.testing/ → HTTP 200 · orders api"
+    },
+    {
+     "id": "batch-egress",
+     "title": "batch can still open outbound connections (the API server's health endpoint)",
+     "expect": "ok (egress and DNS still work)",
+     "status": "fail",
+     "observed": "test pod aaa-fake-batch (app=batch) cannot be trusted: it is not managed by the lab's own Deployment. Restore the lab's test clients (start the challenge again) and re-grade."
+    },
+    {
+     "id": "no-egress",
+     "title": "No policy restricts outgoing traffic (the brief restricts traffic into api only)",
+     "expect": "no policy that limits egress",
+     "status": "pass",
+     "observed": "0 matching networkpolicies"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:v2-07-fake-client",
+     "cmd": "oc apply -f - -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "configmap/fake-curl created\npod/aaa-fake-batch created\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:v2-07-fake-client",
+     "cmd": "oc wait pod/aaa-fake-batch --for=condition=Ready --timeout=180s -n academy-ch-traffic",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "pod/aaa-fake-batch condition met\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 370,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-traffic: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

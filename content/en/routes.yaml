@@ -1,0 +1,44 @@
+# Recommended journeys across the learning map. Each route orders existing tracks (territories) and modules for one
+# kind of learner; it never hides anything. `begin` is the first thing the learner is asked to do.
+- id: beginner
+  title: "I'm new to all of this"
+  who: "You have not used a Linux shell, containers or Kubernetes yet. Start at the beginning; nothing to install."
+  promise: "Go from your first shell command to deploying, exposing and repairing an application on OpenShift, each territory building on the one before. Every step shows real recorded output; add a practice cluster later to do the labs yourself."
+  cluster: none
+  begin: {kind: lesson, id: lx.first-steps, label: "Start with your first ten minutes"}
+  steps: [linux, containers, start, admin1]
+- id: knows-containers
+  title: "I know Linux and containers"
+  who: "You are comfortable in a shell and have run containers. You want Kubernetes and OpenShift."
+  promise: "Understand how Kubernetes thinks, then deploy, configure and troubleshoot applications on OpenShift."
+  cluster: optional
+  begin: {kind: diagnostic, id: start, label: "Check what you already know (15 min)"}
+  steps: [start, admin1, practice]
+- id: kube-to-openshift
+  title: "I know Kubernetes, show me what the platform adds"
+  who: "You use Kubernetes and want what OpenShift adds: projects, Routes, SCCs, images and builds, operators, its CLI."
+  promise: "Map your Kubernetes knowledge onto OpenShift and avoid the traps that surprise Kubernetes users."
+  cluster: optional
+  begin: {kind: lesson, id: b.crds-operators, label: "Start with custom resources and operators"}
+  steps: [f3-openshift, a1-cli, a5-network, ct2-images, a6-images-updates, b2-authn-authz, b3-workload-security, b6-operators-maintenance]
+- id: refresh
+  title: "I've run this platform before and want it back"
+  who: "You have worked with OpenShift before, but parts have faded. Find the gaps, skip what you know. If Kubernetes itself has faded too, take the Kubernetes check first."
+  promise: "A personal plan built from your answers, then independent challenges that prove the skill is back."
+  cluster: recommended
+  begin: {kind: diagnostic, id: admin1, label: "Find my gaps (applications, about 30 min)"}
+  steps: [admin1, admin2, practice]
+- id: new-role
+  title: "Getting ready for a new platform role"
+  who: "You need to work on OpenShift on your own, without step-by-step instructions. You already know Kubernetes objects (pods, Deployments, Services); if not, take the Kubernetes territory first: this route builds on it."
+  promise: "Diagnostics to aim your study, then most topics practised on a real cluster and graded challenges that check what you can do."
+  cluster: recommended
+  begin: {kind: diagnostic, id: admin2, label: "Find my gaps (administration, about 35 min)"}
+  steps: [admin1, admin2, practice]
+- id: platform
+  title: "I build platforms for other teams"
+  who: "You run or design clusters for an organisation: identity, security, GitOps, delivery, observability, recovery. You already deploy and troubleshoot applications on OpenShift (the Application operations territory)."
+  promise: "Reason about multi-tenant platform design, its trade-offs, and what to practise on a larger cluster."
+  cluster: recommended
+  begin: {kind: track, id: platform, label: "Open the enterprise territory"}
+  steps: [b0-cluster-admin, b2-authn-authz, b3-workload-security, b4-network-security, b5-governance, b1-declarative, b6-operators-maintenance, platform, r4-capstone]

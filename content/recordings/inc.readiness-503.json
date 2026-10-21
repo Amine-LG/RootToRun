@@ -1,0 +1,143 @@
+{
+ "lab": "inc.readiness-503",
+ "kind": "incident",
+ "lab_hash": "c34b94004fd71671",
+ "recorded_at": "2026-10-14T17:28:18+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods -n academy-inc-ready",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   STATUS    RESTARTS   AGE\nweb-84dbc4cb4-tgzwv   0/1     Running   0          29s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-ready --field-selector reason=Unhealthy",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON      OBJECT                    MESSAGE\n3s          Warning   Unhealthy   pod/web-84dbc4cb4-tgzwv   Readiness probe failed: HTTP probe failed with statuscode: 404\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-ready -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.1.127 ready=false\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/web -n academy-inc-ready -- curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8080/healthz",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "200\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/web -n academy-inc-ready --readiness --get-url=http://:8080/healthz --period-seconds=5",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-ready --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"web\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "probe-path",
+    "title": "The readiness probe checks /healthz",
+    "expect": "/healthz",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].readinessProbe.httpGet.path = '/health'"
+   },
+   {
+    "id": "endpoints",
+    "title": "Service web has a ready endpoint",
+    "expect": "≥ 1 ready endpoint",
+    "status": "fail",
+    "observed": "0 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-ready.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791998929.8874052
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "probe-path",
+    "title": "The readiness probe checks /healthz",
+    "expect": "/healthz",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].readinessProbe.httpGet.path = '/healthz'"
+   },
+   {
+    "id": "endpoints",
+    "title": "Service web has a ready endpoint",
+    "expect": "≥ 1 ready endpoint",
+    "status": "pass",
+    "observed": "1 ready endpoint address(es), ports [8080]"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-ready.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791998942.738698
+ },
+ "seconds": 45,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-ready: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

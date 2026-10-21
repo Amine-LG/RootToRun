@@ -1,0 +1,145 @@
+id: lab.images-builds
+title: "Build and deploy an image"
+subtitle: "An in-cluster build, then a deployment from an ImageStream"
+summary: "Inspect the platform's ImageStreams, run a Docker-strategy build into the internal registry, deploy the result, and make a new build trigger a rollout."
+module: a6-images-updates
+mode: REAL_LAB
+minutes: 40
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with the internal image registry and the samples operator (CRC). Builds pull the base image from registry.access.redhat.com."
+concepts: [ocp.imagestreams, container.images, k8s.rollout]
+prerequisites: [c.projects-builds]
+namespace: academy-builds
+objective: |
+  Understand the build → ImageStream → Deployment chain on OpenShift: where images go, how tags map to digests, and
+  how an image change can roll out automatically.
+background: |
+  A **BuildConfig** describes how to build; each run is a **Build** executed by a build pod. The output is pushed to
+  the internal registry (`image-registry.openshift-image-registry.svc:5000/<project>/<name>`) and recorded as an
+  **ImageStreamTag** pointing at a digest. A Deployment can carry an **image trigger**: when the tag moves, OpenShift
+  updates the Deployment's image to the new digest, which rolls out.
+
+  **Where everything comes from.** The app creates the project `academy-builds` and applies the empty ImageStream
+  `hello` and the BuildConfig `hello` shown below; its three-line Dockerfile is written inside the BuildConfig, so the
+  build needs no source repository. The build pod pulls its base image from `registry.access.redhat.com` (no login
+  needed) and pushes the result to the cluster's internal registry. The shared `httpd` ImageStream of step 1 lives in
+  the `openshift` namespace, where OpenShift's Samples Operator installs it; any logged-in user may read it. The two
+  commands of step 1 are recorded as the reader identity, a read-only ServiceAccount (`academy-reader` in
+  `academy-system`, bound to `cluster-reader`) that the app creates once from the Connections page; your learner
+  identity may run them too. Clean up deletes the project with its builds and images.
+
+  **Memory.** The build pod asks for 256Mi and may use up to 512Mi (the BuildConfig's `resources`). OpenShift Local
+  reserves most of its memory for the platform itself: a build that asks for more than the node has left stays
+  `Pending`, and its pod's events say `Insufficient memory`.
+
+setup:
+  - |
+    apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata: {name: hello}
+  - |
+    apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata: {name: hello}
+    spec:
+      source:
+        dockerfile: |
+          FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+          RUN echo "built by an OpenShift Build" > /built-by.txt
+          CMD ["sh", "-c", "cat /built-by.txt; sleep infinity"]
+      strategy:
+        type: Docker
+        dockerStrategy: {}
+      output:
+        to: {kind: ImageStreamTag, name: "hello:latest"}
+      resources: {requests: {memory: 256Mi}, limits: {memory: 512Mi}}
+steps:
+  - id: platform
+    title: "The platform's ImageStreams"
+    do: "Look at the httpd ImageStream in the shared `openshift` namespace."
+    commands:
+      - {cmd: "oc get imagestream httpd -n openshift", as: reader, meaning: "the tags this shared ImageStream offers (`2.4-el8,2.4-ubi10,2.4-ubi8,2.4-ubi9 + 1 more...` in the recording: the column is shortened, and the remaining tag is `latest`); every authenticated user can read the openshift namespace's ImageStreams"}
+      - {cmd: "oc get istag httpd:latest -n openshift -o jsonpath='{.image.dockerImageReference}'", as: reader, meaning: "the exact image (registry/repository@sha256:digest) the tag points to right now"}
+    observe: |
+      The tag `httpd:latest` resolves to `image-registry.openshift-image-registry.svc:5000/openshift/httpd@sha256:…`: a
+      name that can move maps to one immutable digest. The IMAGE REPOSITORY column shows the registry's external route
+      (`default-route-openshift-image-registry.apps-crc.testing/...`) because the registry route is exposed on this
+      cluster; pods use the in-cluster service address.
+  - id: build
+    title: "Run a build"
+    do: "Start the build defined by the BuildConfig, wait for it and read its log."
+    commands:
+      - {cmd: "oc start-build hello -n academy-builds", meaning: "creates Build hello-1"}
+      - {cmd: "oc get builds -n academy-builds", meaning: "phase: New → Pending → Running → Complete (seconds after start-build it has not started yet)", expect: ok}
+    predict:
+      prompt: "Where is the resulting image stored?"
+      choices: ["On your laptop", "In the cluster's internal registry, referenced by ImageStreamTag hello:latest", "On Docker Hub"]
+      answer: 1
+      explain: "The build pod pushes to image-registry.openshift-image-registry.svc:5000/academy-builds/hello; the push records the new digest in ImageStreamTag hello:latest."
+      feedback:
+        - "Nothing runs on your machine: `oc start-build` only creates a Build object, and a build pod in the cluster does the work."
+        - "Right: the BuildConfig's output is `ImageStreamTag hello:latest`, so the build pod pushes to the internal registry and the tag records the pushed digest."
+        - "The base image is pulled from registry.access.redhat.com, but the output goes where the BuildConfig's `output.to` says: the cluster's internal registry, not a public one."
+    observe: "Right after `oc start-build`, the build has not started yet: `Pending` in the recording, with no STARTED time. The lab waits until hello-1 is `Complete`."
+    wait_for: [build1]
+  - id: result
+    title: "Inspect the result"
+    do: "Read the build log and the ImageStream."
+    commands:
+      - {cmd: "oc logs build/hello-1 -n academy-builds", meaning: "the build log: base image pull, the Dockerfile STEPs, then the push and its digest"}
+      - {cmd: "oc get istag hello:latest -n academy-builds", meaning: "the new tag and the digest it points to"}
+    observe: |
+      The log shows 5 steps for a 3-line Dockerfile: OpenShift appends an `ENV OPENSHIFT_BUILD_NAME=…` and a
+      `LABEL io.openshift.build.name=…` step. The digest in `Successfully pushed …/hello@sha256:a02b…` is exactly the one
+      the ImageStreamTag `hello:latest` now references.
+  - id: deploy
+    title: "Deploy it, with an image trigger"
+    do: "Create a Deployment from the internal registry image and add a trigger so new builds roll out automatically."
+    commands:
+      - {cmd: "oc create deployment hello --image=image-registry.openshift-image-registry.svc:5000/academy-builds/hello:latest -n academy-builds", meaning: "pulls from the internal registry"}
+      - {cmd: "oc set triggers deploy/hello --from-image=hello:latest -c hello -n academy-builds", meaning: "adds the image.openshift.io/triggers annotation; OpenShift immediately sets the container image to the tag's current digest, which is itself a new rollout"}
+      - {cmd: "oc rollout status deploy/hello -n academy-builds --timeout=180s", meaning: "waits; 'old replicas are pending termination' is the first pod (image by tag) being replaced by the digest-pinned one", timeout: 200}
+      - {cmd: "oc logs deploy/hello -n academy-builds", meaning: "the file baked in by the build"}
+    observe: |
+      `built by an OpenShift Build`. The stderr note `Found 2 pods, using pod/…` appears because the replaced pod was
+      still terminating: `oc logs deploy/<name>` reads one pod of the Deployment.
+    wait_for: [hello-ready, pinned]
+  - id: rebuild
+    title: "A new build rolls out by itself"
+    do: "Start a second build and watch the Deployment's revision change without touching it."
+    commands:
+      - {cmd: "oc start-build hello -n academy-builds", meaning: "hello-2"}
+      - {cmd: "oc get builds -n academy-builds", meaning: "hello-1 Complete, hello-2 just created (Pending)"}
+    observe: "You do not touch the Deployment. The lab waits until hello-2 is Complete and the trigger has rolled the Deployment to a new revision (3) with build 2's digest."
+    wait_for: [build2, rolled]
+  - id: after
+    title: "Check what changed"
+    do: "Read the rollout history and the image the Deployment now uses."
+    commands:
+      - {cmd: "oc rollout history deploy/hello -n academy-builds", meaning: "three revisions: 1 = created with the :latest tag, 2 = trigger pinned build 1's digest, 3 = build 2's digest (CHANGE-CAUSE is <none>: nothing set the kubernetes.io/change-cause annotation)"}
+      - {cmd: "oc get deploy hello -n academy-builds -o jsonpath='{.spec.template.spec.containers[0].image}'", meaning: "now an @sha256 digest, different from build 1's: the digest of build 2"}
+    why: |
+      The trigger rewrote the image to the exact digest the tag points to, once when it was added and again when build 2
+      moved the tag. Digest pinning is what makes each revision reproducible: rolling back to revision 2 runs build 1's
+      image, not whatever `:latest` means today.
+hints: []
+checks:
+  - {id: build1, title: "Build hello-1 completed", type: field, kind: build, name: hello-1, path: status.phase, op: eq, value: Complete, final: false, expect_text: "Complete"}
+  - {id: build2, title: "Build hello-2 completed", type: field, kind: build, name: hello-2, path: status.phase, op: eq, value: Complete, expect_text: "Complete"}
+  - {id: hello-ready, title: "hello runs", type: deployment_ready, name: hello, expect_text: "1/1"}
+  - {id: pinned, title: "The trigger pinned the image to a digest", type: field, kind: deployment, name: hello, path: "spec.template.spec.containers[0].image", op: contains, value: "@sha256:", expect_text: "image@sha256:…"}
+  - {id: rolled, title: "Build 2 rolled out by itself (the Deployment runs the digest build 2 produced)", type: field_ref, kind: deployment, name: hello, path: "spec.template.spec.containers[0].image", op: contains, ref: {kind: build, name: hello-2, path: status.output.to.imageDigest}, expect_text: "image@<build 2 digest>"}
+questions:
+  - q: "What does an ImageStreamTag add compared with a plain registry tag?"
+    a: "An indirection with history inside the cluster: it records which digest the tag points to, and can trigger deployments when it moves."
+  - q: "Why do many enterprises build in CI instead of in the cluster?"
+    a: "Separation of duties and security (no build workloads on runtime clusters), scanning and signing in one pipeline, promotion of the same image across environments."
+enterprise: |
+  "Build once, promote everywhere": the image digest tested in staging is the one that reaches production. Rebuilding
+  per environment breaks that guarantee.
+references:
+  - {title: "OpenShift 4.21: Build strategies (Docker build)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/builds_using_buildconfig/build-strategies#builds-strategy-docker-build_build-strategies"}
+  - {title: "OpenShift 4.21: Managing image streams", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/managing-image-streams"}
+  - {title: "OpenShift 4.21: Triggering updates on image stream changes", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/triggering-updates-on-imagestream-changes"}
+variations:
+  - "Change the message in the BuildConfig's Dockerfile, start a new build, and do not touch the Deployment. Check: `oc logs deploy/hello` prints your message, and the rollout history has one more revision whose image is a new digest."

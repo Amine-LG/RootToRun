@@ -1,0 +1,180 @@
+{
+ "lab": "lesson.n.templates",
+ "kind": "lesson",
+ "lab_hash": "29c9df18e3e41ab9",
+ "recorded_at": "2026-10-20T17:06:11+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-templates",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "sed -n '/^parameters:/,/^objects:/p' shop.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "parameters:\n- name: APP_NAME\n  description: Name of the application\n  required: true\n- name: REPLICAS\n  description: Number of web servers\n  value: \"2\"\n- name: DB_PASSWORD\n  description: Generated when not supplied\n  generate: expression\n  from: \"[a-zA-Z0-9]{12}\"\nobjects:\n",
+   "stderr": "",
+   "combined": "parameters:\n- name: APP_NAME\n  description: Name of the application\n  required: true\n- name: REPLICAS\n  description: Number of web servers\n  value: \"2\"\n- name: DB_PASSWORD\n  description: Generated when not supplied\n  generate: expression\n  from: \"[a-zA-Z0-9]{12}\"\nobjects:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc process --parameters -f shop.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                DESCRIPTION                   GENERATOR           VALUE\nAPP_NAME            Name of the application                           \nREPLICAS            Number of web servers                             2\nDB_PASSWORD         Generated when not supplied   expression          [a-zA-Z0-9]{12}\n",
+   "stderr": "",
+   "combined": "NAME                DESCRIPTION                   GENERATOR           VALUE\nAPP_NAME            Name of the application                           \nREPLICAS            Number of web servers                             2\nDB_PASSWORD         Generated when not supplied   expression          [a-zA-Z0-9]{12}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc process -f shop.yaml",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unable to process template\n  Required value: template.parameters[0]: parameter APP_NAME is required and must be specified\n",
+   "combined": "error: unable to process template\n  Required value: template.parameters[0]: parameter APP_NAME is required and must be specified\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "grep -n '\\${' shop.yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "8:  app.kubernetes.io/instance: ${APP_NAME}\n24:    name: ${APP_NAME}-db\n26:    password: ${DB_PASSWORD}\n30:    name: ${APP_NAME}\n32:    replicas: ${{REPLICAS}}\n35:        app: ${APP_NAME}\n39:          app: ${APP_NAME}\n",
+   "stderr": "",
+   "combined": "8:  app.kubernetes.io/instance: ${APP_NAME}\n24:    name: ${APP_NAME}-db\n26:    password: ${DB_PASSWORD}\n30:    name: ${APP_NAME}\n32:    replicas: ${{REPLICAS}}\n35:        app: ${APP_NAME}\n39:          app: ${APP_NAME}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc process -f shop.yaml -p APP_NAME=shop -o yaml",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: v1\nitems:\n- apiVersion: v1\n  kind: Secret\n  metadata:\n    labels:\n      app.kubernetes.io/instance: shop\n    name: shop-db\n  stringData:\n    password: <generated-1>\n- apiVersion: apps/v1\n  kind: Deployment\n  metadata:\n    labels:\n      app.kubernetes.io/instance: shop\n    name: shop\n  spec:\n    replicas: 2\n    selector:\n      matchLabels:\n        app: shop\n    template:\n      metadata:\n        labels:\n          app: shop\n      spec:\n        containers:\n        - image: registry.access.redhat.com/ubi9/httpd-24:latest\n          name: web\nkind: List\nmetadata: {}\n",
+   "stderr": "",
+   "combined": "apiVersion: v1\nitems:\n- apiVersion: v1\n  kind: Secret\n  metadata:\n    labels:\n      app.kubernetes.io/instance: shop\n    name: shop-db\n  stringData:\n    password: <generated-1>\n- apiVersion: apps/v1\n  kind: Deployment\n  metadata:\n    labels:\n      app.kubernetes.io/instance: shop\n    name: shop\n  spec:\n    replicas: 2\n    selector:\n      matchLabels:\n        app: shop\n    template:\n      metadata:\n        labels:\n          app: shop\n      spec:\n        containers:\n        - image: registry.access.redhat.com/ubi9/httpd-24:latest\n          name: web\nkind: List\nmetadata: {}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for i in 1 2; do oc process -f shop.yaml -p APP_NAME=shop -o jsonpath='{.items[0].stringData.password}{\"\\n\"}'; done",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<generated-2>\n<generated-3>\n",
+   "stderr": "",
+   "combined": "<generated-2>\n<generated-3>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc process -f shop.yaml -p APP_NAME=shop -p DB_PASSWORD=keep-this-one | oc apply -f -",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "secret/shop-db created\ndeployment.apps/shop created\n",
+   "stderr": "",
+   "combined": "secret/shop-db created\ndeployment.apps/shop created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment,secret -l app.kubernetes.io/instance=shop",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/shop   0/2     2            0           0s\n\nNAME             TYPE     DATA   AGE\nsecret/shop-db   Opaque   1      0s\n",
+   "stderr": "",
+   "combined": "NAME                   READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/shop   0/2     2            0           0s\n\nNAME             TYPE     DATA   AGE\nsecret/shop-db   Opaque   1      0s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete deployment,secret -l app.kubernetes.io/instance=shop",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps \"shop\" deleted from academy-lesson-n-templates namespace\nsecret \"shop-db\" deleted from academy-lesson-n-templates namespace\n",
+   "stderr": "",
+   "combined": "deployment.apps \"shop\" deleted from academy-lesson-n-templates namespace\nsecret \"shop-db\" deleted from academy-lesson-n-templates namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f shop.yaml; oc get templates",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "template.template.openshift.io/shop created\nNAME   DESCRIPTION                                                 PARAMETERS    OBJECTS\nshop   A web server and the Secret holding its database password   3 (1 blank)   2\n",
+   "stderr": "",
+   "combined": "template.template.openshift.io/shop created\nNAME   DESCRIPTION                                                 PARAMETERS    OBJECTS\nshop   A web server and the Secret holding its database password   3 (1 blank)   2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-app --template=shop -p APP_NAME=store",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "--> Deploying template \"academy-lesson-n-templates/shop\" to project academy-lesson-n-templates\n\n     shop\n     ---------\n     A web server and the Secret holding its database password\n\n     * With parameters:\n        * APP_NAME=store\n        * REPLICAS=2\n        * DB_PASSWORD=<generated-4> # generated\n\n--> Creating resources ...\n    secret \"store-db\" created\n    deployment.apps \"store\" created\n--> Success\n    Run 'oc status' to view your app.\n",
+   "stderr": "",
+   "combined": "--> Deploying template \"academy-lesson-n-templates/shop\" to project academy-lesson-n-templates\n\n     shop\n     ---------\n     A web server and the Secret holding its database password\n\n     * With parameters:\n        * APP_NAME=store\n        * REPLICAS=2\n        * DB_PASSWORD=<generated-4> # generated\n\n--> Creating resources ...\n    secret \"store-db\" created\n    deployment.apps \"store\" created\n--> Success\n    Run 'oc status' to view your app.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment,secret -l app.kubernetes.io/instance=store; oc delete deployment,secret -l app.kubernetes.io/instance=store",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/store   0/2     2            0           0s\n\nNAME              TYPE     DATA   AGE\nsecret/store-db   Opaque   1      0s\ndeployment.apps \"store\" deleted from academy-lesson-n-templates namespace\nsecret \"store-db\" deleted from academy-lesson-n-templates namespace\n",
+   "stderr": "",
+   "combined": "NAME                    READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/store   0/2     2            0           0s\n\nNAME              TYPE     DATA   AGE\nsecret/store-db   Opaque   1      0s\ndeployment.apps \"store\" deleted from academy-lesson-n-templates namespace\nsecret \"store-db\" deleted from academy-lesson-n-templates namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get templates -n openshift -o name | wc -l; oc get templates -n openshift -o name | head -n 4",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "50\ntemplate.template.openshift.io/cache-service\ntemplate.template.openshift.io/cakephp-mysql-example\ntemplate.template.openshift.io/cakephp-mysql-persistent\ntemplate.template.openshift.io/dancer-mysql-example\n",
+   "stderr": "",
+   "combined": "50\ntemplate.template.openshift.io/cache-service\ntemplate.template.openshift.io/cakephp-mysql-example\ntemplate.template.openshift.io/cakephp-mysql-persistent\ntemplate.template.openshift.io/dancer-mysql-example\n",
+   "ok": true
+  }
+ ],
+ "seconds": 49,
+ "ok": true,
+ "problems": []
+}

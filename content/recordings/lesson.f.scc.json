@@ -1,0 +1,482 @@
+{
+ "lab": "lesson.f.scc",
+ "kind": "lesson",
+ "lab_hash": "c59969428095f80d",
+ "recorded_at": "2026-10-20T15:02:39+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-f-scc",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f vendor-app.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/vendor-app created\n",
+   "stderr": "Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true (pod or container \"app\" must set securityContext.runAsNonRoot=true), runAsUser=0 (pod must not set runAsUser=0)\n",
+   "combined": "Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true (pod or container \"app\" must set securityContext.runAsNonRoot=true), runAsUser=0 (pod must not set runAsUser=0)\ndeployment.apps/vendor-app created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/vendor-app --timeout=20s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Waiting for deployment \"vendor-app\" rollout to finish: 0 out of 1 new replicas have been updated...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "combined": "Waiting for deployment \"vendor-app\" rollout to finish: 0 out of 1 new replicas have been updated...\nerror: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy,rs,pods",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/vendor-app   0/1     0            0           21s\n\nNAME                                    DESIRED   CURRENT   READY   AGE\nreplicaset.apps/vendor-app-75cbd798d4   1         0         0       21s\n",
+   "stderr": "",
+   "combined": "NAME                         READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/vendor-app   0/1     0            0           21s\n\nNAME                                    DESIRED   CURRENT   READY   AGE\nreplicaset.apps/vendor-app-75cbd798d4   1         0         0       21s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe rs -l app=vendor-app",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:           vendor-app-75cbd798d4\nNamespace:      academy-lesson-f-scc\nSelector:       app=vendor-app,pod-template-hash=75cbd798d4\nLabels:         app=vendor-app\n                pod-template-hash=75cbd798d4\nAnnotations:    deployment.kubernetes.io/desired-replicas: 1\n                deployment.kubernetes.io/max-replicas: 2\n                deployment.kubernetes.io/revision: 1\nControlled By:  Deployment/vendor-app\nReplicas:       0 current / 1 desired\nPods Status:    0 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:  app=vendor-app\n           pod-template-hash=75cbd798d4\n  Containers:\n   app:\n    Image:           registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:            <none>\n    Host Port:       <none>\n    SeccompProfile:  RuntimeDefault\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:         10m\n      memory:      16Mi\n    Environment:   <none>\n    Mounts:        <none>\n  Volumes:         <none>\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nConditions:\n  Type             Status  Reason\n  ----             ------  ------\n  ReplicaFailure   True    FailedCreate\nEvents:\n  Type     Reason        Age                From                   Message\n  ----     ------        ----               ----                   -------\n  Warning  FailedCreate  2s (x13 over 22s)  replicaset-controller  Error creating: pods \"vendor-app-75cbd798d4-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "combined": "Name:           vendor-app-75cbd798d4\nNamespace:      academy-lesson-f-scc\nSelector:       app=vendor-app,pod-template-hash=75cbd798d4\nLabels:         app=vendor-app\n                pod-template-hash=75cbd798d4\nAnnotations:    deployment.kubernetes.io/desired-replicas: 1\n                deployment.kubernetes.io/max-replicas: 2\n                deployment.kubernetes.io/revision: 1\nControlled By:  Deployment/vendor-app\nReplicas:       0 current / 1 desired\nPods Status:    0 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:  app=vendor-app\n           pod-template-hash=75cbd798d4\n  Containers:\n   app:\n    Image:           registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:            <none>\n    Host Port:       <none>\n    SeccompProfile:  RuntimeDefault\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:         10m\n      memory:      16Mi\n    Environment:   <none>\n    Mounts:        <none>\n  Volumes:         <none>\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nConditions:\n  Type             Status  Reason\n  ----             ------  ------\n  ReplicaFailure   True    FailedCreate\nEvents:\n  Type     Reason        Age                From                   Message\n  ----     ------        ----               ----                   -------\n  Warning  FailedCreate  2s (x13 over 22s)  replicaset-controller  Error creating: pods \"vendor-app-75cbd798d4-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=FailedCreate",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON         OBJECT                             MESSAGE\n2s          Warning   FailedCreate   replicaset/vendor-app-75cbd798d4   Error creating: pods \"vendor-app-75cbd798d4-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON         OBJECT                             MESSAGE\n2s          Warning   FailedCreate   replicaset/vendor-app-75cbd798d4   Error creating: pods \"vendor-app-75cbd798d4-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project academy-lesson-f-scc -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1000810000/10000\n",
+   "stderr": "",
+   "combined": "1000810000/10000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f vendor-app.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE                ALLOWED BY   \nDeployment/vendor-app   <none>       \n",
+   "stderr": "",
+   "combined": "RESOURCE                ALLOWED BY   \nDeployment/vendor-app   <none>       \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f vendor-app-fixed.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE                ALLOWED BY      \nDeployment/vendor-app   restricted-v2   \n",
+   "stderr": "",
+   "combined": "RESOURCE                ALLOWED BY      \nDeployment/vendor-app   restricted-v2   \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -z default -f vendor-app-fixed.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE                ALLOWED BY   \nDeployment/vendor-app   <none>       \n",
+   "stderr": "",
+   "combined": "RESOURCE                ALLOWED BY   \nDeployment/vendor-app   <none>       \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f vendor-app-fixed.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/vendor-app configured\n",
+   "stderr": "",
+   "combined": "deployment.apps/vendor-app configured\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/vendor-app --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"vendor-app\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"vendor-app\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"vendor-app\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"vendor-app\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/vendor-app -- id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1000810000(1000810000) gid=0(root) groups=0(root),1000810000\n",
+   "stderr": "",
+   "combined": "uid=1000810000(1000810000) gid=0(root) groups=0(root),1000810000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=vendor-app -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          SCC\nvendor-app-7b4b495466-9dvzh   restricted-v2\n",
+   "stderr": "",
+   "combined": "NAME                          SCC\nvendor-app-7b4b495466-9dvzh   restricted-v2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create serviceaccount legacy-sa",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/legacy-sa created\n",
+   "stderr": "",
+   "combined": "serviceaccount/legacy-sa created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f legacy-hardened.yaml -n academy-lesson-f-scc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE            ALLOWED BY   \nDeployment/legacy   privileged   \n",
+   "stderr": "",
+   "combined": "RESOURCE            ALLOWED BY   \nDeployment/legacy   privileged   \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get scc anyuid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIORITY:.priority,RUNASUSER:.runAsUser.type,SECCOMP:.seccompProfiles,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME            PRIORITY   RUNASUSER        SECCOMP             PRIVILEGED   HOSTPID\nanyuid          10         RunAsAny         <none>              false        false\nrestricted-v2   <nil>      MustRunAsRange   [runtime/default]   false        false\nprivileged      <nil>      RunAsAny         [*]                 true         true\n",
+   "stderr": "",
+   "combined": "NAME            PRIORITY   RUNASUSER        SECCOMP             PRIVILEGED   HOSTPID\nanyuid          10         RunAsAny         <none>              false        false\nrestricted-v2   <nil>      MustRunAsRange   [runtime/default]   false        false\nprivileged      <nil>      RunAsAny         [*]                 true         true\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f legacy.yaml -n academy-lesson-f-scc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE            ALLOWED BY   \nDeployment/legacy   anyuid       \n",
+   "stderr": "",
+   "combined": "RESOURCE            ALLOWED BY   \nDeployment/legacy   anyuid       \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user anyuid -z legacy-sa -n academy-lesson-f-scc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid added: \"legacy-sa\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid added: \"legacy-sa\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get rolebinding system:openshift:scc:anyuid -n academy-lesson-f-scc -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          ROLE                                      AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:anyuid   ClusterRole/system:openshift:scc:anyuid   1s                     academy-lesson-f-scc/legacy-sa\n",
+   "stderr": "",
+   "combined": "NAME                          ROLE                                      AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:anyuid   ClusterRole/system:openshift:scc:anyuid   1s                     academy-lesson-f-scc/legacy-sa\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f legacy.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/legacy created\n",
+   "stderr": "",
+   "combined": "deployment.apps/legacy created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/legacy --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"legacy\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"legacy\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"legacy\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"legacy\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    SA          SCC      PHASE\nlegacy-988f579f-56gqk   legacy-sa   anyuid   Running\n",
+   "stderr": "",
+   "combined": "NAME                    SA          SCC      PHASE\nlegacy-988f579f-56gqk   legacy-sa   anyuid   Running\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/legacy -- id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=0(root) gid=0(root) groups=0(root)\n",
+   "stderr": "",
+   "combined": "uid=0(root) gid=0(root) groups=0(root)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/vendor-app -- grep '^Seccomp:' /proc/1/status",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Seccomp:\t2\n",
+   "stderr": "",
+   "combined": "Seccomp:\t2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/legacy -- grep '^Seccomp:' /proc/1/status",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Seccomp:\t0\n",
+   "stderr": "",
+   "combined": "Seccomp:\t0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f root-pod.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): error when creating \"root-pod.yaml\": pods \"root-probe\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "combined": "Error from server (Forbidden): error when creating \"root-pod.yaml\": pods \"root-probe\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy remove-scc-from-user anyuid -z legacy-sa -n academy-lesson-f-scc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid removed: \"legacy-sa\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid removed: \"legacy-sa\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout restart deploy/legacy",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/legacy restarted\n",
+   "stderr": "Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true (pod or container \"app\" must set securityContext.runAsNonRoot=true), runAsUser=0 (pod must not set runAsUser=0), seccompProfile (pod or container \"app\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")\n",
+   "combined": "Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true (pod or container \"app\" must set securityContext.runAsNonRoot=true), runAsUser=0 (pod must not set runAsUser=0), seccompProfile (pod or container \"app\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")\ndeployment.apps/legacy restarted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/legacy --timeout=30s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Waiting for deployment \"legacy\" rollout to finish: 0 out of 1 new replicas have been updated...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "combined": "Waiting for deployment \"legacy\" rollout to finish: 0 out of 1 new replicas have been updated...\nerror: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    SA          SCC      PHASE\nlegacy-988f579f-56gqk   legacy-sa   anyuid   Running\n",
+   "stderr": "",
+   "combined": "NAME                    SA          SCC      PHASE\nlegacy-988f579f-56gqk   legacy-sa   anyuid   Running\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get rs -l app=legacy",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                DESIRED   CURRENT   READY   AGE\nlegacy-6d48845d68   1         0         0       32s\nlegacy-988f579f     1         1         1       37s\n",
+   "stderr": "",
+   "combined": "NAME                DESIRED   CURRENT   READY   AGE\nlegacy-6d48845d68   1         0         0       32s\nlegacy-988f579f     1         1         1       37s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector involvedObject.kind=ReplicaSet,reason=FailedCreate -o custom-columns=REPLICASET:.involvedObject.name,MESSAGE:.message | grep -E '^(REPLICASET|legacy-)'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "REPLICASET              MESSAGE\nlegacy-6d48845d68       Error creating: pods \"legacy-6d48845d68-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "combined": "REPLICASET              MESSAGE\nlegacy-6d48845d68       Error creating: pods \"legacy-6d48845d68-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000810000, 1000819999], provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1000, 65534], provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  }
+ ],
+ "seconds": 96,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-SCC-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete rolebinding system:openshift:scc:anyuid -n academy-lesson-f-scc --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-f-scc --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "found=$(oc get namespace academy-lesson-f-scc --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "ans=$(oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-lesson-f-scc:legacy-sa -n academy-lesson-f-scc 2>/dev/null)\ntest \"$ans\" = no",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get scc -o json | jq -S '[.items[] | {name:.metadata.name,body:del(.metadata,.status)}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebindings -o json | jq -S '[.items[] | {name:.metadata.name,roleRef,subjects}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrole system:openshift:scc:anyuid -o jsonpath='{.rules}'",
+    "same": true
+   }
+  ]
+ }
+}

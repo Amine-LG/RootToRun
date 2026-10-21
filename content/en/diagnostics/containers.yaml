@@ -1,0 +1,328 @@
+track: containers
+title: "Containers: find your gaps"
+intro: |
+  Fifteen questions on what a container really is, running containers with Podman, building images, troubleshooting
+  containers that will not run, registries, tags and digests, and container security. Most show real output to read. Answer honestly, with a confidence for each answer; "I don't know yet" is
+  a useful answer. Allow about 20 minutes. This is a self-assessment: the result suggests where to start in this
+  territory, and it marks nothing as done.
+minutes: 20
+items:
+  - id: meminfo-is-the-node
+    targets: [a.container-is-a-process]
+    prompt: "A service sizes its in-memory cache as half of the MemTotal it reads from /proc/meminfo. The node has 16 GiB of memory. Inside the container you see the output below. What happens under load?"
+    evidence: |
+      $ oc exec deploy/box -- cat /sys/fs/cgroup/memory.max
+      134217728
+    choices:
+      - "It caps its cache at 64 MiB, because /proc/meminfo reports the 128 MiB limit"
+      - "It plans for about 8 GiB, goes past 128 MiB and is OOMKilled"
+      - "It is throttled at 128 MiB and keeps running more slowly"
+      - "The node evicts the pod as soon as it uses more than 128 MiB"
+    answer: 1
+    feedback:
+      - "/proc/meminfo is not namespaced: it describes the whole node. Only the cgroup file shows the 134217728-byte (128 MiB) limit."
+      - "The app believes it has 16 GiB, and the kernel enforces memory.max through the cgroup: the container is killed with reason OOMKilled, exit code 137."
+      - "Throttling is what happens at a CPU limit. Memory cannot be withheld the same way, so exceeding the limit ends in an OOM kill."
+      - "Eviction reacts to pressure on the whole node. A single container over its own limit is killed by the kernel's OOM killer and restarted in the same pod."
+    explain: "A container shares the node's kernel and /proc/meminfo shows the node. The limit lives in the container's cgroup (memory.max on cgroup v2); size applications from that, or use a cgroup-aware runtime."
+
+  - id: sidecar-cannot-see-files
+    targets: [a.container-is-a-process]
+    prompt: "A pod has two containers. `app` writes /var/log/app/out.log in its own filesystem; `shipper` tails /var/log/app/out.log and finds no such file. The two talk to each other on localhost:9000 without trouble. Why?"
+    choices:
+      - "Each container has its own filesystem; only a volume such as emptyDir is shared"
+      - "The shipper runs with a different random UID, so the kernel hides the app's files from it"
+      - "Containers of one pod only see each other's files when they are built from the same image"
+      - "The file only becomes visible to other containers after the app container has restarted once"
+    answer: 0
+    feedback:
+      - "One network namespace (one IP, localhost between containers), but separate filesystems. Mount the same emptyDir volume in both containers at /var/log/app."
+      - "Under restricted-v2 both containers of a pod get the same UID from the project's range. A permission problem would also say 'Permission denied', not 'no such file'."
+      - "The image does not matter: each container gets its own copy of its image's filesystem in its own mount namespace."
+      - "Restarts do not merge filesystems. Without a shared volume the file only ever exists in the app container."
+    explain: "A pod is containers sharing network, IPC and UTS namespaces on one node. Files are shared only through volumes."
+
+  - id: pull-name-unknown
+    targets: [a.images-registries, inc.imagepull]
+    prompt: "A new Deployment's pod never starts. What does the event tell you?"
+    evidence: |
+      NAME                  READY   STATUS             RESTARTS   AGE
+      web-8c9c54f74-hlwdm   0/1     ImagePullBackOff   0          24s
+
+      Warning  Failed  pod/web-8c9c54f74-hlwdm  Failed to pull image "registry.access.redhat.com/ubi9/htpd-24:latest": ...
+        reading manifest latest in registry.access.redhat.com/ubi9/htpd-24: name unknown: Repo not found
+    choices:
+      - "The tag latest does not exist in an otherwise correct repository"
+      - "The node has no credentials for this registry"
+      - "The repository path is wrong: no repository by that name exists"
+      - "The registry cannot be reached from the node"
+    answer: 2
+    feedback:
+      - "A missing tag in an existing repository reads 'manifest unknown'. 'name unknown' is about the repository itself."
+      - "Missing credentials read 'unauthorized' or 'authentication required'. Here the registry answered and said the repository does not exist."
+      - "The path says htpd-24 instead of httpd-24. Fix the image in the Deployment, not the pod."
+      - "An unreachable registry gives 'no such host', a timeout or 'connection refused'. This registry answered."
+    explain: "ImagePullBackOff is a symptom; the event message names the cause: name unknown (repository), manifest unknown (tag), unauthorized (credentials or hidden repository), network errors (reachability)."
+
+  - id: promote-by-digest
+    targets: [a.images-registries]
+    prompt: "Testing approved image `shop:2.3` in staging. Production must run exactly the bits that were tested, even if someone later pushes a new image under the same tag. What do you deploy to production?"
+    choices:
+      - "shop:2.3 with imagePullPolicy Always, so every node fetches the current content of the tag"
+      - "shop:latest, after re-tagging the tested image as latest"
+      - "shop:2.3 with imagePullPolicy IfNotPresent, so nodes keep their cached copy"
+      - "The image by the digest staging actually ran (shop@sha256:…)"
+    answer: 3
+    feedback:
+      - "Always guarantees the tag's *current* content, which is exactly what may have changed since the tests."
+      - "latest is the most mutable tag of all, and it defaults the pull policy to Always."
+      - "Caching only helps on nodes that already pulled. A new node pulls whatever the tag points to then, so two versions can run under one tag."
+      - "A digest names exact content and can never move. Promote the same digest from one environment to the next."
+    explain: "Tags are mutable pointers; digests are content hashes. Pin and promote digests when what runs must be what was tested."
+
+  # ---------- ct.podman-run ----------
+  - id: localhost-is-per-container
+    targets: [ct.podman-run]
+    prompt: "The database answers from the host, but the api container cannot reach it. Why?"
+    evidence: |
+      $ podman run -d --name db -p 15432:5432 -e POSTGRESQL_USER=app -e POSTGRESQL_PASSWORD=… -e POSTGRESQL_DATABASE=app registry.redhat.io/rhel9/postgresql-16
+      $ psql -h localhost -p 15432 -U app -tAc 'select 1' app
+      1
+      $ podman run --rm --name api -e DB_HOST=localhost -e DB_PORT=5432 localhost/api:1.0
+      error: connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused
+    choices:
+      - "The api container must use port 15432, the port that was published on the host"
+      - "SELinux gives each container its own MCS categories, which block traffic between them"
+      - "Each container has its own network namespace: localhost in api is its own loopback"
+      - "The database listens on 127.0.0.1 only, so only the host can connect to it"
+    answer: 2
+    feedback:
+      - "Inside api, localhost is still api's own loopback, and nothing listens there on 15432 either. A published port opens on the host, not in other containers."
+      - "MCS categories separate files and processes, not network traffic. The refusal comes from api's own loopback, where nothing listens."
+      - "Put both containers in one pod (`podman pod create`, then `--pod`) to share localhost, as containers of a Kubernetes pod do, or join them to one Podman network and use DB_HOST=db."
+      - "The host reaches it through the published port, which arrives on the container's network interface. A loopback-only server would have refused the host as well."
+    explain: "Every container has its own network namespace and its own localhost. Only containers of one pod share it; otherwise connect through a network by name, or in a cluster through a Service."
+
+  - id: writable-layer-lost-on-rm
+    targets: [ct.podman-run]
+    prompt: "The application stores its notes under /var/lib/notes. Why are they gone after the container is recreated, and what keeps them?"
+    evidence: |
+      $ podman run -d --name notes -p 18080:8080 localhost/notes:1.0
+      $ curl -s -X POST localhost:18080/notes -d 'buy milk'; curl -s localhost:18080/notes
+      ["buy milk"]
+      $ podman rm -f notes && podman run -d --name notes -p 18080:8080 localhost/notes:1.0
+      $ curl -s localhost:18080/notes
+      []
+    choices:
+      - "They were in the container's writable layer, deleted by rm; mount a named volume at /var/lib/notes"
+      - "rm -f killed the application before it flushed its data; podman stop first would have kept the notes"
+      - "The second run pulled a fresh copy of notes:1.0 from the registry, which replaced the stored data"
+      - "They are still on disk, but the new container runs as another UID and cannot read the old files"
+    answer: 0
+    feedback:
+      - "Each container gets its own thin writable layer, removed with the container. `-v notes-data:/var/lib/notes` keeps the data outside it; in a cluster, a PersistentVolumeClaim plays that role."
+      - "Even a clean stop followed by rm loses them: the writable layer is deleted with the container, whatever was flushed into it."
+      - "--pull=missing (the default) reuses the local image. And an image never holds a container's data in any case."
+      - "A new container gets a new, empty writable layer from the same image. The old files went with the old container."
+    explain: "Images are read-only; a container's changes live in its own writable layer and disappear with `podman rm` (or with a container restart in a pod). Data that must last goes in a volume."
+
+  # ---------- ct.build-images ----------
+  - id: shell-form-ignores-arguments
+    targets: [ct.build-images]
+    prompt: "You start the image with a different document root, but the server still serves /www. Why are the arguments ignored?"
+    evidence: |
+      $ podman image inspect localhost/web:1.2 --format '{{json .Config.Entrypoint}}'
+      ["/bin/sh","-c","httpd -f -p 8080 -h /www"]
+      $ podman run -d --name web -p 18080:8080 localhost/web:1.2 -h /srv/site
+      $ podman top web args
+      COMMAND
+      httpd -f -p 8080 -h /www
+    choices:
+      - "Arguments after the image name replace ENTRYPOINT, and the shell then ignores them"
+      - "Run arguments only take effect when the image also declares a CMD to replace"
+      - "Podman passes arguments to a container only when --entrypoint is also given"
+      - "The shell form runs a fixed string with /bin/sh -c, which ignores run arguments"
+    answer: 3
+    feedback:
+      - "Run arguments replace CMD, never ENTRYPOINT; only --entrypoint does that."
+      - "With an exec-form ENTRYPOINT, run arguments are appended even if the image has no CMD."
+      - "Arguments after the image name are always passed on; here they reach `sh -c` as extra parameters that the fixed string never uses."
+      - "Use the exec form, `ENTRYPOINT [\"httpd\", \"-f\", \"-p\", \"8080\"]` with `CMD [\"-h\", \"/www\"]`: run arguments then replace CMD, and httpd is PID 1 without a shell in front."
+    explain: "ENTRYPOINT and CMD have an exec form (a JSON list, no shell) and a shell form (a string run by /bin/sh -c, which ignores CMD and run arguments). `podman image inspect` shows which one an image has."
+
+  - id: build-stage-env-not-in-final
+    targets: [ct.build-images]
+    prompt: "This Containerfile is built and the result pushed. Is the value of NPM_TOKEN in the pushed image?"
+    evidence: |
+      FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS build
+      ENV NPM_TOKEN=npm_9f2c…
+      COPY package.json package-lock.json .npmrc ./
+      RUN npm ci
+      COPY src/ ./src/
+      RUN npm run build
+
+      FROM registry.access.redhat.com/ubi9/nodejs-20-minimal:latest
+      COPY --from=build /opt/app-root/src/dist ./dist
+      CMD ["node", "dist/server.js"]
+    choices:
+      - "ENV values are inherited by every later stage of the same Containerfile"
+      - "No: the final stage starts fresh and gets only what COPY --from adds"
+      - "The layers of every stage are pushed to the registry together, as one image"
+      - "No, because npm ci removes the variable from the environment once it has run"
+    answer: 1
+    feedback:
+      - "Each FROM starts a fresh configuration from its own base image. ENV, ARG and USER of the build stage stay behind."
+      - "As long as dist/ holds no copy of it. The build stage's image still sits in the builder's local store with the token in its configuration, so prefer `RUN --mount=type=secret` for credentials."
+      - "Only the final stage becomes the image. The earlier stages' layers are left in the builder's store, not pushed."
+      - "A RUN cannot change the configuration. Had the token been set in the final stage, it would be in the image's Env for anyone to read."
+    explain: "A multi-stage build ships only the last stage: its base, its own instructions and what `COPY --from` brings in. Values set with ENV or ARG in the final stage are readable by anyone who has the image."
+
+  # ---------- ct.troubleshoot-containers ----------
+  - id: exit-126-not-executable
+    targets: [ct.troubleshoot-containers]
+    prompt: "The Containerfile ends with `COPY run.sh /app/run.sh` and `ENTRYPOINT [\"/app/run.sh\"]`. Which change fixes this?"
+    evidence: |
+      $ podman run --rm localhost/report:1.4
+      Error: crun: the path `/app/run.sh` exists but it is not executable: Operation not permitted: OCI permission denied
+      $ echo $?
+      126
+    choices:
+      - "COPY --chmod=755 run.sh /app/run.sh, or RUN chmod 755 /app/run.sh after the COPY"
+      - "Convert run.sh to Unix line endings, because a trailing \\r makes the runtime refuse it"
+      - "Run the container with --user 0, since root may execute any file whatever its mode"
+      - "Add #!/bin/sh as the first line, so the kernel knows which interpreter runs the file"
+    answer: 0
+    feedback:
+      - "126 means found but not executable: the file arrived without an execute bit. Set the mode in the image rather than relying on the mode in your working copy."
+      - "Windows line endings give 'No such file or directory' (for the interpreter /bin/sh\\r), with exit 1, not this message."
+      - "Root may execute a file only if at least one execute bit is set. And OpenShift would not run it as root anyway."
+      - "A missing #! line gives 'Exec format error'. This file was never run at all, because it has no execute bit."
+    explain: "Read the exact message with the code: 126 is 'cannot execute' (no x bit), 127 'not found', 'No such file' for an existing script points at its interpreter, and 'Exec format error' at a missing #! or the wrong CPU architecture."
+
+  - id: reproduce-with-entrypoint-shell
+    targets: [ct.troubleshoot-containers]
+    prompt: "You want to see what the image contains under /etc/report. What is the next step?"
+    evidence: |
+      $ podman ps -a --filter name=report --format '{{.Names}} | {{.Status}}'
+      report | Exited (1) 12 seconds ago
+      $ podman logs report
+      Error: config file /etc/report/report.yaml not found
+      $ podman exec -it report sh
+      Error: can only create exec sessions on running containers: container state improper
+    choices:
+      - "podman start report, then podman exec quickly before the container exits again"
+      - "podman exec --privileged report sh, which can also enter stopped containers"
+      - "podman run -it --rm --entrypoint sh on the same image, then list /etc/report"
+      - "Rebuild with --no-cache, since the file must have been lost from the build cache"
+    answer: 2
+    feedback:
+      - "A race you will usually lose, and each start runs the failing program again. You need a process that stays, not a faster typist."
+      - "exec always needs a running process to join, privileged or not."
+      - "A shell instead of the failing entrypoint lets you look at the same image at leisure. On OpenShift, `oc debug` gives the same: a copy of the pod with a shell."
+      - "The cache only reuses results of identical steps. Look first: the file may never have been in the image, or may be expected from a mount."
+    explain: "The method: status, exit code, logs, configuration, then reproduce. You cannot exec into an exited container; start the same image with `--entrypoint sh`."
+
+  # ---------- ct.registries-skopeo ----------
+  - id: index-digest-vs-istag-digest
+    targets: [ct.registries-skopeo]
+    prompt: "Both commands ran a minute apart, and the tag has not moved for a week. A colleague concludes that the cluster imported a different image. Is that right?"
+    evidence: |
+      $ skopeo inspect --format '{{.Digest}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest
+      sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661
+      $ oc get istag minimal:latest -n academy-img-src
+      minimal:latest   image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal@sha256:c2fcb1793e00…
+    choices:
+      - "OpenShift rebuilt the image when it imported it into the ImageStream"
+      - "No: Skopeo shows the index digest; the istag, the amd64 manifest in it"
+      - "The import recompressed the layers, which gave the image a new digest"
+      - "No: the integrated registry gives every image it serves a digest of its own"
+    answer: 1
+    feedback:
+      - "An import copies metadata only; nothing is built or changed. ImageStreams are pointers to digests."
+      - "`skopeo inspect --raw` on the tag lists c2fcb179… as the amd64 entry of the index c4c285d4…; the default import mode (Legacy) keeps one image from a manifest list."
+      - "Layers are never touched by an import, and a digest names exact bytes: changing them would be a different image."
+      - "A digest is the hash of the content, so any registry serving the same manifest reports the same digest. That is what makes digests usable across mirrors."
+    explain: "A multi-arch tag points to an index (manifest list); each platform has its own manifest digest. Skopeo reports the index, while oc image info with --filter-by-os, istags and nodes record the per-platform manifest. Compare like with like."
+
+  - id: skopeo-ignores-short-name-aliases
+    targets: [ct.registries-skopeo]
+    prompt: "On the same RHEL 9 workstation, Podman pulls the short name and Skopeo fails. Why?"
+    evidence: |
+      $ podman pull ubi9/ubi-minimal 2>&1 | head -1
+      Trying to pull registry.access.redhat.com/ubi9/ubi-minimal:latest...
+      $ skopeo inspect docker://ubi9/ubi-minimal
+      FATA[0000] Error parsing image name "docker://ubi9/ubi-minimal": reading manifest latest in docker.io/ubi9/ubi-minimal: requested access to the resource is denied
+    choices:
+      - "Skopeo is not logged in to registry.access.redhat.com, while Podman is"
+      - "The image was removed from the registry in the minute between the two commands"
+      - "Short names need a terminal in Skopeo, and enforcing mode refuses them"
+      - "Skopeo ignores short-name aliases and reads docker.io/ubi9/ubi-minimal"
+    answer: 3
+    feedback:
+      - "registry.access.redhat.com needs no login, and the error names docker.io: Skopeo never asked Red Hat's registry."
+      - "Podman found it a moment earlier, and the error is about a different registry altogether."
+      - "That is Podman's enforcing-mode error ('cannot prompt without a TTY'). Skopeo does not resolve short names at all."
+      - "Podman applied the alias in registries.conf.d; Skopeo's docker:// transport treats a name without a registry as Docker Hub. Write fully qualified references everywhere."
+    explain: "The same string can mean different images to different tools. Podman resolves short names through aliases and search registries (enforcing mode on RHEL); Skopeo assumes docker.io; nodes use their own registries.conf (on OpenShift, a default search list that administrators can replace)."
+
+  # ---------- ct.podman-stack ----------
+  - id: started-is-not-ready
+    targets: [ct.podman-stack]
+    prompt: "A CI job starts the api container, then the client straight away. About one run in five fails like this. What is the right fix?"
+    evidence: |
+      $ podman run -d --name api --network shop-net --health-cmd 'wget -qO /dev/null http://localhost:8080/healthz' --health-interval 2s localhost/kv-api:1.0
+      $ podman inspect api --format 'state={{.State.Status}} health={{.State.Health.Status}}'
+      state=running health=starting
+      $ podman run --rm --network shop-net localhost/kv-client:1.0
+      wget: can't connect to remote host (10.89.1.2): Connection refused
+    choices:
+      - "Call the API by its address, 10.89.1.2, so that no name lookup can fail"
+      - "Leave the client on the default network, where container names resolve sooner"
+      - "Wait for health=healthy (podman wait --condition healthy), and retry"
+      - "Add a sleep 10 to the CI job, before it starts the client container"
+    answer: 2
+    feedback:
+      - "The name already resolved: the error shows the address. Nothing listened yet, and a hard-coded address breaks the next time the container is recreated."
+      - "The default network resolves no container names at all; the client would fail with 'bad address' instead."
+      - "`podman run -d` returns when the process has started, not when it answers. A healthcheck makes readiness visible, and retries cover later restarts; in Kubernetes, a readiness probe and client retries play these roles."
+      - "A fixed sleep is a guess: too short on a slow day, wasted time on a fast one. Test readiness instead."
+    explain: "Started is not ready. Connect by name on a user-defined network, gate on a healthcheck (`podman wait --condition healthy`, Compose's service_healthy), and make clients retry, as readiness probes and retries do on a cluster."
+
+  # ---------- ct.image-archives ----------
+  - id: export-import-loses-config
+    targets: [ct.image-archives]
+    prompt: "A colleague carried an image to an offline site this way, and it will not start. What should they have done?"
+    evidence: |
+      $ podman export -o web-fs.tar web && podman import -q web-fs.tar localhost/web-copy:1
+      $ podman image inspect --format 'cmd={{json .Config.Cmd}} env={{json .Config.Env}} layers={{len .RootFS.Layers}}' localhost/web-copy:1
+      cmd=null env=null layers=1
+      $ podman run --rm localhost/web-copy:1
+      Error: crun: cannot find `` in $PATH: No such file or directory: OCI runtime attempted to invoke a command that was not found
+      $ echo $?
+      127
+    choices:
+      - "Used podman load instead of podman import, since load reads any archive"
+      - "Used podman save, and podman load at the site, with a checksum file"
+      - "Added -c 'CMD …' to podman import; the command is the only thing lost"
+      - "Committed the container first, then exported the committed image instead"
+    answer: 1
+    feedback:
+      - "load expects an image archive (manifest.json or index.json); an export tar has neither, so load refuses it."
+      - "Save keeps the layers, the configuration and the name, and load restores the same image ID. Ship a sha256 checksum with the archive."
+      - "-c can put a CMD back, but PATH and the rest of the environment, the user, the history and the shared layers are gone too."
+      - "export always writes a container's flattened filesystem, without configuration, whatever the container was started from."
+    explain: "save/load move images (layers, configuration, name); export/import move a container's flattened filesystem, and the imported image has no command, no environment and one layer."
+
+  - id: image-any-uid
+    targets: [a.container-security]
+    prompt: "An app writes to `/app/data`, owned by UID 1001 with mode 755. Started with `podman run --user 54321:0`, it gets Permission denied. What makes the image work for any UID in group 0?"
+    choices:
+      - "In the Containerfile: `chgrp -R 0 /app/data && chmod -R g=u /app/data`"
+      - "In the Containerfile: `chown -R 54321 /app/data`"
+      - "In the Containerfile: `USER root` as the last line"
+    answer: 0
+    feedback:
+      - "A process in group 0 that is not the owner uses the group bits; giving group 0 the owner's permissions lets any such UID write."
+      - "That works for UID 54321 only; another run with another UID falls back to the others bits."
+      - "`--user` on the command line overrides the image's USER, so the process still runs as 54321."
+    explain: "Images that must run under any UID give their writable directories to group 0, with group permissions equal to the owner's."

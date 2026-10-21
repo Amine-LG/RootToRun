@@ -1,0 +1,394 @@
+# Containers path, module ct2-images, written as a teaching flow. Recorded with Skopeo and Podman against public registries.
+- id: ct.registries-skopeo
+  title: "Inside a registry: indexes, manifests and names"
+  subtitle: "Why one tag has several digests, copying images exactly, short names and credentials"
+  module: ct2-images
+  mode: LOCAL_SIMULATION
+  minutes: 28
+  level: 2
+  supports: "Skopeo, Podman 5.8 and jq on RHEL 9. Recorded on a RHEL 9 workstation as an ordinary user against public registries; digests and tag counts change as images are rebuilt. The credentials file holds a made-up demo login."
+  concepts: [container.images, container.registries]
+  prerequisites: [ct.image-archives]
+  objective: |
+    Explain how one tag can point to several images (an index with one manifest per architecture), read a manifest,
+    copy an image without changing its digest, know how short names are resolved, and see where credentials are
+    stored.
+  flow:
+    - kind: ask
+      id: recall-tag
+      prompt: "A look back. Why can two machines run different code from the same image tag?"
+      recalls: a.images-registries
+      choices:
+        - text: "A tag can be moved to new content"
+          why: "A tag is a movable label; machines that pulled at different times can hold different images under it."
+        - text: "Each machine compresses images differently"
+          why: "Compression does not change the content that runs; the tag pointing elsewhere does."
+        - text: "Tags are local to each machine"
+          why: "Tags are defined by the registry; the point is that the registry can move them."
+      answer: 0
+    - kind: teach
+      id: puzzle
+      title: "One tag, several images"
+      body: |
+        In the lesson on tags and digests you inspected `ubi-minimal:latest` and got one digest. Here is something
+        stranger: the same tag, inspected for two different processor architectures.
+    - kind: show
+      id: two-arch
+      run: "skopeo inspect --format '{{.Digest}} {{.Architecture}} {{.Layers}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest; skopeo --override-arch arm64 inspect --format '{{.Digest}} {{.Architecture}} {{.Layers}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest"
+      notice: "The same digest both times, yet a different architecture and different layers. One digest cannot describe two different images, unless it describes something else."
+    - kind: teach
+      id: index
+      body: |
+        That something is an **index** (also called a manifest list). For images built for several architectures,
+        the tag points to an index: a small document listing one **manifest** per architecture. The index has its
+        own digest, which is what `skopeo inspect` reported both times; Podman and Skopeo then pick the manifest
+        that matches the machine. `--raw` shows the document as stored (the recordings pipe it through `jq`, a JSON filter, to keep the lines that matter):
+    - kind: try
+      id: raw-index
+      body: "Print the raw document that the tag `registry.access.redhat.com/ubi9/ubi-minimal:latest` points to."
+      accept: ["skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal:latest", "skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal"]
+      hints:
+        - match: "^skopeo inspect docker://"
+          say: "Without `--raw`, Skopeo summarises the selected image. `--raw` prints the document stored under the tag."
+        - match: "^podman"
+          say: "Podman would pull the image. Skopeo reads the registry directly."
+      hint: "`skopeo inspect --raw docker://` and the full reference."
+      run: "skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal:latest | jq '{mediaType, manifests: [.manifests[] | {arch: .platform.architecture, digest}]}'"
+      then: "An index with one entry per architecture, each with its own digest. The image you actually run on an `amd64` machine is the first one."
+      understand:
+        purpose: Prints the document that the tag points to, exactly as the registry stores it, and keeps only the fields
+          that show it is an index.
+        parts:
+          - text: --raw
+            means: Prints the manifest (here an index) as stored, instead of Skopeo's summary of one image.
+          - text: '{mediaType, manifests: [.manifests[] | {arch: .platform.architecture, digest}]}'
+            means: 'A `jq` filter that builds a smaller JSON object: `mediaType` as it is, and a list made from every
+              entry of `.manifests[]`, keeping its architecture (renamed `arch`) and its `digest`.'
+        needs: '`jq`, a separate JSON tool, for the filtered version; plain `skopeo inspect --raw` prints the whole document.'
+        mistakes:
+          - 'Leaving out `docker://`: Skopeo stops with `unknown transport`.'
+        concepts:
+          - container.images
+          - container.registries
+        refs:
+          - title: skopeo-inspect(1)
+            url: https://github.com/containers/skopeo/blob/main/docs/skopeo-inspect.1.md
+          - title: 'jq manual: object construction, iteration, pipes'
+            url: https://jqlang.org/manual/
+          - title: OCI image index
+            url: https://github.com/opencontainers/image-spec/blob/main/image-index.md
+    - kind: show
+      id: manifest
+      body: "Following the `amd64` entry to its manifest:"
+      run: "AMD64=$(skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal:latest | jq -r '.manifests[] | select(.platform.architecture == \"amd64\") | .digest') && skopeo inspect --raw \"docker://registry.access.redhat.com/ubi9/ubi-minimal@$AMD64\" | jq '{mediaType, config: .config.digest, layers: [.layers[] | {size, digest}]}'"
+      notice: "A manifest names a **config** (the image's settings: command, user, environment) and its **layers**, each by digest and size. Every piece is addressed by the hash of its content, which is why digests can be trusted."
+      understand:
+        purpose: Reads the index, picks the digest of the `amd64` manifest and stores it in a shell variable, then fetches
+          that manifest by digest and prints its media type, its config digest and its layers.
+        parts:
+          - text: AMD64=$(
+            means: Runs the command inside `$( )` and stores what it prints, here one digest, in the shell variable `AMD64`.
+          - text: jq -r
+            means: Prints a string result without JSON quotes, so the digest can be pasted into a reference.
+          - text: select(.platform.architecture == "amd64")
+            means: 'Keeps only the entries of `.manifests[]` whose platform architecture is `amd64`; `| .digest` then
+              takes the digest of each one kept.'
+          - text: '&&'
+            means: Runs the second command only if the first one succeeded.
+          - text: ubi-minimal@$AMD64
+            means: 'A reference by digest: `name@sha256:…` names exactly that content, whatever the tags say. Your shell
+              replaces `$AMD64` with the digest, because the reference is in double quotes.'
+          - text: '{mediaType, config: .config.digest, layers: [.layers[] | {size, digest}]}'
+            means: Builds a smaller object from the manifest, with its `mediaType`, the digest of its config, and the size
+              and digest of each layer.
+        mistakes:
+          - 'If no entry matches (a typo such as `amd-64`), `jq` prints nothing and still succeeds, so `&&` lets the second
+            command run with an empty digest, and Skopeo rejects a reference that ends in `@`.'
+        concepts:
+          - container.images
+          - container.registries
+        refs:
+          - title: 'jq manual: select, object construction, --raw-output'
+            url: https://jqlang.org/manual/
+          - title: skopeo-inspect(1)
+            url: https://github.com/containers/skopeo/blob/main/docs/skopeo-inspect.1.md
+          - title: OCI image manifest
+            url: https://github.com/opencontainers/image-spec/blob/main/manifest.md
+          - title: 'Bash manual: Command substitution'
+            url: https://www.gnu.org/software/bash/manual/html_node/Command-Substitution.html
+    - kind: ask
+      id: which-digest
+      prompt: "A production deployment must run on both `amd64` and `arm64` nodes, and each node must run exactly the image you tested for its architecture. Which digest do you pin?"
+      choices:
+        - text: "The index digest; machines pick their architecture"
+          why: "The index is immutable too, and each node gets its own architecture's manifest from it, so one pinned digest is exact on both kinds of node."
+        - text: "Only the `amd64` manifest digest"
+          why: "That names exactly one image, built for amd64: the arm64 nodes could not run it. The index digest covers both architectures, exactly."
+        - text: "Neither: digests change when images are rebuilt"
+          why: "A rebuild creates a new digest; the old one still means the old content. That is why pinning works."
+      answer: 0
+    - kind: teach
+      id: tags-many
+      title: "Many tags, few images"
+      body: |
+        Repositories carry many tags. Several often point to the same image: a moving `latest`, a moving minor
+        version, and a fixed build tag. `skopeo list-tags` lists them, and comparing digests shows which are the same:
+    - kind: try
+      id: list-tags
+      body: "List the tags of the repository `registry.access.redhat.com/ubi9/ubi-minimal`."
+      accept: ["skopeo list-tags docker://registry.access.redhat.com/ubi9/ubi-minimal"]
+      hints:
+        - match: ":latest$"
+          say: "`list-tags` works on a repository, not on one tag: leave out `:latest`."
+        - match: "^skopeo inspect"
+          say: "`inspect` describes one image. The subcommand that lists a repository's tags is `list-tags`."
+      hint: "`skopeo list-tags docker://` and the repository."
+      run: "skopeo list-tags docker://registry.access.redhat.com/ubi9/ubi-minimal | jq -r '.Tags[]' > tags.txt && echo \"tags: $(wc -l < tags.txt)\" && echo \"signature, attestation and SBOM tags: $(grep -c -E '\\.(sig|att|sbom)$' tags.txt)\" && echo \"source image tags: $(grep -c -- '-source$' tags.txt)\""
+      then: "Thousands of tags, most of them signatures, attestations and software bills of materials stored next to the images, plus source images."
+    - kind: show
+      id: same-image
+      run: "for t in latest 9.8 $(grep -E '^9\\.8-[0-9]+$' tags.txt | sort -V | tail -1); do echo \"$t -> $(skopeo inspect --format '{{.Digest}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:$t)\"; done"
+      notice: "`latest`, `9.8` and the newest fixed build tag `9.8-…` currently point to the same digest. Pin the fixed tag or the digest; the other two will move."
+    - kind: teach
+      id: exact-copy
+      title: "Copying an image exactly"
+      body: |
+        `skopeo copy SOURCE DESTINATION` copies images between **transports**: `docker://` (a registry), `oci:` (an
+        OCI layout directory), `dir:`, `docker-archive:`, `containers-storage:` (Podman's local store). A copy can
+        silently change the digest, by converting the manifest format, and Red Hat's signatures cannot always travel
+        along.
+    - kind: show
+      id: copy-sig
+      run: "skopeo copy -q docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci:latest"
+      notice: "Refused: the image is signed, and an OCI directory cannot hold those signatures. Skopeo will not drop them without being told."
+    - kind: show
+      id: copy-oci
+      body: "Told to drop them, Skopeo copies, but look at the digest:"
+      run: "skopeo copy -q --remove-signatures docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci:latest && jq -r '.manifests[0] | \"\\(.mediaType) \\(.digest)\"' ubi-oci/index.json"
+      notice: "A new digest, `bb12…`: Skopeo converted the manifest to the OCI format, which changes its bytes, and so its digest, though the layers are the same."
+    - kind: ask
+      id: guess-preserve
+      guess: true
+      prompt: "The copy is repeated with `--preserve-digests`. What happens to the digest?"
+      choices:
+        - text: "The original digest comes back"
+          why: "See the next step."
+        - text: "The digest changes again"
+          why: "That is what the option is there to prevent. The next step shows it."
+        - text: "The copy now fails"
+          why: "The copy works when the destination can store the manifest unchanged. The next step shows it."
+      answer: 0
+    - kind: show
+      id: copy-exact
+      run: "skopeo copy -q --remove-signatures --preserve-digests docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci-exact:latest && jq -r '.manifests[0] | \"\\(.mediaType) \\(.digest)\"' ubi-oci-exact/index.json"
+      notice: "The manifest was kept as it was, so the digest is the registry's own `c2fc…`, the amd64 entry of the index. When an image is mirrored for disconnected environments, preserving digests is what lets deployments pinned by digest keep working."
+    - kind: teach
+      id: short-names
+      title: "Short names"
+      body: |
+        A name without a registry, such as `ubi9/ubi-minimal`, is a **short name**. Podman resolves it with
+        `/etc/containers/registries.conf`: a list of registries to search, a mode, and aliases that map well-known
+        short names to one exact registry. These are the host's own files, as RHEL 9 installs them; other
+        distributions ship different lists:
+    - kind: show
+      id: registries-conf
+      run: "grep -E '^(unqualified-search-registries|short-name-mode)' /etc/containers/registries.conf && grep -H '\"ubi9/ubi-minimal\"' /etc/containers/registries.conf.d/*.conf"
+      notice: "Three registries to search, the `enforcing` mode, and two aliases for `ubi9/ubi-minimal` that disagree, in two files. The files in `registries.conf.d` are read in name order and a later file overrides an earlier one, so the alias in `001-rhel-shortnames.conf` wins: `registry.access.redhat.com/ubi9/ubi-minimal`. In enforcing mode, an ambiguous short name is not guessed: Podman asks, and without a terminal to ask on, it refuses."
+    - kind: show
+      id: short-pull
+      run: "podman pull academy-no-such-image; podman pull ubi9/ubi-minimal 2>&1 | head -1"
+      notice: "An unknown short name is refused without a terminal; `ubi9/ubi-minimal` is resolved through the winning alias, from the later file, to Red Hat's registry."
+    - kind: ask
+      id: guess-skopeo-short
+      guess: true
+      prompt: "`skopeo inspect docker://ubi9/ubi-minimal` uses the same short name. Where does Skopeo look?"
+      choices:
+        - text: "Red Hat's registry, like Podman"
+          why: "A reasonable guess, since both tools share configuration. The next step shows what Skopeo actually does."
+        - text: "docker.io"
+          why: "See the next step."
+        - text: "It asks which registry"
+          why: "The next step shows Skopeo's behaviour."
+      answer: 1
+    - kind: show
+      id: skopeo-short
+      run: "skopeo inspect docker://ubi9/ubi-minimal"
+      notice: "Skopeo treats a `docker://` name without a registry as Docker Hub's (`docker.io`), where this repository does not exist. Different tools resolve short names differently, which is the best argument for always writing full names."
+    - kind: teach
+      id: credentials
+      title: "Where logins are stored"
+      body: |
+        `podman login REGISTRY` stores a credential in an **auth file** (by default
+        `$XDG_RUNTIME_DIR/containers/auth.json`), which Podman, Skopeo and Buildah all read. A login can be scoped to
+        one repository path instead of a whole registry. The recording uses a separate file, `auth.json` from this
+        lesson's source files, holding a made-up demo login for `quay.io/academy-demo` (its value decodes to
+        `academy:not-a-secret`); `--authfile` points Podman at it instead of your real one. Two lookups follow:
+        the first, for a path under `quay.io/academy-demo`, finds the login; the second, for the whole registry,
+        is expected to fail:
+    - kind: show
+      id: get-login
+      run: "podman login --authfile ./auth.json --get-login quay.io/academy-demo/app; podman login --authfile ./auth.json --get-login quay.io"
+      notice: "The login answers for paths under `quay.io/academy-demo`, and not for the registry as a whole."
+    - kind: show
+      id: logout
+      run: "podman logout --authfile ./auth.json quay.io/academy-demo && cat auth.json"
+      notice: "After `logout`, the entry is gone. The value stored there was only base64-encoded, not encrypted: auth files deserve the same care as passwords."
+    - kind: reflect
+      id: explain-index
+      prompt: "Explain to a colleague why `skopeo inspect` showed the same digest for two architectures."
+      model: |
+        The tag points to an index (a manifest list) that lists one manifest per architecture. `skopeo inspect`
+        reports the digest of the tag's target, the index, and then describes the manifest it selected for the
+        requested architecture. Each architecture's manifest has its own digest, listed inside the index.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read an index and a manifest, choose which digest to pin, copy an image without changing its digest,
+        predict how short names are resolved, and find where logins are stored.
+
+        That completes the containers part of the course. Next, Kubernetes: running containers like these on a
+        cluster of machines, with a system that keeps them running for you. It starts with [Linux you will
+        use](/lesson/f0.linux-essentials), a short review of the four Linux facts that most cluster failures come
+        down to.
+  sections:
+    - id: copying-between-transports
+      title: Copying between transports
+      depth: true
+      body: "Skopeo names every location with a **transport** prefix:\n\n| Transport | Where the image lives | Typical use\
+        \ |\n|---|---|---|\n| `docker://` | a registry (any registry speaking the distribution API, not only Docker Hub) |\
+        \ inspect, copy, mirror |\n| `oci:dir:tag` | an OCI image layout directory (`index.json`, `blobs/sha256/…`) | portable,\
+        \ standard on-disk format |\n| `dir:path` | a plain directory of manifest, blobs and signatures | debugging, looking\
+        \ at raw files |\n| `containers-storage:` | Podman's, Buildah's and CRI-O's local store | make an image visible to\
+        \ Podman without a pull |\n| `oci-archive:`, `docker-archive:` | a single tar file | moving images across an air gap\
+        \ |\n\nCopies of the same tag teach three lessons (the `oci:` lines come from this lesson's recording; the\
+        \ `dir:` and `containers-storage:` lines are an example, not part of this lesson's recording):\n\n```\noci:ubi-oci           fails: Pushing signatures\
+        \ for OCI images is not supported\noci:ubi-oci           with --remove-signatures:     oci manifest  sha256:bb12f76b…\n\
+        oci:ubi-oci-exact     plus --preserve-digests:      docker manifest  sha256:c2fcb179…\ndir:ubi-dir           16 signature\
+        \ files kept;  sha256sum manifest.json = c2fcb179…\ncontainers-storage:   image ID 1f074f64…, the same config digest\
+        \ as the original\n```\n\n- Red Hat signs its images, and RHEL's `/etc/containers/policy.json` requires a valid signature\n\
+        \  (`signedBy`) for `registry.access.redhat.com`. An OCI layout cannot store those signatures, so\n  Skopeo refuses\
+        \ rather than drop them silently; `--remove-signatures` is an explicit choice. The\n  `dir:` transport can store them,\
+        \ as files `signature-1`, `signature-2` and so on (16 in the example above).\n- Writing to an OCI layout **converts** the Docker manifest into an OCI manifest.\
+        \ The config and\n  layer digests are unchanged, but the manifest is different text, so its digest changes. Every\n\
+        \  reference pinned to `@sha256:c2fcb179…` would no longer match the copy.\n- `--preserve-digests` refuses any conversion\
+        \ that would change a digest; here it stored the original\n  Docker manifest inside the OCI layout. Add `--all` (or\
+        \ `--multi-arch all`) when the index itself must\n  survive: by default Skopeo copies only the image for your platform.\n\
+        \nMirroring has the same rule: if the digest changes on the way, every digest-pinned reference breaks.\nLater in the\
+        \ course, [Images on the platform](/lesson/ct.openshift-images) shows how a cluster is told where\nits mirrors are.\n"
+    - id: choosing-a-tool
+      title: Choosing the right tool
+      depth: true
+      body: '| You want to… | Use | Why |
+
+        |---|---|---|
+
+        | know what a tag points to now | `skopeo inspect --format ''{{.Digest}}''` | no download, works for any platform
+        |
+
+        | see which platforms exist | `skopeo inspect --raw` on the tag | the index lists them |
+
+        | read user, cmd, env before deploying | `skopeo inspect --config` | the config blob only, a few kilobytes |
+
+        | list releases | `skopeo list-tags` | filter out `.sig`, `.att`, `.sbom`, `-source` |
+
+        | copy registry to registry, or to disk | `skopeo copy` (`--all`, `--preserve-digests`) | no local store, no daemon
+        |
+
+        | run, build, debug | Podman | needs the layers locally |
+
+        | mirror images to another registry | `skopeo copy` (`--all`, `--preserve-digests`) for each image | the same digest
+        survives only with those options; clusters get their own mirroring tools later in the course ([Images on the platform](/lesson/ct.openshift-images))
+        |
+
+        '
+    - id: what-goes-wrong
+      title: What goes wrong, and how to see it
+      depth: true
+      body: '| Symptom | Evidence | Cause | Fix |
+
+        |---|---|---|---|
+
+        | `Can not copy signatures … not supported` | the destination transport | the image is signed and the destination
+        cannot store signatures | `--remove-signatures` if you accept that, or a transport that keeps them |
+
+        | digest pins break after a copy | compare `skopeo inspect --format ''{{.Digest}}''` on both sides | the manifest
+        was converted (Docker → OCI) | copy again with `--preserve-digests` (and `--all` for indexes) |
+
+        | `short-name resolution enforced but cannot prompt without a TTY` | the reference has no registry | enforcing mode
+        in a script | use the fully qualified name |
+
+        | `manifest unknown` | `skopeo list-tags` on the repository | the tag does not exist (yet) | correct the tag |
+
+        | `unauthorized` or `requested access to the resource is denied` | `podman login --get-login <registry/namespace>`
+        | no credential for that key, or a wrong repository path | log in to the right key, check the path |
+
+        | `x509: certificate signed by unknown authority` | the registry host name | a private CA | add the CA under `/etc/containers/certs.d/<host[:port]>/`
+        |
+
+        | `exec format error` when the container starts | `skopeo inspect --raw` lists the platforms | no image for your architecture
+        | build or select the right platform (`--platform`) |
+
+        '
+    - id: common-mistakes
+      title: Common mistakes
+      depth: true
+      body: "- **Comparing an index digest with a manifest digest.** `skopeo inspect` reports the index for a\n  multi-arch\
+        \ tag; `oc image info` and the cluster record the per-platform manifest. Compare like with like.\n- **Copying without\
+        \ `--all` and expecting a multi-arch mirror.** The default copies only your platform.\n- **Reading `list-tags` as\
+        \ a list of releases.** Signature, attestation, SBOM and source tags are mixed in.\n- **Assuming Skopeo resolves short\
+        \ names like Podman.** It does not; it assumes Docker Hub.\n- **Leaving credentials in shell history.** Use `--password-stdin`\
+        \ or a credential helper.\n- **Logging in once and expecting it to last.** The default auth file lives under `/run/user/`,\
+        \ which is\n  emptied at reboot.\n"
+  review:
+    - q: "What is an image index (manifest list)?"
+      a: "A document listing one manifest per architecture; a multi-architecture tag points to it."
+    - q: "Why can `skopeo copy` change an image's digest, and how do you prevent it?"
+      a: "It may convert the manifest format; `--preserve-digests` keeps it unchanged (or fails when that is impossible)."
+    - q: "How does Podman resolve a short name like `ubi9/ubi-minimal`?"
+      a: "Through registries.conf: aliases first, then the search list, asking (or refusing) when ambiguous in enforcing mode."
+    - q: "Where are registry logins stored?"
+      a: "In an auth file, by default `$XDG_RUNTIME_DIR/containers/auth.json`, base64-encoded, not encrypted."
+  commands:
+    - cmd: "skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal:latest | jq '{mediaType, manifests: [.manifests[] | {arch: .platform.architecture, digest}]}'"
+      meaning: "the raw document behind the tag: a manifest list (Docker's name for an OCI index) with one manifest per platform"
+    - cmd: "skopeo inspect --format '{{.Digest}} {{.Architecture}} {{.Layers}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest; skopeo --override-arch arm64 inspect --format '{{.Digest}} {{.Architecture}} {{.Layers}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest"
+      expect: any
+      meaning: "both cases, one after the other"
+    - cmd: "AMD64=$(skopeo inspect --raw docker://registry.access.redhat.com/ubi9/ubi-minimal:latest | jq -r '.manifests[] | select(.platform.architecture == \"amd64\") | .digest') && skopeo inspect --raw \"docker://registry.access.redhat.com/ubi9/ubi-minimal@$AMD64\" | jq '{mediaType, config: .config.digest, layers: [.layers[] | {size, digest}]}'"
+      meaning: "follow the amd64 entry by digest: the per-platform manifest names one config blob and one compressed layer"
+    - cmd: "skopeo list-tags docker://registry.access.redhat.com/ubi9/ubi-minimal | jq -r '.Tags[]' > tags.txt && echo \"tags: $(wc -l < tags.txt)\" && echo \"signature, attestation and SBOM tags: $(grep -c -E '\\.(sig|att|sbom)$' tags.txt)\" && echo \"source image tags: $(grep -c -- '-source$' tags.txt)\""
+      meaning: "every tag of the repository, and how many of them are not runnable images"
+    - cmd: "for t in latest 9.8 $(grep -E '^9\\.8-[0-9]+$' tags.txt | sort -V | tail -1); do echo \"$t -> $(skopeo inspect --format '{{.Digest}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:$t)\"; done"
+      meaning: "two floating tags and the newest build tag point to the same digest today"
+    - cmd: "skopeo copy -q docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci:latest"
+      expect: fail
+      meaning: "refused: the image is signed and an OCI layout cannot store the signatures"
+    - cmd: "skopeo copy -q --remove-signatures docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci:latest && jq -r '.manifests[0] | \"\\(.mediaType) \\(.digest)\"' ubi-oci/index.json"
+      meaning: "copied without signatures; the manifest was converted to OCI, so its digest is new"
+    - cmd: "skopeo copy -q --remove-signatures --preserve-digests docker://registry.access.redhat.com/ubi9/ubi-minimal:latest oci:ubi-oci-exact:latest && jq -r '.manifests[0] | \"\\(.mediaType) \\(.digest)\"' ubi-oci-exact/index.json"
+      meaning: "with --preserve-digests the original Docker manifest is kept, with the registry's amd64 digest"
+    - cmd: "grep -E '^(unqualified-search-registries|short-name-mode)' /etc/containers/registries.conf && grep -H '\"ubi9/ubi-minimal\"' /etc/containers/registries.conf.d/*.conf"
+      meaning: "the search registries, the enforcing mode, and two alias files: the later one (001) overrides the earlier one"
+    - cmd: "podman pull academy-no-such-image; podman pull ubi9/ubi-minimal 2>&1 | head -1"
+      expect: any
+      meaning: "both cases, one after the other"
+    - cmd: "skopeo inspect docker://ubi9/ubi-minimal"
+      expect: fail
+      meaning: "Skopeo does not use aliases: the short name is read as docker.io/ubi9/ubi-minimal, which does not exist"
+    - cmd: "podman login --authfile ./auth.json --get-login quay.io/academy-demo/app; podman login --authfile ./auth.json --get-login quay.io"
+      expect: any
+      meaning: "both cases, one after the other"
+    - cmd: "podman logout --authfile ./auth.json quay.io/academy-demo && cat auth.json"
+      meaning: "logout removes the entry from that file"
+    - cmd: "rm -rf ubi-oci ubi-oci-exact tags.txt auth.json && echo cleaned"
+      meaning: "clean up (not shown in the lesson)"
+  files:
+    auth.json: |
+      {"auths": {"quay.io/academy-demo": {"auth": "YWNhZGVteTpub3QtYS1zZWNyZXQ="}}}
+  references:
+    - {title: "OCI Image Specification: image index", url: "https://github.com/opencontainers/image-spec/blob/main/image-index.md"}
+    - {title: "OCI Image Specification: image manifest", url: "https://github.com/opencontainers/image-spec/blob/main/manifest.md"}
+    - {title: "Skopeo: skopeo-copy(1) (--preserve-digests)", url: "https://github.com/containers/skopeo/blob/main/docs/skopeo-copy.1.md"}
+    - {title: "containers-registries.conf(5): short names", url: "https://github.com/containers/image/blob/main/docs/containers-registries.conf.5.md"}
+    - {title: "containers-auth.json(5)", url: "https://github.com/containers/image/blob/main/docs/containers-auth.json.5.md"}

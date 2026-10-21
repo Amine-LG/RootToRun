@@ -1,0 +1,2242 @@
+# Network security and exposure, written as teaching flows. The cluster steps were recorded on OpenShift Local by
+# the cluster administrator and the ordinary user developer; documented examples say so where they appear.
+- id: d.networkpolicy-ovn
+  title: NetworkPolicies and OVN-Kubernetes
+  module: b4-network-security
+  diagram: networkpolicy
+  mode: REAL_LAB
+  minutes: 45
+  level: 2
+  supports: "OpenShift 4.21 default OVN-Kubernetes network, networking.k8s.io/v1 NetworkPolicy, and policy.networking.k8s.io/v1alpha1 AdminNetworkPolicy. Every step was run on OpenShift Local 4.21: the ordinary user developer wrote the policies and tested every connection; the cluster administrator (kubeadmin) created the two projects, labelled a namespace and applied one AdminNetworkPolicy, all removed afterwards (experiment X-NET-03)."
+  concepts:
+    - net.policy
+    - net.ovn
+    - sec.segmentation
+  prerequisites:
+    - d.services-dns
+  record_on: cluster-admin
+  objective: |
+    Write and test NetworkPolicies: default deny for ingress and egress, allowing DNS and specific callers by pod and
+    namespace labels, and the OpenShift rule for the router; then see an administrator's AdminNetworkPolicy override
+    a project's own allow rule.
+  files:
+    shop.yaml: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: web-content
+      data:
+        index.html: |
+          hello from lab-shop
+        healthz: ok
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+        labels:
+          app: web
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+            - name: httpd
+              image: registry.access.redhat.com/ubi9/httpd-24:latest
+              ports:
+              - containerPort: 8080
+              readinessProbe:
+                httpGet: {path: /healthz, port: 8080}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+              - name: content
+                mountPath: /var/www/html
+            volumes:
+            - name: content
+              configMap:
+                name: web-content
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+      spec:
+        selector:
+          app: web
+        ports:
+        - name: http
+          port: 8080
+          targetPort: 8080
+      ---
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: web
+      spec:
+        to:
+          kind: Service
+          name: web
+        port:
+          targetPort: http
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: client
+        labels:
+          app: client
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: client
+        template:
+          metadata:
+            labels:
+              app: client
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: curl
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["sleep", "infinity"]
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: stranger
+        labels:
+          app: stranger
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: stranger
+        template:
+          metadata:
+            labels:
+              app: stranger
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: curl
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["sleep", "infinity"]
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    reports.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: reports
+        labels:
+          app: reports
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: reports
+        template:
+          metadata:
+            labels:
+              app: reports
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: curl
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["sleep", "infinity"]
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    reach.sh: |
+      # reach.sh: which callers get an answer from web? curl gives up after 3 seconds and then prints 000.
+      for caller in lab-shop/client lab-shop/stranger lab-reports/reports; do
+        ns=${caller%/*}; app=${caller#*/}
+        code=$(oc exec deploy/$app -n $ns -- curl -s -m 3 -o /dev/null -w '%{http_code}' http://web.lab-shop.svc:8080/ 2>/dev/null)
+        echo "$caller -> web: $code"
+      done
+    deny-ingress.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: default-deny-ingress
+      spec:
+        podSelector: {}
+        policyTypes: [Ingress]
+    allow-client.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-client
+      spec:
+        podSelector:
+          matchLabels: {app: web}
+        policyTypes: [Ingress]
+        ingress:
+        - from:
+          - podSelector:
+              matchLabels: {app: client}
+          ports:
+          - {protocol: TCP, port: 8080}
+    allow-reports.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-reports
+      spec:
+        podSelector:
+          matchLabels: {app: web}
+        policyTypes: [Ingress]
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels: {team: reports}
+            podSelector:
+              matchLabels: {app: reports}
+          ports:
+          - {protocol: TCP, port: 8080}
+    allow-router.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-router
+      spec:
+        podSelector:
+          matchLabels: {app: web}
+        policyTypes: [Ingress]
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                policy-group.network.openshift.io/ingress: ""
+          ports:
+          - {protocol: TCP, port: 8080}
+    deny-egress.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: default-deny-egress
+      spec:
+        podSelector: {}
+        policyTypes: [Egress]
+    allow-dns.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-dns
+      spec:
+        podSelector: {}
+        policyTypes: [Egress]
+        egress:
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: openshift-dns
+          ports:
+          - {protocol: UDP, port: 5353}
+          - {protocol: TCP, port: 5353}
+    allow-client-egress.yaml: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-client-egress
+      spec:
+        podSelector:
+          matchLabels: {app: client}
+        policyTypes: [Egress]
+        egress:
+        - to:
+          - podSelector:
+              matchLabels: {app: web}
+          ports:
+          - {protocol: TCP, port: 8080}
+    academy-deny-reports.yaml: |
+      apiVersion: policy.networking.k8s.io/v1alpha1
+      kind: AdminNetworkPolicy
+      metadata:
+        name: academy-deny-reports
+      spec:
+        priority: 40
+        subject:
+          namespaces:
+            matchLabels:
+              kubernetes.io/metadata.name: lab-shop
+        ingress:
+        - name: deny-from-lab-reports
+          action: Deny
+          from:
+          - namespaces:
+              matchLabels:
+                kubernetes.io/metadata.name: lab-reports
+  flow:
+    - kind: teach
+      id: situation
+      title: Security hardening becomes a timeout
+      body: |
+        The web application worked until a project added network isolation. Its pod is ready, but the reporting
+        client now waits until its request times out. You need to permit the intended caller while keeping
+        unrelated workloads out.
+
+        A **NetworkPolicy** selects pods and describes permitted connections. OVN-Kubernetes enforces those rules on
+        OpenShift's default pod network. Everything below was done on a lab cluster: the administrator created two
+        projects, `lab-shop` and `lab-reports`, with the ordinary user `developer` as their administrator, and
+        developer wrote every policy and tested every connection. The prompt in front of each command names who ran
+        it.
+    - kind: teach
+      id: isolation
+      title: Isolation belongs to a pod and a direction
+      body: |
+        **Ingress** means incoming connections to a pod; **egress** means outgoing connections from it. A pod that
+        no NetworkPolicy selects for a direction accepts all traffic in that direction. The first policy that selects
+        it for ingress turns ingress into an allow list. Further policies add allowed traffic; they never subtract
+        it, and their order does not matter.
+
+        The same applies independently to egress. For a pod-to-pod connection, both the caller's egress and the
+        destination's ingress must permit it. Replies to an allowed connection are allowed automatically.
+    - kind: show
+      id: projects
+      run: "oc adm new-project lab-shop --admin=developer && oc adm new-project lab-reports --admin=developer"
+      notice: "Two projects, each with developer as its administrator."
+    - kind: show
+      id: deploy
+      body: "In `lab-shop`: `web` (a small web server behind a Service and a Route) and two pods with `curl`, `client` and `stranger`. In `lab-reports`: one more `curl` pod, `reports`."
+      run: "oc apply -f shop.yaml -n lab-shop && oc apply -f reports.yaml -n lab-reports && oc wait --for=condition=Available deployment --all -n lab-shop --timeout=180s && oc wait --for=condition=Available deployment --all -n lab-reports --timeout=180s"
+      notice: "Every object is created and all four Deployments are available."
+    - kind: ask
+      id: who-can-connect
+      prompt: No NetworkPolicy exists in either project yet. Which pods can open a connection to web?
+      choices:
+      - text: Every pod, in both projects
+        why: A pod that no NetworkPolicy selects accepts every connection. A project groups objects and permissions; on its own it is not a network boundary.
+      - text: Only the pods in lab-shop
+        why: Projects do not filter traffic. Until a policy selects web, a pod in lab-reports reaches it like any other.
+      - text: Only pods whose labels a policy names
+        why: Labels matter once a policy selects web. With no policy, nothing is checked at all.
+      answer: 0
+    - kind: show
+      id: labels
+      body: "Policies select pods by label, so read the labels first:"
+      run: "oc get pods -n lab-shop --show-labels"
+      notice: "`app=web`, `app=client` and `app=stranger`, plus the `pod-template-hash` label every Deployment adds."
+    - kind: show
+      id: open-test
+      body: "A connection test runs `curl` inside a caller pod. `-m 3` gives up after three seconds:"
+      run: "oc exec deploy/stranger -n lab-shop -- curl -s -m 3 http://web:8080/"
+      notice: "`hello from lab-shop`: with no policy, any pod may connect."
+    - kind: show
+      id: reach-script
+      code: |
+        # reach.sh: which callers get an answer from web? curl gives up after 3 seconds and then prints 000.
+        for caller in lab-shop/client lab-shop/stranger lab-reports/reports; do
+          ns=${caller%/*}; app=${caller#*/}
+          code=$(oc exec deploy/$app -n $ns -- curl -s -m 3 -o /dev/null -w '%{http_code}' http://web.lab-shop.svc:8080/ 2>/dev/null)
+          echo "$caller -> web: $code"
+        done
+      caption: "reach.sh"
+      notice: "Three callers, one line each: the same `oc exec … curl -s -m 3` test, printing only the HTTP status. `000` means no HTTP answer at all."
+    - kind: show
+      id: reach-open
+      run: "sh reach.sh"
+      notice: "`200` for all three, including `reports` in the other project."
+    - kind: show
+      id: route-open
+      body: "And through the Route, from the workstation, via the router:"
+      run: "curl -s -m 10 -o /dev/null -w '%{http_code}\\n' http://web-lab-shop.apps-crc.testing/"
+      notice: "`200`."
+    - kind: teach
+      id: deny-ingress-teach
+      title: Default deny for ingress
+      body: |
+        An empty top-level `podSelector` selects every pod in the namespace. With `policyTypes: [Ingress]` and no
+        rules, it isolates every pod for ingress and allows nothing: a **default deny**.
+    - kind: show
+      id: deny-ingress-file
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny-ingress
+        spec:
+          podSelector: {}
+          policyTypes: [Ingress]
+      caption: "deny-ingress.yaml"
+    - kind: try
+      id: try-deny-ingress
+      body: "As developer, apply `deny-ingress.yaml` to the project `lab-shop`."
+      accept: ["oc apply -f deny-ingress.yaml -n lab-shop", "oc apply -f deny-ingress.yaml --namespace=lab-shop", "oc apply -f deny-ingress.yaml --namespace lab-shop", "oc apply -n lab-shop -f deny-ingress.yaml", "oc -n lab-shop apply -f deny-ingress.yaml", "oc create -f deny-ingress.yaml -n lab-shop", "oc apply --filename=deny-ingress.yaml -n lab-shop"]
+      hints:
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "The file names no namespace. Without `-n lab-shop`, the policy lands in your current project."
+        - match: "lab-reports"
+          say: "The web server to protect is in `lab-shop`."
+      hint: "`oc apply -f` with the file, and `-n lab-shop`."
+      run: "oc apply -f deny-ingress.yaml -n lab-shop"
+      then: "`networkpolicy.networking.k8s.io/default-deny-ingress created`."
+    - kind: ask
+      id: guess-deny
+      guess: true
+      prompt: "`client` runs the same curl to web again. What does it get?"
+      choices:
+        - text: "A quick 'connection refused'"
+          why: "A refusal is an answer from the destination. OVN-Kubernetes drops the packets instead, so nothing answers."
+        - text: "No answer until curl gives up"
+          why: "Dropped packets look like a silent network. The next step shows curl's exit status for that."
+        - text: "The page, because client is in the same project"
+          why: "Being in the same project grants nothing once web is isolated for ingress."
+      answer: 1
+    - kind: show
+      id: client-denied
+      run: "oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/"
+      notice: "No output, then `command terminated with exit code 28`: curl's code for a timeout. A timeout like this is the usual sign of a dropped connection; it does not say which policy dropped it."
+    - kind: show
+      id: reach-denied
+      run: "sh reach.sh"
+      notice: "`000` for all three callers."
+    - kind: show
+      id: route-denied
+      body: "And the Route?"
+      run: "curl -s -m 10 -o /dev/null -w '%{http_code}\\n' http://web-lab-shop.apps-crc.testing/"
+      notice: "Still `200`, although every pod in `lab-shop` is isolated for ingress."
+    - kind: teach
+      id: router
+      title: Why the Route still works here
+      body: |
+        The default router on this cluster runs on the node's own network (**host network**), and traffic that
+        comes from a pod's own node is not blocked by NetworkPolicy. OpenShift Local has one node, so the router is
+        always on the same node as `web`. On a cluster with several nodes, router traffic from another node is
+        blocked by the same default deny. The next two commands show the evidence.
+    - kind: show
+      id: router-node
+      run: "oc get pods -n openshift-ingress -o custom-columns=NAME:.metadata.name,HOSTNETWORK:.spec.hostNetwork,NODE:.spec.nodeName"
+      notice: "`router-default-…` has `HOSTNETWORK` `true` and runs on node `crc`. (`routes-controller` belongs to OpenShift Local.)"
+    - kind: show
+      id: web-node
+      run: "oc get pods -l app=web -n lab-shop -o wide"
+      notice: "`web` runs on `crc` too. A Route test that passes on a one-node cluster therefore proves nothing about the router rule."
+    - kind: show
+      id: allow-client
+      title: Allow one caller
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-client
+        spec:
+          podSelector:
+            matchLabels: {app: web}
+          policyTypes: [Ingress]
+          ingress:
+          - from:
+            - podSelector:
+                matchLabels: {app: client}
+            ports:
+            - {protocol: TCP, port: 8080}
+      caption: "allow-client.yaml"
+      notice: |
+        The top selector chooses the pods this policy protects: web. The `from` selector allows client pods in the
+        same namespace, on the web pods' TCP port 8080.
+    - kind: ask
+      id: first-policy
+      prompt: "With `default-deny-ingress` and `allow-client` in `lab-shop`, which callers will reach web?"
+      choices:
+        - text: "client only"
+          why: "Policies add up: the default deny allows nothing, allow-client allows client pods. stranger and reports match no allow rule."
+        - text: "client and stranger, both in lab-shop"
+          why: "A standalone podSelector matches labels, not the project as a whole. stranger has app=stranger."
+        - text: "Nobody: the default deny wins"
+          why: "There is no winning policy. Each policy adds what it allows, and nothing subtracts."
+      answer: 0
+    - kind: show
+      id: apply-allow-client
+      run: "oc apply -f allow-client.yaml -n lab-shop && sh reach.sh"
+      notice: "`client` gets `200`; `stranger` and `reports` still get `000`."
+    - kind: teach
+      id: namespace-and-pod
+      title: One peer entry means AND
+      body: |
+        A `podSelector` alone in `from` or `to` matches pods in the policy's own namespace. To allow callers in
+        another namespace, select that namespace too.
+
+        Within one peer list item, `namespaceSelector` and `podSelector` mean **AND**: those pods in those
+        namespaces. Put them in separate list items and they mean **OR**: either match is enough.
+    - kind: show
+      id: combined-peer
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-reports
+        spec:
+          podSelector:
+            matchLabels: {app: web}
+          policyTypes: [Ingress]
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels: {team: reports}
+              podSelector:
+                matchLabels: {app: reports}
+            ports:
+            - {protocol: TCP, port: 8080}
+      caption: "allow-reports.yaml"
+      notice: "There is one dash under `from`: the caller must be `app=reports` AND belong to a namespace labelled `team=reports`."
+    - kind: ask
+      id: extra-dash
+      prompt: A dash is added before podSelector. Which callers now match?
+      evidence: |
+        from:
+        - namespaceSelector:
+            matchLabels: {team: reports}
+        - podSelector:
+            matchLabels: {app: reports}
+      choices:
+        - text: Only reports pods in namespaces labelled team=reports
+          why: That requires both selectors in one list item.
+        - text: Reports pods in every namespace of the cluster
+          why: A podSelector alone does not search every namespace.
+        - text: Any team=reports namespace pod, or lab-shop reports pods
+          why: The two list items are alternatives. A standalone podSelector is local to the policy namespace, lab-shop.
+      answer: 2
+    - kind: show
+      id: apply-allow-reports
+      run: "oc apply -f allow-reports.yaml -n lab-shop && sh reach.sh"
+      notice: "The policy is created, yet `reports` still gets `000`."
+    - kind: ask
+      id: why-reports-blocked
+      prompt: "`allow-reports` exists and the reports pod has `app=reports`. Why is it still blocked?"
+      choices:
+        - text: "Policies take minutes to apply"
+          why: "OVN-Kubernetes applied the earlier policies within the same second. Look at what the selector needs."
+        - text: "The namespace `lab-reports` has no label `team=reports`"
+          why: "The namespaceSelector matches namespace labels, and nobody has set that one yet. A new project only has labels such as `kubernetes.io/metadata.name`."
+        - text: "Cross-namespace traffic needs an egress rule in lab-shop"
+          why: "The caller's egress is in lab-reports, which has no policy; lab-shop only needs the ingress rule."
+      answer: 1
+    - kind: show
+      id: developer-label
+      body: "developer administers `lab-reports`. Can they label it?"
+      run: "oc label namespace lab-reports team=reports"
+      notice: "`Forbidden`: namespaces are cluster-scoped objects, and the project's `admin` role does not allow changing them. A team cannot give its own namespace the label that another team's policy trusts."
+    - kind: show
+      id: admin-label
+      body: "The cluster administrator sets it:"
+      run: "oc label namespace lab-reports team=reports"
+      notice: "`namespace/lab-reports labeled`."
+    - kind: show
+      id: reach-reports
+      run: "sh reach.sh"
+      notice: "`reports` now gets `200`: the namespace label was the missing piece. `stranger` is still out."
+    - kind: ask
+      id: why-policy-group
+      guess: true
+      prompt: Why does allow-router select the policy-group label instead of the namespace openshift-ingress by name?
+      choices:
+      - text: It also covers openshift-host-network, for host-network routers
+        why: "Both namespaces carry the label, so one rule can cover router traffic whatever the router's publishing strategy. For routers on the host network the entry also needs `podSelector: {}`: a namespaceSelector alone matches only the ordinary pods of those namespaces, which is why the documented allow-from-router policy has both."
+      - text: A namespaceSelector cannot match a namespace's name
+        why: 'It can: Kubernetes labels every namespace with kubernetes.io/metadata.name and its name. The label is chosen to cover every namespace that carries router traffic.'
+      - text: Router pods carry no labels to select
+        why: 'allow-router selects namespaces, not pods: a namespace label matches whatever runs there, including routers on the host network.'
+      answer: 0
+    - kind: teach
+      id: router-rule-teach
+      title: Allow platform callers deliberately
+      body: |
+        Router and monitoring connections are callers too. OpenShift labels the namespaces whose pods carry router
+        traffic with `policy-group.network.openshift.io/ingress: ""`, including `openshift-host-network` for routers
+        that run on the host network. A project allows its Routes by selecting that label. Use the label as a
+        selector; do not put it on application namespaces. One detail matters for host-network routers: a
+        `namespaceSelector` alone matches only ordinary pods, so the documented rule adds `podSelector: {}` to the
+        same entry to match the router pods that use the node's network.
+    - kind: show
+      id: ingress-namespaces
+      run: "oc get namespaces -l policy-group.network.openshift.io/ingress"
+      notice: "`openshift-host-network` and `openshift-ingress`: the two namespaces that the router rule will match."
+    - kind: show
+      id: router-rule
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-router
+        spec:
+          podSelector:
+            matchLabels: {app: web}
+          policyTypes: [Ingress]
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  policy-group.network.openshift.io/ingress: ""
+            ports:
+            - {protocol: TCP, port: 8080}
+      caption: "allow-router.yaml"
+    - kind: show
+      id: apply-allow-router
+      run: "oc apply -f allow-router.yaml -n lab-shop"
+      notice: "`networkpolicy.networking.k8s.io/allow-router created`. On this cluster the Route already worked: the router runs on the pod's own node, whose traffic is never blocked. On a cluster with several nodes this rule keeps Routes working when the routers are ordinary pods in `openshift-ingress`; for routers on the host network of other nodes, use the documented form below."
+    - kind: show
+      id: router-rule-host-network
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-router
+        spec:
+          podSelector:
+            matchLabels: {app: web}
+          policyTypes: [Ingress]
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  policy-group.network.openshift.io/ingress: ""
+              podSelector: {}
+            ports:
+            - {protocol: TCP, port: 8080}
+      caption: "allow-router.yaml, also matching host-network routers (example)"
+      origin: example
+      highlight: ["podSelector: {}"]
+      notice: |
+        The documented allow-from-router policy: `podSelector: {}` sits in the same entry as the `namespaceSelector`
+        (no dash before it), so the entry means pods of any kind in those namespaces, host-network router pods
+        included. Without it, a router on the host network of another node is blocked. Not run here: this cluster has
+        one node.
+    - kind: ask
+      id: egress-scope
+      guess: true
+      prompt: default-deny-egress will select every pod in lab-shop. Which of client's connections will it block?
+      choices:
+      - text: Every new outgoing connection, DNS lookups included
+        why: Egress isolation covers every connection the pod opens, inside the cluster or outside it, until some policy allows it.
+      - text: Only connections that leave the cluster
+        why: 'Egress here means everything the pod opens, inside the cluster as well: other pods, Services and DNS.'
+      - text: Only connections to other projects
+        why: 'Isolation does not depend on the destination''s project: a call to web in the same project is blocked as well.'
+      answer: 0
+    - kind: teach
+      id: deny-egress
+      title: Default deny needs explicit dependencies
+      body: |
+        The same empty `podSelector` with `policyTypes: [Egress]` isolates every pod's outgoing connections. Before
+        applying it, list what the pods need: DNS, application destinations and the API server if a workload uses
+        it. DNS is an outbound connection too.
+    - kind: show
+      id: deny-egress-apply
+      run: "oc apply -f deny-egress.yaml -n lab-shop"
+      notice: "`default-deny-egress` (`podSelector: {}`, `policyTypes: [Egress]`, no rules) is created."
+    - kind: show
+      id: dns-blocked
+      run: "oc exec deploy/client -n lab-shop -- getent hosts web"
+      notice: "Nothing printed, and `command terminated with exit code 2`: getent found no address for `web`. The DNS query itself is outgoing traffic, and it is blocked."
+    - kind: show
+      id: reach-egress-denied
+      run: "sh reach.sh"
+      notice: |
+        `client` now gets `000`: its own egress is blocked. `reports` still gets `200`: its pod is in `lab-reports`,
+        which has no egress policy, and the reply from web needs no rule.
+    - kind: ask
+      id: two-ends
+      prompt: Web ingress permits the client, but the client is egress-isolated with only DNS allowed. What happens?
+      choices:
+        - text: The application connection is blocked
+          why: Both directions must allow the new connection; DNS access alone does not permit traffic to web.
+        - text: The connection succeeds after name resolution
+          why: Successful resolution establishes only that DNS traffic is allowed.
+        - text: The destination ingress rule overrides egress
+          why: Ingress and egress are independent checks, not competing rules with priorities.
+      answer: 0
+    - kind: show
+      id: deny-and-dns
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-dns
+        spec:
+          podSelector: {}
+          policyTypes: [Egress]
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: openshift-dns
+            ports:
+            - {protocol: UDP, port: 5353}
+            - {protocol: TCP, port: 5353}
+      caption: "allow-dns.yaml"
+      notice: |
+        On OpenShift's default OVN-Kubernetes network the rule is checked against the DNS pods behind the Service,
+        so it names their port 5353, not the Service's port 53. `kubernetes.io/metadata.name` is a label Kubernetes
+        puts on every namespace, so it selects a namespace by name.
+    - kind: show
+      id: apply-dns
+      run: "oc apply -f allow-dns.yaml -n lab-shop && oc exec deploy/client -n lab-shop -- getent hosts web"
+      notice: "The lookup works again: `web.lab-shop.svc.cluster.local` and the Service's cluster IP."
+    - kind: show
+      id: dns-only
+      run: "oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/"
+      notice: "Exit code 28 again: the name resolves, but the connection to web is still blocked by client's own egress isolation."
+    - kind: ask
+      id: dns-target
+      prompt: Pods in this egress-isolated namespace cannot resolve names, although the rule below exists. Which edit fixes it?
+      evidence: |
+        egress:
+        - to:
+          - namespaceSelector:
+              matchLabels: {kubernetes.io/metadata.name: openshift-dns}
+          ports:
+          - {protocol: UDP, port: 53}
+          - {protocol: TCP, port: 53}
+      choices:
+        - text: Change both ports to 5353
+          why: The Service accepts 53, but the policy is checked against the DNS pods, which listen on 5353 in this OpenShift setup.
+        - text: Put the rule in a second NetworkPolicy
+          why: NetworkPolicies add up without any order, so moving the rule to another policy changes nothing.
+        - text: Add an ingress rule for the replies
+          why: Replies to a permitted connection are allowed automatically and need no ingress rule.
+      answer: 0
+    - kind: show
+      id: egress-recorded
+      code: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-client-egress
+        spec:
+          podSelector:
+            matchLabels: {app: client}
+          policyTypes: [Egress]
+          egress:
+          - to:
+            - podSelector:
+                matchLabels: {app: web}
+            ports:
+            - {protocol: TCP, port: 8080}
+      caption: "allow-client-egress.yaml"
+    - kind: show
+      id: apply-client-egress
+      run: "oc apply -f allow-client-egress.yaml -n lab-shop && oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/"
+      notice: "`hello from lab-shop`: client's egress and web's ingress both allow the connection now."
+    - kind: teach
+      id: inspect-before-edit
+      title: Inspect endpoints, policy and labels
+      body: |
+        A timeout suggests dropped traffic, but it does not prove NetworkPolicy is responsible.
+        [Services and DNS](/lesson/d.services-dns) explained ready EndpointSlices: confirm the Service has a usable
+        destination before examining isolation.
+
+        Then list the policies, describe those selecting the destination, and compare their allowed peers with the
+        caller's actual pod and namespace labels. If the caller is egress-isolated, inspect its namespace too. Do not
+        remove every policy to make a test pass.
+    - kind: show
+      id: inspection-commands
+      run: "oc get networkpolicy -n lab-shop"
+      notice: "Seven policies. `POD-SELECTOR` shows which pods each one selects; `<none>` means all pods of the project."
+    - kind: try
+      id: inspect-reporting
+      body: Policy allow-reports exists in project lab-shop. Type the command that describes its allowed peers and ports.
+      accept:
+        - oc describe networkpolicy allow-reports -n lab-shop
+        - oc describe networkpolicy allow-reports --namespace=lab-shop
+        - oc describe networkpolicy allow-reports --namespace lab-shop
+        - oc describe networkpolicies allow-reports -n lab-shop
+        - oc describe netpol allow-reports -n lab-shop
+        - oc describe networkpolicy/allow-reports -n lab-shop
+        - oc describe netpol/allow-reports -n lab-shop
+        - oc -n lab-shop describe networkpolicy allow-reports
+        - oc -n lab-shop describe netpol allow-reports
+        - oc --namespace lab-shop describe networkpolicy allow-reports
+        - oc --namespace=lab-shop describe networkpolicy allow-reports
+      hints:
+        - match: ^oc get
+          say: A listing does not explain the interpreted peer rules; use describe for this task.
+        - match: lab-reports
+          say: The policy protects web, so it lives in lab-shop, not in the caller's project.
+        - match: " pod"
+          say: Describe the NetworkPolicy object, not a Pod.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n lab-shop the command looks in your current project, not in lab-shop, where allow-reports exists.
+      hint: Use describe with the NetworkPolicy name and project lab-shop.
+      run: "oc describe networkpolicy allow-reports -n lab-shop"
+      then: |
+        Under `Allowing ingress traffic`: `To Port: 8080/TCP`, and one `From:` with both `NamespaceSelector: team=reports`
+        and `PodSelector: app=reports`: the AND form. Then `Not affecting egress traffic`.
+    - kind: show
+      id: console-policy
+      body: "The web console draws a policy's rules as a table. A demo policy `web-from-same-project`, which lets any pod of its own project reach the pods labelled `app=web`:"
+      image:
+        src: networkpolicy.png
+        alt: "The details of the NetworkPolicy web-from-same-project, with an Ingress rules table: target pods app=web, from namespace console-demo, pod selector any pod; and an Egress rules section that is empty."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, in the demo project console-demo, 2026-10-20"
+      caption: "Networking > NetworkPolicies > web-from-same-project"
+      notice: "The console states the rule this lesson is built on, for incoming traffic: a pod accepts every connection until an ingress policy selects it, then only what the ingress policies selecting it allow, together. Outgoing traffic is isolated separately, by egress policies."
+    - kind: teach
+      id: admin-tier
+      title: An administrator's policy comes first
+      body: |
+        NetworkPolicies belong to the projects' administrators. A cluster administrator can set rules that no project
+        can override with an **AdminNetworkPolicy** (ANP), a cluster-scoped object. OVN-Kubernetes evaluates ANPs
+        first, lowest `priority` number first: `Allow` and `Deny` are final, `Pass` hands the decision to the
+        NetworkPolicies. A **BaselineAdminNetworkPolicy** applies last, only when nothing before it decided.
+    - kind: show
+      id: anp-file
+      code: |
+        apiVersion: policy.networking.k8s.io/v1alpha1
+        kind: AdminNetworkPolicy
+        metadata:
+          name: academy-deny-reports
+        spec:
+          priority: 40
+          subject:
+            namespaces:
+              matchLabels:
+                kubernetes.io/metadata.name: lab-shop
+          ingress:
+          - name: deny-from-lab-reports
+            action: Deny
+            from:
+            - namespaces:
+                matchLabels:
+                  kubernetes.io/metadata.name: lab-reports
+      caption: "academy-deny-reports.yaml"
+      notice: "Every pod in `lab-shop` (the subject) refuses connections from every pod in `lab-reports`. It selects the namespaces by name, so it touches nothing else on the cluster."
+    - kind: show
+      id: anp-apply
+      run: "oc apply -f academy-deny-reports.yaml"
+      notice: "`adminnetworkpolicy.policy.networking.k8s.io/academy-deny-reports created`."
+    - kind: ask
+      id: guess-anp
+      guess: true
+      prompt: "`allow-reports` still exists in lab-shop. What does `reports` get now?"
+      choices:
+        - text: "200: the project's allow rule still applies"
+          why: "The ANP is evaluated before any NetworkPolicy, and its Deny is final."
+        - text: "000: the administrator's Deny wins"
+          why: "A Deny in an ANP is final; the project's NetworkPolicies are never consulted for that traffic. The next step shows it."
+        - text: "It depends on which policy was created last"
+          why: "Neither NetworkPolicies nor ANPs depend on creation order."
+      answer: 1
+    - kind: show
+      id: reach-anp
+      run: "sh reach.sh"
+      notice: "`reports` gets `000` again, although `allow-reports` is unchanged. `client` still gets `200`: the ANP only concerns `lab-reports`."
+    - kind: show
+      id: developer-anp
+      body: "Can developer see what blocks the traffic?"
+      run: "oc get adminnetworkpolicies"
+      notice: "`Forbidden`: ANPs are cluster-scoped, and a project administrator cannot list them. When a project's own policies all look right and traffic is still dropped, ask the cluster administrators."
+    - kind: show
+      id: anp-delete
+      run: "oc delete adminnetworkpolicy academy-deny-reports"
+      notice: "The administrator removes the ANP."
+    - kind: show
+      id: reach-after-anp
+      run: "sh reach.sh"
+      notice: "`reports` gets `200` again: the project's own allow rule decides once more."
+    - kind: try
+      id: test-new-caller
+      body: In project billing, Deployment auditor has curl installed. Test http://ledger:8080/ from it, with a
+        three-second maximum and silent output.
+      accept:
+        - oc exec deploy/auditor -n billing -- curl -s -m 3 http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl -m 3 -s http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl --silent --max-time 3 http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl --max-time 3 --silent http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl -s --max-time 3 http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl -sm 3 http://ledger:8080/
+        - oc exec deploy/auditor -n billing -- curl -s -m 3 http://ledger:8080
+        - oc exec deploy/auditor --namespace=billing -- curl -s -m 3 http://ledger:8080/
+        - oc exec deploy/auditor --namespace billing -- curl -s -m 3 http://ledger:8080/
+        - oc exec deployment/auditor -n billing -- curl -s -m 3 http://ledger:8080/
+        - oc exec deployment/auditor -n billing -- curl --silent --max-time 3 http://ledger:8080/
+        - oc exec deployments/auditor -n billing -- curl -s -m 3 http://ledger:8080/
+        - oc -n billing exec deploy/auditor -- curl -s -m 3 http://ledger:8080/
+        - oc -n billing exec deploy/auditor -- curl --silent --max-time 3 http://ledger:8080/
+        - oc -n billing exec deployment/auditor -- curl -s -m 3 http://ledger:8080/
+        - oc --namespace billing exec deploy/auditor -- curl -s -m 3 http://ledger:8080/
+      hints:
+        - match: ^curl
+          say: A workstation test has a different source. Run curl inside the auditor workload with exec.
+        - match: ^oc logs
+          say: Logs show the program’s earlier output; they do not initiate this connection.
+        - match: stranger|client
+          say: The source under test is auditor in billing.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the command looks for the auditor Deployment in your current project, not in billing.
+      hint: Use exec on deployment/auditor in billing; pass curl after --, with -s and -m 3.
+      then: |
+        The request would originate from an auditor pod, exercising its DNS and application egress plus ledger ingress. Compare an expected success with a separate excluded caller; one successful request does not prove isolation.
+    - kind: reflect
+      id: explain-outage
+      prompt: Explain how you would restore reporting access without reopening every source.
+      model: |
+        Confirm ready endpoints and name resolution, then compare reporting's pod and namespace labels with the
+        destination's ingress rules and the source's egress rules. If a namespace label is missing, ask the cluster
+        administrator to set it rather than loosening the selector. Add only the flow that is needed and test from
+        reporting and from an excluded pod, keeping the default deny. If the project's policies all allow the flow,
+        ask whether an AdminNetworkPolicy denies it.
+    - kind: show
+      id: cleanup
+      run: "oc delete project lab-shop lab-reports"
+      notice: "Both projects go, and their policies with them."
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can isolate a project for ingress and egress, allow DNS, single callers and other namespaces by label,
+        recognise why a Route test passes on a one-node cluster, and test every change from allowed and excluded
+        callers. [Protect application traffic](/lab/ch.protect-traffic) grades the resulting connections;
+        [NetworkPolicy](/lab/lab.networkpolicy) guides the setup.
+
+        Next, [Certificates and non-HTTP traffic](/lesson/o2.tls-exposure) protects what permitted connections carry.
+  sections:
+    - id: policy-reference
+      title: Policy fields and baseline additions
+      depth: true
+      body: |
+        | Field or pattern | Meaning |
+        |---|---|
+        | spec.podSelector | protected pods in this policy's namespace; {} selects all |
+        | policyTypes | explicit Ingress and/or Egress isolation |
+        | ingress.from / egress.to | permitted peers; separate entries are alternatives |
+        | one namespaceSelector plus podSelector peer | pods matching both selectors |
+        | standalone podSelector peer | matching pods in the policy namespace |
+        | ports | allowed destination protocols and ports; omitted means all ports |
+        | ipBlock | CIDR peers, with optional except ranges |
+        | no policyTypes | Ingress is implied; Egress is also implied if egress rules exist |
+
+        To allow same-namespace traffic under default deny in both directions, add a separate policy with
+        podSelector {}, ingress from a podSelector {}, and egress to a podSelector {}.
+        The DNS rule does not supply those application permissions. Monitoring needs its own permitted scrape port,
+        from namespaces labelled `network.openshift.io/policy-group: monitoring`.
+
+        The 5353 rule describes OpenShift DNS pod traffic on OVN-Kubernetes. Do not generalise it to every
+        Kubernetes implementation: Service address translation and ipBlock evaluation can differ between network
+        implementations. For pod-selector rules use the actual destination pod port; inspect the Service targetPort.
+        NetworkPolicies work at IP/port/protocol level, not HTTP paths or TLS identities.
+    - id: network-triage
+      title: Timeouts and implementation limits
+      depth: true
+      body: |
+        | Symptom | Next evidence | Possible cause |
+        |---|---|---|
+        | timeout, ready EndpointSlices | source egress, destination ingress, actual peer labels | missing allowed flow, or another network/application fault |
+        | DNS failure after egress isolation | DNS namespace and pod ports | no matching DNS rule |
+        | Route fails across nodes only | router source and ingress policy | missing router policy masked by node-local exemption |
+        | unintended caller succeeds | peer list structure and broader policies | OR where AND was intended, or an additive allow elsewhere |
+        | every project policy allows the flow, still dropped | AdminNetworkPolicies (ask an administrator) | a cluster-wide Deny |
+
+        OpenShift's ingress policy-group label is placed on openshift-ingress and on openshift-host-network. A
+        host-network source on the destination's own node is exempt; traffic from other nodes still needs the
+        appropriate allowance, and to match host-network pods an entry needs `podSelector: {}` beside its
+        `namespaceSelector`. Do not assume all router traffic is exempt.
+
+        OVN-Kubernetes implements policies using ACLs and programs the node dataplane through OVN and Open vSwitch.
+        Namespace annotation `k8s.ovn.org/acl-logging` can request allow/deny logging severities;
+        administrators inspect `/var/log/ovn/acl-audit-log.log` in the node's OVN-Kubernetes pod.
+        [Timeouts after security hardening](/lab/inc.networkpolicy-block) practises evidence-led diagnosis.
+    - id: administrator-tiers
+      title: Administrator policy tiers and external destinations
+      depth: true
+      body: |
+        | Tier | Who and how it decides |
+        |---|---|
+        | AdminNetworkPolicy | cluster administrator; lower priority number first (0–99); Allow/Deny are final, Pass delegates to NetworkPolicy |
+        | NetworkPolicy | namespace allow lists; selected-direction isolation can deny implicitly |
+        | BaselineAdminNetworkPolicy | one object named default; Allow/Deny baseline when the preceding tiers delegate the decision |
+
+        Both administrator APIs use policy.networking.k8s.io/v1alpha1 in OpenShift 4.21.
+        BANP does not override an implicit deny from NetworkPolicy isolation. A namespace policy can override
+        the baseline but cannot override a final ANP Allow or Deny.
+
+        EgressFirewall in k8s.ovn.org/v1 controls external destinations with ordered Allow/Deny rules by CIDR
+        or DNS name. A project can have at most one, named default. It is separate from NetworkPolicy's additive
+        peer lists. Teams commonly establish baseline isolation through project provisioning and review changes
+        against a source/destination/port matrix.
+  review:
+    - q: When does a pod become isolated for ingress?
+      a: As soon as any NetworkPolicy with policyType Ingress selects it.
+    - q: How do you keep Routes working after a default-deny policy on OpenShift?
+      a: Allow ingress from namespaces with label policy-group.network.openshift.io/ingress, with podSelector {} in
+        the same entry so that host-network routers (in openshift-host-network) are matched too.
+    - q: In which order does OVN-Kubernetes evaluate AdminNetworkPolicy, NetworkPolicy and BaselineAdminNetworkPolicy?
+      a: ANP first (Allow/Deny final, Pass delegates), then NetworkPolicy, then BANP as the fallback default.
+    - q: What must you account for when default-denying egress, and how is OpenShift DNS allowed?
+      a: 'Permit required dependencies, including DNS lookups: to openshift-dns on UDP and TCP 5353 for the default
+        OVN-Kubernetes network. Application destinations need their own rules.'
+    - q: In a `from` list, what is the difference between one item with namespaceSelector and podSelector, and two
+        items?
+      a: 'One item: AND (those pods in those namespaces). Two items: OR (any pod in those namespaces, or those pods
+        in the policy''s namespace).'
+    - q: Who can set the namespace label that a namespaceSelector trusts?
+      a: A cluster administrator (or whoever may update Namespace objects); a project's admin role cannot label its own namespace.
+  labs:
+    - lab.networkpolicy
+    - ch.protect-traffic
+    - ch.production-ready
+    - inc.networkpolicy-block
+  limits: |
+    OpenShift Local has one node, and its default router runs on the host network of that node, so a Route keeps
+    working under a default deny: the router's traffic comes from the pod's own node. The router rule was applied,
+    but its effect can only be seen on a cluster with several nodes. A BaselineAdminNetworkPolicy and the `Pass` action
+    are explained, not run.
+
+    Recorded on OpenShift 4.21. Starting in 4.22 the operators that manage cluster DNS and Ingress install and maintain
+    default deny-all NetworkPolicies in their own namespaces: do not edit those policies, and do not run your own pods
+    in those namespaces, whose traffic they block. `oc get networkpolicies --all-namespaces` lists them (4.22 release
+    notes, "Network policy enhancement").
+  enterprise: |
+    Regulated organisations usually expect namespace isolation by default (deny all ingress, allow same
+    namespace, allow router, allow monitoring) created by the project template, egress control to known
+    destinations (EgressFirewall or an egress proxy), and AdminNetworkPolicy guardrails that tenants cannot
+    override. Policy changes go through review because a wrong policy is an outage that looks like an application
+    bug.
+  commands:
+    - {cmd: "oc adm new-project lab-shop --admin=developer && oc adm new-project lab-reports --admin=developer", as: admin, meaning: "two projects administered by developer"}
+    - {cmd: "oc apply -f shop.yaml -n lab-shop && oc apply -f reports.yaml -n lab-reports && oc wait --for=condition=Available deployment --all -n lab-shop --timeout=180s && oc wait --for=condition=Available deployment --all -n lab-reports --timeout=180s", timeout: 400, meaning: "web, client and stranger in lab-shop; reports in lab-reports"}
+    - {cmd: "oc get pods -n lab-shop --show-labels", meaning: "the labels that policies select"}
+    - {cmd: "oc exec deploy/stranger -n lab-shop -- curl -s -m 3 http://web:8080/", meaning: "no policy yet: stranger gets the page"}
+    - {cmd: "sh reach.sh", meaning: "three callers before any policy: all 200"}
+    - {cmd: "for i in $(seq 1 30); do oc get route web -n lab-shop -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5", timeout: 120, meaning: "wait until the router has admitted the Route and reloaded"}
+    - {cmd: "curl -s -m 10 -o /dev/null -w '%{http_code}\\n' http://web-lab-shop.apps-crc.testing/", meaning: "the Route before any policy"}
+    - {cmd: "oc apply -f deny-ingress.yaml -n lab-shop", meaning: "isolate every pod in lab-shop for ingress"}
+    - {cmd: "oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/", expect: fail, meaning: "exit code 28: a timeout"}
+    - {cmd: "sh reach.sh", meaning: "all three callers get 000"}
+    - {cmd: "curl -s -m 10 -o /dev/null -w '%{http_code}\\n' http://web-lab-shop.apps-crc.testing/", meaning: "the Route under default deny"}
+    - {cmd: "oc get pods -n openshift-ingress -o custom-columns=NAME:.metadata.name,HOSTNETWORK:.spec.hostNetwork,NODE:.spec.nodeName", as: admin, meaning: "the router runs on the host network of node crc"}
+    - {cmd: "oc get pods -l app=web -n lab-shop -o wide", meaning: "web runs on the same node"}
+    - {cmd: "oc apply -f allow-client.yaml -n lab-shop && sh reach.sh", meaning: "allow client only"}
+    - {cmd: "oc apply -f allow-reports.yaml -n lab-shop && sh reach.sh", meaning: "allow reports pods from team=reports namespaces: the label is missing"}
+    - {cmd: "oc label namespace lab-reports team=reports", expect: fail, meaning: "Forbidden: a project admin cannot label the namespace"}
+    - {cmd: "oc label namespace lab-reports team=reports", as: admin, meaning: "the administrator labels it"}
+    - {cmd: "sh reach.sh", meaning: "reports now gets 200"}
+    - {cmd: "oc get namespaces -l policy-group.network.openshift.io/ingress", as: admin, meaning: "the namespaces the router rule matches"}
+    - {cmd: "oc apply -f allow-router.yaml -n lab-shop", meaning: "the documented router rule"}
+    - {cmd: "oc apply -f deny-egress.yaml -n lab-shop", meaning: "isolate every pod in lab-shop for egress"}
+    - {cmd: "oc exec deploy/client -n lab-shop -- getent hosts web", expect: fail, meaning: "DNS is blocked too"}
+    - {cmd: "sh reach.sh", meaning: "client is blocked by its own egress isolation"}
+    - {cmd: "oc apply -f allow-dns.yaml -n lab-shop && oc exec deploy/client -n lab-shop -- getent hosts web", meaning: "allow DNS to the openshift-dns pods"}
+    - {cmd: "oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/", expect: fail, meaning: "the name resolves; the connection is still blocked"}
+    - {cmd: "oc apply -f allow-client-egress.yaml -n lab-shop && oc exec deploy/client -n lab-shop -- curl -s -m 3 http://web:8080/", meaning: "allow client's egress to web"}
+    - {cmd: "oc get networkpolicy -n lab-shop", meaning: "the seven policies"}
+    - {cmd: "oc describe networkpolicy allow-reports -n lab-shop", meaning: "the interpreted peer rule"}
+    - {cmd: "oc apply -f academy-deny-reports.yaml", as: admin, meaning: "an AdminNetworkPolicy that denies lab-reports into lab-shop"}
+    - {cmd: "sh reach.sh", meaning: "reports blocked again by the administrator's Deny"}
+    - {cmd: "oc get adminnetworkpolicies", expect: fail, meaning: "Forbidden for a project administrator"}
+    - {cmd: "oc delete adminnetworkpolicy academy-deny-reports", as: admin, meaning: "remove the ANP"}
+    - {cmd: "sh reach.sh", meaning: "the project's allow rule decides again"}
+    - {cmd: "oc delete project lab-shop lab-reports", as: admin, timeout: 300, meaning: "remove both projects"}
+  experiment:
+    id: X-NET-03
+    objective: "As developer, isolate a project for ingress and egress and allow DNS, one pod, one labelled namespace and the router; as the administrator, label the namespace a project admin cannot label and apply an AdminNetworkPolicy whose Deny overrides the project's allow rule; then remove everything and prove no AdminNetworkPolicy or test project remains."
+    changes:
+      - "AdminNetworkPolicy academy-deny-reports, cluster-scoped, selecting only the namespaces lab-shop and lab-reports by name (created, deleted)"
+      - "Projects lab-shop and lab-reports with RoleBindings for developer, Deployments, a Service, a Route and seven NetworkPolicies (created, deleted)"
+      - "Label team=reports on the namespace lab-reports (removed with the project)"
+    preflight:
+      - cmd: |-
+          found=$(oc get namespace lab-shop --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get namespace lab-reports --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get adminnetworkpolicy academy-deny-reports --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          found=$(oc get namespaces -l team=reports -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc wait co/network --for=condition=Available=True --timeout=30s && oc wait co/network --for=condition=Degraded=False --timeout=30s"}
+    snapshot:
+      - "oc get adminnetworkpolicies,baselineadminnetworkpolicies -o name"
+      - "oc get namespaces -l team=reports -o name"
+      - "oc get project lab-shop lab-reports -o name --ignore-not-found"
+    rollback:
+      - "oc delete adminnetworkpolicy academy-deny-reports --ignore-not-found"
+      - "oc delete project lab-shop lab-reports --ignore-not-found --wait=false"
+    settle:
+      - "oc wait --for=delete project/lab-shop project/lab-reports --timeout=300s"
+    verify:
+      - {cmd: "oc wait co/network --for=condition=Available=True --timeout=60s && oc wait co/network --for=condition=Degraded=False --timeout=60s"}
+  references:
+    - title: 'Kubernetes: Network policies'
+      url: https://kubernetes.io/docs/concepts/services-networking/network-policies/
+    - title: 'Kubernetes: Automatic namespace labelling'
+      url: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/#automatic-labelling
+    - title: 'OpenShift 4.21: Network policy'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy
+    - title: 'OpenShift 4.21: Admin network policy'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/admin-network-policy
+    - title: 'OpenShift 4.21: Network policy APIs and evaluation order'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy-apis
+    - title: 'OpenShift 4.21: Logging for network security (ACL audit logs)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/logging-network-security
+    - title: 'OpenShift 4.21: Egress firewall'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/egress-firewall
+    - title: 'OpenShift 4.21: DNS Operator'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/dns-operator
+- id: o2.tls-exposure
+  title: Certificates and non-HTTP traffic
+  subtitle: Service CA, CA bundles, Route certificates you bring, and SNI passthrough
+  module: b4-network-security
+  mode: REAL_LAB
+  minutes: 40
+  level: 3
+  supports: "OpenShift 4.21 service CA operator (serving certificates and CA bundle injection) and HAProxy Routes (edge, re-encrypt, passthrough). Every step was run on OpenShift Local 4.21 as the ordinary user developer, in a temporary project deleted afterwards. The lab CA and the Route certificates were generated with openssl for the recording, valid for two days, and their private keys were never printed or kept."
+  concepts:
+    - sec.certs
+    - net.routes
+    - net.services
+  prerequisites:
+    - d.routes-tls
+  record_on: cluster
+  objective: |
+    Secure traffic end to end: get an internal certificate from the service CA, verify it from a client with the
+    right CA bundle and name, serve your own CA's certificates on edge and re-encrypt Routes, terminate TLS in the pod
+    with a passthrough Route, and tell the router which CA to trust for a backend the service CA did not sign.
+  files:
+    web.yaml: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: web-content
+      data:
+        index.html: |
+          hello from web
+        healthz: ok
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+        annotations:
+          service.beta.openshift.io/serving-cert-secret-name: web-tls
+      spec:
+        selector:
+          app: web
+        ports:
+        - name: http
+          port: 8080
+          targetPort: 8080
+        - name: https
+          port: 8443
+          targetPort: 8443
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+        labels:
+          app: web
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: web
+        template:
+          metadata:
+            labels:
+              app: web
+          spec:
+            containers:
+            - name: httpd
+              image: registry.access.redhat.com/ubi9/httpd-24:latest
+              ports:
+              - containerPort: 8080
+              - containerPort: 8443
+              readinessProbe:
+                httpGet: {path: /healthz, port: 8080}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+              - {name: content, mountPath: /var/www/html}
+              # the service CA's certificate and key replace the image's self-signed ones
+              - {name: tls, mountPath: /etc/httpd/tls/localhost.crt, subPath: tls.crt}
+              - {name: tls, mountPath: /etc/httpd/tls/localhost.key, subPath: tls.key}
+            volumes:
+            - name: content
+              configMap:
+                name: web-content
+            - name: tls
+              secret:
+                secretName: web-tls
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: client
+        labels:
+          app: client
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: client
+        template:
+          metadata:
+            labels:
+              app: client
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: curl
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command: ["sleep", "infinity"]
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    public.yaml: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: public-content
+      data:
+        index.html: |
+          hello from public, TLS ends in the pod
+        healthz: ok
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: public
+      spec:
+        selector:
+          app: public
+        ports:
+        - name: https
+          port: 8443
+          targetPort: 8443
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: public
+        labels:
+          app: public
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: public
+        template:
+          metadata:
+            labels:
+              app: public
+          spec:
+            containers:
+            - name: httpd
+              image: registry.access.redhat.com/ubi9/httpd-24:latest
+              ports:
+              - containerPort: 8080
+              - containerPort: 8443
+              readinessProbe:
+                httpGet: {path: /healthz, port: 8080}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+              - {name: content, mountPath: /var/www/html}
+              # a certificate from the lab CA for the public host name, created with oc create secret tls
+              - {name: tls, mountPath: /etc/httpd/tls/localhost.crt, subPath: tls.crt}
+              - {name: tls, mountPath: /etc/httpd/tls/localhost.key, subPath: tls.key}
+            volumes:
+            - name: content
+              configMap:
+                name: public-content
+            - name: tls
+              secret:
+                secretName: public-tls
+  flow:
+    - kind: teach
+      id: situation
+      title: Encrypt the second connection too
+      body: |
+        A browser reaches your HTTPS Route, but the security team also wants encryption between the router
+        and the pod, certificates from the company's own CA on the public names, and one application that must
+        terminate TLS itself.
+
+        You will give an in-cluster Service a managed certificate, check the client's trust and hostname, put your
+        own CA's certificate on edge and re-encrypt Routes, and pass TLS through to a pod. Everything below ran on a
+        lab cluster as the ordinary user `developer`, in a project of their own.
+    - kind: ask
+      id: recall-edge
+      prompt: An edge Route handles browser TLS. What carries requests from that router to the application?
+      recalls: d.routes-tls
+      choices:
+        - text: The original browser TLS connection
+          why: 'That is the passthrough model: the pod handles the original TLS session.'
+        - text: A second verified TLS connection
+          why: Re-encrypt termination creates that second TLS connection.
+        - text: Plain HTTP
+          why: Edge termination ends the TLS connection at the router; backend TLS requires a different termination
+            choice.
+      answer: 2
+    - kind: teach
+      id: service-ca
+      title: Ask the platform for an internal certificate
+      body: |
+        A **certificate authority (CA)** signs certificates so clients can verify a server's identity.
+        OpenShift's **service CA operator** creates and renews a serving certificate for an internal Service.
+        Annotate the Service with `service.beta.openshift.io/serving-cert-secret-name` and the Secret name you want.
+        The operator creates a `kubernetes.io/tls` Secret with `tls.crt` and `tls.key`.
+
+        Creating the Secret does not reconfigure the application: mount it in the pod and make the server use it.
+        In `web.yaml` the Service carries the annotation, and the Deployment mounts the Secret over the web server's
+        own certificate and key.
+    - kind: show
+      id: request-cert
+      run: "oc apply -f web.yaml && oc rollout status deployment/web --timeout=180s && oc rollout status deployment/client --timeout=180s"
+      notice: |
+        The objects are created and both Deployments roll out. The web pod mounts the Secret `web-tls`, which nobody
+        created by hand: the service CA operator made it from the Service's annotation, and the pod could not have
+        started without it.
+    - kind: show
+      id: secret-issued
+      run: "oc get secret web-tls -o jsonpath='{.type}{\"\\n\"}{.metadata.annotations}{\"\\n\"}'"
+      notice: "Type `kubernetes.io/tls`. The annotations name the Service it was issued for and its expiry, about two years ahead."
+    - kind: show
+      id: cert-names
+      body: "The certificate itself, read with openssl from the Secret (the key is not printed):"
+      run: "oc get secret web-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -ext subjectAltName"
+      notice: |
+        Subject `web.<project>.svc`, issuer `openshift-service-serving-signer@…`, and two names: `web.<project>.svc`
+        and `web.<project>.svc.cluster.local`. The short name `web` is not among them.
+    - kind: try
+      id: cert-for-api
+      body: Service api exists in project billing and has no serving-cert annotation. Request its certificate in
+        a Secret named api-tls.
+      accept:
+        - oc annotate service api service.beta.openshift.io/serving-cert-secret-name=api-tls -n billing
+        - oc annotate svc api service.beta.openshift.io/serving-cert-secret-name=api-tls -n billing
+        - oc annotate service/api service.beta.openshift.io/serving-cert-secret-name=api-tls -n billing
+        - oc annotate svc/api service.beta.openshift.io/serving-cert-secret-name=api-tls -n billing
+        - oc annotate service api -n billing service.beta.openshift.io/serving-cert-secret-name=api-tls
+        - oc -n billing annotate service api service.beta.openshift.io/serving-cert-secret-name=api-tls
+      hints:
+        - match: ^oc create secret
+          say: Manually creating a Secret does not ask the service CA to issue and renew a Service certificate.
+        - match: ^oc annotate (pod|deployment|deploy)
+          say: The service CA watches the annotation on the Service.
+        - match: web-tls|shop
+          say: Use the billing Service and its requested Secret name, api-tls.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the command annotates a Service in your current project. The Service api is in billing.
+      hint: Annotate Service api in billing with service.beta.openshift.io/serving-cert-secret-name=api-tls.
+      then: |
+        The operator would issue a certificate and key in api-tls for api.billing.svc. The pod would still need a Secret mount and application TLS configuration.
+    - kind: teach
+      id: trust-and-name
+      title: Trust and hostname are separate checks
+      body: |
+        Clients must trust the issuing CA and call a name the certificate covers. OpenShift's service CA is not in
+        an image's default trust store.
+
+        A pod with the default service-account volume finds the service CA bundle at
+        `/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt`. curl's `--cacert` names the CA file to trust.
+    - kind: show
+      id: verified-internal-call
+      run: "oc exec deploy/client -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web.$(oc project -q).svc:8443/"
+      notice: "`hello from web`, with full verification: the CA is trusted and the name matches. `$(oc project -q)` puts the current project's name into the host name."
+    - kind: ask
+      id: short-name
+      prompt: The same client trusts the CA but calls https://web:8443/. What fails?
+      choices:
+        - text: The router’s backend connection
+          why: This internal Service call does not go through a Route or router.
+        - text: The hostname check
+          why: The certificate names web.<project>.svc and web.<project>.svc.cluster.local, not the short name web.
+        - text: The CA trust check only
+          why: The supplied CA bundle addresses trust; it cannot change which names the certificate covers.
+      answer: 1
+    - kind: show
+      id: short-name-fails
+      run: "oc exec deploy/client -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web:8443/"
+      notice: "`curl: (60) SSL: no alternative certificate subject name matches target host name 'web'`, and exit code 60. Trust was fine; the name was not."
+    - kind: show
+      id: no-ca-fails
+      body: "And with the right name but no CA file:"
+      run: "oc exec deploy/client -- curl -sS -m 5 https://web.$(oc project -q).svc:8443/"
+      notice: "Exit code 60 again, with `self-signed certificate in certificate chain`: the server sends the service CA along with its own certificate, but curl does not trust that CA, because it is not in the image's trust store."
+    - kind: try
+      id: verify-ledger
+      body: You are in a client pod with curl and that CA file. Ledger serves TLS on port 9443 in billing with its
+        service CA certificate. Type the verified request to its .svc name.
+      accept:
+        - curl --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl https://ledger.billing.svc:9443/ --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+        - curl --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443
+        - curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl -sS --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl -s -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl --silent --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc:9443/
+        - curl --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://ledger.billing.svc.cluster.local:9443/
+      hints:
+        - match: (^| )(-k|--insecure)( |$)
+          say: Disabling verification hides both trust and identity mistakes; supply the CA instead.
+        - match: 'https://ledger:'
+          say: 'Use the name in the certificate: ledger.billing.svc.'
+        - match: ^oc exec
+          say: The task starts inside the client pod; type curl directly.
+        - match: --cacert=
+          say: 'curl stops here with "option --cacert=…: is unknown": give the file as the next word, `--cacert FILE`.'
+      hint: Use curl --cacert with the service-ca.crt file in /var/run/secrets/kubernetes.io/serviceaccount/, then https://ledger.billing.svc:9443/.
+      then: |
+        curl would verify the certificate against the service CA and compare the requested hostname with the certificate. It would then request the page if TLS and connectivity both succeed.
+    - kind: teach
+      id: ca-bundle
+      title: The CA bundle as a ConfigMap
+      body: |
+        A client that does not mount the service-account volume, or a tool that reads trust from a ConfigMap, can ask
+        for the bundle another way: annotate a ConfigMap with `service.beta.openshift.io/inject-cabundle=true`, and
+        the operator writes the service CA into its `service-ca.crt` key. The operator owns that data and replaces it
+        on rotation, so keep application settings in other ConfigMaps.
+    - kind: show
+      id: inject-bundle
+      run: "oc create configmap lab-service-ca && oc annotate configmap lab-service-ca service.beta.openshift.io/inject-cabundle=true"
+      notice: "An empty ConfigMap, then the annotation."
+    - kind: show
+      id: bundle-content
+      run: "oc get configmap lab-service-ca -o jsonpath='{.data.service-ca\\.crt}' | openssl x509 -noout -subject -enddate"
+      notice: "The key `service-ca.crt` is there, and holds `openshift-service-serving-signer@…`: the issuer of `web-tls`."
+    - kind: ask
+      id: which-bundle
+      guess: true
+      prompt: A client pod that does not mount the service-account volume must trust web's certificate. Which ConfigMap can it mount?
+      choices:
+      - text: openshift-service-ca.crt
+        why: It holds the service CA, the issuer of web-tls, and every project gets it.
+      - text: kube-root-ca.crt
+        why: That bundle verifies the Kubernetes API server's certificate, not the certificates the service CA issues to Services.
+      - text: None until a ConfigMap is annotated in the client's project
+        why: lab-service-ca shows how to request one more, but every project already has openshift-service-ca.crt with the same CA.
+      answer: 0
+    - kind: show
+      id: every-project
+      body: "OpenShift also puts such a ConfigMap into every project:"
+      run: "oc get configmaps"
+      notice: |
+        `openshift-service-ca.crt` holds the service CA certificate, which signed the certificates Services receive, and `kube-root-ca.crt` the CA of the API server's certificate; both were created with the project. `lab-service-ca` is the one made above.
+    - kind: teach
+      id: own-ca
+      title: Certificates from your own CA
+      body: |
+        Public names usually carry certificates from the company's CA, not the service CA. To show it end to end,
+        the recording made a small lab CA with openssl, valid for two days, then a certificate it signed for two
+        Route host names. The keys stay in the working directory and are never printed.
+    - kind: show
+      id: make-ca
+      run: "openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj \"/CN=Academy Lab CA\" 2>/dev/null && openssl x509 -in ca.crt -noout -subject -issuer"
+      notice: "Subject and issuer are the same: a self-signed CA certificate, `Academy Lab CA`."
+    - kind: show
+      id: make-route-cert
+      body: "A key and a certificate request with both host names, then the CA's signature (`-copy_extensions copy` keeps the names from the request):"
+      run: "openssl req -new -newkey rsa:2048 -nodes -keyout routes.key -out routes.csr -subj \"/CN=lab-routes\" -addext \"subjectAltName=DNS:tls-edge.apps-crc.testing,DNS:tls-reen.apps-crc.testing\" 2>/dev/null && openssl x509 -req -in routes.csr -CA ca.crt -CAkey ca.key -days 2 -copy_extensions copy -out routes.crt 2>/dev/null && openssl x509 -in routes.crt -noout -subject -issuer -ext subjectAltName"
+      notice: "Subject `lab-routes`, issuer `Academy Lab CA`, and the two DNS names a client will check."
+    - kind: try
+      id: try-edge-route
+      body: "Create an edge Route `web-edge` to the Service `web`, port `http`, host `tls-edge.apps-crc.testing`, with the certificate `routes.crt`, its key `routes.key`, and the CA certificate `ca.crt`."
+      accept:
+        - "oc create route edge web-edge --service=web --port=http --hostname=tls-edge.apps-crc.testing --cert=routes.crt --key=routes.key --ca-cert=ca.crt"
+        - "oc create route edge web-edge --service web --port http --hostname tls-edge.apps-crc.testing --cert routes.crt --key routes.key --ca-cert ca.crt"
+      hints:
+        - match: "--dest-ca-cert"
+          say: "`--dest-ca-cert` is the CA the router trusts for the pod's certificate (re-encrypt). Here the CA certificate is served to clients: `--ca-cert`."
+        - match: "--port=8443|--port=https|--port 8443|--port https"
+          say: "Edge sends plain HTTP to the pod, so it targets the Service's `http` port."
+        - match: "^(?!.*--key).*$"
+          say: "The router needs the private key that matches the certificate: `--key=routes.key`."
+        - match: "^oc expose"
+          say: "`oc expose` creates an unsecured Route. TLS options come with `oc create route edge`."
+      hint: "`oc create route edge web-edge --service=web --port=http`, then `--hostname`, `--cert`, `--key` and `--ca-cert`."
+      run: "oc create route edge web-edge --service=web --port=http --hostname=tls-edge.apps-crc.testing --cert=routes.crt --key=routes.key --ca-cert=ca.crt"
+      then: "`route.route.openshift.io/web-edge created`."
+    - kind: teach
+      id: reencrypt
+      title: Re-encrypt creates two TLS sessions
+      body: |
+        A **re-encrypt Route** terminates the client's TLS at the router with the Route's certificate, then opens a
+        second, verified TLS connection to the pod. Without `--dest-ca-cert`, the router verifies the pod's
+        certificate against the service CA: exactly what `web` serves on its `https` port.
+    - kind: show
+      id: reencrypt-route
+      run: "oc create route reencrypt web-reen --service=web --port=https --hostname=tls-reen.apps-crc.testing --cert=routes.crt --key=routes.key --ca-cert=ca.crt"
+      notice: "`route.route.openshift.io/web-reen created`, with the same lab certificate at the front."
+    - kind: show
+      id: edge-verified
+      body: "From the workstation, trusting only the lab CA:"
+      run: "curl -sS -m 5 --cacert ca.crt https://tls-edge.apps-crc.testing/ && curl -sS -m 5 --cacert ca.crt https://tls-reen.apps-crc.testing/"
+      notice: "`hello from web` twice, both verified against `ca.crt`. Through `web-reen`, the hop from the router to the pod was TLS too, checked against the service CA."
+    - kind: show
+      id: edge-unverified
+      body: "Without the CA file, and then with `-k`:"
+      run: "curl -sS -m 5 https://tls-edge.apps-crc.testing/; echo \"exit $?\"; curl -sk -m 5 https://tls-edge.apps-crc.testing/"
+      notice: |
+        Without `--cacert`, exit code 60 and `self-signed certificate in certificate chain`: the router sends the lab
+        CA with the certificate (from `--ca-cert`), and the workstation does not trust it. With `-k` the page comes back,
+        because nothing is checked at all. `-k` is for looking at a certificate, never for proving a setup works.
+    - kind: ask
+      id: guess-reen-cert
+      guess: true
+      prompt: Through web-reen, which certificate will the workstation's curl receive?
+      choices:
+      - text: lab-routes, issued by Academy Lab CA
+        why: The client's TLS connection ends at the router, which presents the Route's own certificate. The next step shows it.
+      - text: web.<project>.svc, issued by the service CA
+        why: That certificate serves the second connection, from the router to the pod. The client never sees it.
+      - text: The router's default wildcard certificate
+        why: The default is used only when a Route has no certificate of its own; web-reen has one.
+      answer: 0
+    - kind: show
+      id: route-certificates
+      body: "Which certificate does the client see through `web-reen`?"
+      run: "curl -sv -m 5 --cacert ca.crt -o /dev/null https://tls-reen.apps-crc.testing/ 2>&1 | grep -E 'subject:|issuer:|SSL certificate verify|< HTTP'"
+      notice: "`subject: CN=lab-routes`, `issuer: CN=Academy Lab CA`, the verification succeeded, and `HTTP/1.1 200 OK`: the client sees the Route's certificate. The pod's service CA certificate is used only between the router and the pod."
+    - kind: teach
+      id: passthrough-teach
+      title: Passthrough leaves TLS to the pod
+      body: |
+        A **passthrough Route** does not decrypt anything. The router reads only the host name the client sends in
+        the TLS handshake (SNI) and forwards the encrypted stream to the pod. The pod must therefore present a
+        certificate valid for the public host name. The second application, `public`, gets such a certificate from
+        the lab CA, in a TLS Secret.
+    - kind: show
+      id: make-pod-cert
+      run: "openssl req -new -newkey rsa:2048 -nodes -keyout public.key -out public.csr -subj \"/CN=tls-pass.apps-crc.testing\" -addext \"subjectAltName=DNS:tls-pass.apps-crc.testing\" 2>/dev/null && openssl x509 -req -in public.csr -CA ca.crt -CAkey ca.key -days 2 -copy_extensions copy -out public.crt 2>/dev/null && oc create secret tls public-tls --cert=public.crt --key=public.key"
+      notice: "A certificate for `tls-pass.apps-crc.testing`, and `secret/public-tls created`: `oc create secret tls` stores the pair under the keys `tls.crt` and `tls.key`."
+    - kind: show
+      id: passthrough-route
+      run: "oc apply -f public.yaml && oc rollout status deployment/public --timeout=180s && oc create route passthrough web-pass --service=public --port=https --hostname=tls-pass.apps-crc.testing"
+      notice: "`public` rolls out with its certificate, and `route.route.openshift.io/web-pass created`. A passthrough Route takes no certificate options: it has nothing to decrypt."
+    - kind: ask
+      id: sni-choice
+      prompt: The router does not decrypt web-pass's traffic. What does it use to choose the backend?
+      choices:
+      - text: The host name in the TLS handshake (SNI)
+        why: The client sends that name, unencrypted, at the start of the handshake; the router reads nothing else.
+      - text: The Host header of the HTTP request
+        why: The HTTP request travels inside the encrypted stream, which the router never opens.
+      - text: The certificate that the pod presents
+        why: The pod's certificate comes back after the router has already chosen the pod.
+      answer: 0
+    - kind: show
+      id: passthrough-cert
+      run: "curl -sv -m 5 --cacert ca.crt https://tls-pass.apps-crc.testing/ 2>&1 | grep -E 'subject:|issuer:|SSL certificate verify|< HTTP|hello'"
+      notice: "`subject: CN=tls-pass.apps-crc.testing`: the pod's own certificate, verified against the lab CA, and the page `hello from public, TLS ends in the pod`."
+    - kind: show
+      id: sni-only
+      body: |
+        The router needed nothing from HTTP to route that connection: only the host name in the TLS handshake.
+        `openssl s_client` opens a bare TLS connection and sends that name with `-servername`, without speaking
+        HTTP at all:
+      run: "openssl s_client -connect tls-pass.apps-crc.testing:443 -servername tls-pass.apps-crc.testing -CAfile ca.crt </dev/null 2>/dev/null | grep -E '^subject=|^issuer=|Verify return code'"
+      notice: |
+        The pod's certificate again, and `Verify return code: 0 (ok)`. A passthrough Route can therefore carry any
+        protocol that runs inside TLS and whose clients send SNI, on the router's port 443. A plain TCP protocol
+        without TLS gives the router nothing to route on: that needs a Service, in the next lesson.
+      understand:
+        purpose: Opens a bare TLS connection to the router, sends the host name in the handshake, reports whether the
+          certificate it gets is signed by `ca.crt`, and closes without speaking HTTP.
+        parts:
+          - text: -connect tls-pass.apps-crc.testing:443
+            means: 'Where to open the connection: host and port.'
+          - text: -CAfile ca.crt
+            means: 'The authority to verify the server''s certificate against; the result is the `Verify return code`
+              line. `s_client` only reports it: it does not check the host name (that needs `-verify_hostname`) and does
+              not stop on a failure (`-verify_return_error`).'
+          - text: </dev/null
+            means: Gives `s_client` an empty input. It closes the connection at the end of its input, so it stops after
+              the handshake instead of waiting for you to type.
+          - text: 2>/dev/null
+            means: Hides the diagnostic lines that `s_client` writes to the error stream.
+        concepts:
+          - sec.certs
+          - net.routes
+        refs:
+          - title: openssl-s_client(1)
+            url: https://docs.openssl.org/3.0/man1/openssl-s_client/
+    - kind: ask
+      id: client-certificates
+      prompt: The pod must verify the external client’s own TLS certificate. Which Route type preserves that handshake?
+      choices:
+        - text: Passthrough
+          why: The original TLS session reaches the pod, including client-certificate authentication.
+        - text: Re-encrypt with a service CA certificate
+          why: The router ends the original session and opens its own; it does not preserve the client’s original
+            TLS handshake.
+        - text: Edge with HTTP redirect enabled
+          why: Redirect chooses HTTPS at the front; edge still ends TLS at the router.
+      answer: 0
+    - kind: teach
+      id: dest-ca
+      title: Re-encrypt to a backend the service CA did not sign
+      body: |
+        `public` also serves TLS, but with the lab CA's certificate. A re-encrypt Route to it without
+        `--dest-ca-cert` makes the router check that certificate against the service CA.
+    - kind: show
+      id: reen-wrong-ca
+      run: "oc create route reencrypt public-reen --service=public --port=https --hostname=tls-pubreen.apps-crc.testing"
+      notice: "`route.route.openshift.io/public-reen created`. No front certificate: the router uses its default wildcard certificate for `*.apps-crc.testing`."
+    - kind: show
+      id: reen-wrong-ca-result
+      run: "curl -sk -m 5 -o /dev/null -w '%{http_code}\\n' https://tls-pubreen.apps-crc.testing/"
+      notice: "`503`. (`-k` only because the workstation does not trust the router's default certificate.) The router could not verify the pod's certificate, so it has no usable backend."
+    - kind: ask
+      id: fix-503
+      prompt: public-reen answers 503 while the public pod is healthy. What fixes it?
+      choices:
+      - text: Give the Route the CA that signed public's certificate
+        why: By default the router checks the pod's certificate against the service CA; --dest-ca-cert names the CA that really signed it.
+      - text: Run curl with --cacert ca.crt instead of -k
+        why: That changes what the workstation trusts. The 503 comes from the router, which could not verify the pod.
+      - text: Add a front certificate with --cert and --key
+        why: The front certificate serves the client's connection. The failing hop is the router's connection to the pod.
+      answer: 0
+    - kind: show
+      id: reen-dest-ca
+      body: "The fix is to tell the router which CA signed the backend's certificate:"
+      run: "oc delete route public-reen && oc create route reencrypt public-reen --service=public --port=https --hostname=tls-pubreen.apps-crc.testing --dest-ca-cert=ca.crt"
+      notice: "The Route is recreated with `spec.tls.destinationCACertificate` set to the lab CA."
+    - kind: show
+      id: reen-dest-ca-result
+      run: "curl -sk -m 5 -o /dev/null -w '%{http_code}\\n' https://tls-pubreen.apps-crc.testing/"
+      notice: "`200`: the router trusts the backend now."
+    - kind: show
+      id: routes-overview
+      run: "oc get routes"
+      notice: "Four Routes, three terminations: `edge` and `reencrypt` with the lab certificate, `passthrough` to the pod, and `reencrypt` with a destination CA."
+    - kind: teach
+      id: renewal
+      title: Renewal must reach the running application
+      body: |
+        The service CA renews the Secret, but the application must read the replacement material.
+        A whole-Secret volume receives updates eventually; an application still needs to reload the files or restart.
+        A `subPath` mount, as in this lesson's Deployments, does not receive Secret updates, so the pod must be
+        replaced to pick them up.
+
+        The service CA lasts 26 months and rotates automatically when less than 13 months remain. The previous
+        CA remains trusted until expiry during automatic rotation. Certificates you bring, on Routes or in pods,
+        are renewed by you or by tooling you configure.
+    - kind: ask
+      id: stale-certificate
+      prompt: The Secret has renewed, but a whole-Secret mount still serves the old certificate. What should you
+        check?
+      choices:
+        - text: Whether every renewal changes the Service name
+          why: Renewal replaces certificate material; it does not require a new Service DNS identity.
+        - text: Whether a passthrough Route renews the Secret
+          why: The service CA manages this Secret, independently of Route forwarding.
+        - text: Whether the server reloads its TLS files
+          why: File propagation and application reload are separate; confirm both before deciding a restart is needed.
+      answer: 2
+    - kind: reflect
+      id: choose-path
+      prompt: Describe a browser-to-pod encrypted setup and how you would verify the two TLS connections.
+      model: |
+        Request a service CA Secret on the Service, mount it and configure the pod's TLS listener, then create a
+        re-encrypt Route to that port with the public certificate, key and CA. Verify the internal Service from a pod
+        with its .svc name and the service CA bundle, and verify the Route from outside with its public host name and
+        the public CA, without -k. If the backend's certificate comes from another CA, give the Route that CA with
+        --dest-ca-cert. Plan how the certificates are renewed and reloaded.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can request a Service certificate and a CA bundle, verify trust and hostname separately, put your own
+        CA's certificate on edge and re-encrypt Routes, terminate TLS in a pod with passthrough, and point a
+        re-encrypt Route at the right destination CA. [TLS three ways, and non-HTTP exposure](/lab/lab.tls-exposure)
+        practises those choices.
+
+        Next, [Expose plain TCP: NodePort and LoadBalancer](/lesson/n.loadbalancer-services) handles protocols that no
+        Route can carry.
+  sections:
+    - id: exposure-reference
+      title: Choose exposure and diagnose failures
+      depth: true
+      body: |
+        | Requirement | Exposure | Check |
+        |---|---|---|
+        | browser HTTPS, plain backend | edge Route | backend is HTTP; insecureEdgeTerminationPolicy can Redirect HTTP |
+        | encrypted browser and backend connections | re-encrypt Route plus backend TLS | service CA by default, or `--dest-ca-cert` |
+        | original TLS or client certificate checked in pod | passthrough Route | TLS with SNI; pod certificate must name public host |
+        | internal encrypted calls | Service plus service CA certificate | client trust and full .svc name |
+        | external plain TCP/UDP | LoadBalancer or NodePort Service | see the next lesson |
+
+        | Symptom | Evidence to distinguish causes |
+        |---|---|
+        | curl code 60, unable to get local issuer certificate, or self-signed certificate in certificate chain | missing or wrong client CA bundle |
+        | curl code 60, no alternative certificate subject name | short name or public Route host absent from the certificate |
+        | re-encrypt Route gives 503, backend healthy | backend certificate not signed by the service CA and no `--dest-ca-cert` |
+        | passthrough fails against healthy HTTP pod | pod must terminate TLS, not serve plain HTTP |
+        | renewed Secret, stale server certificate | subPath mount, propagation delay or missing application reload |
+        | HTTP fails but HTTPS works at an edge Route | inspect insecureEdgeTerminationPolicy; None is the default |
+
+        Serving certificates normally last two years and are renewed automatically.
+        A headless Service additionally receives a wildcard subject for its pod DNS names; do not use that shared
+        wildcard certificate when clients must distinguish individual pod identities.
+        Deleting a generated serving Secret requests replacement; plan for the application to load the new material.
+
+        For edge and re-encrypt Routes, spec.tls.externalCertificate can reference a TLS Secret in the Route's
+        namespace instead of inline certificate fields. Configure the documented RBAC for the openshift-ingress router
+        ServiceAccount to read it. A certificate manager can update that Secret; renewal and serving behaviour still
+        need verification. Reading a Route with `-o yaml` prints its inline key: share Route manifests with care.
+  review:
+    - q: What does the serving-cert-secret-name annotation do?
+      a: The service CA operator creates, and renews before expiry, a TLS Secret for the Service's names <service>.<namespace>.svc and <service>.<namespace>.svc.cluster.local.
+    - q: How does a client get the service CA bundle?
+      a: From /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt in a pod, from the openshift-service-ca.crt ConfigMap in every project, or from a ConfigMap annotated service.beta.openshift.io/inject-cabundle=true.
+    - q: What do --cert, --key, --ca-cert and --dest-ca-cert configure on a Route?
+      a: The certificate, key and CA chain the router presents to clients (edge, re-encrypt); --dest-ca-cert is the CA the router trusts for the pod's certificate (re-encrypt).
+    - q: How long is the service CA valid, and when is it rotated?
+      a: 26 months; it is rotated automatically when less than 13 months remain, and the previous CA stays trusted
+        until it expires.
+    - q: Why does trusting the service CA not make https://web valid?
+      a: Trust and hostname matching are separate checks; an ordinary Service certificate covers web.<namespace>.svc,
+        not the short name.
+  labs:
+    - lab.tls-exposure
+  limits: |
+    The lab CA and its certificates were generated for the recording and valid for two days; a real deployment uses
+    the company's CA or an ACME issuer. The workstation reached the Routes through OpenShift Local's router.
+  references:
+    - title: 'OpenShift 4.21: Securing service traffic with service serving certificates'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/configuring-certificates#add-service-serving
+    - title: 'OpenShift 4.21: Creating secured routes (edge, passthrough, re-encrypt)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes#configuring-default-certificate
+    - title: 'OpenShift 4.21: Routes'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes
+    - title: 'OpenShift 4.21: Creating advanced routes (externally managed certificates)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes#nw-ingress-route-secret-load-external-cert_creating-advanced-routes
+    - title: 'OpenShift API: Route TLSConfig (insecureEdgeTerminationPolicy, destinationCACertificate)'
+      url: https://github.com/openshift/api/blob/release-4.21/route/v1/types.go
+    - title: 'Kubernetes: Secrets as files and subPath update limitations'
+      url: https://kubernetes.io/docs/concepts/configuration/secret/#using-secrets-as-files-from-a-pod
+    - title: 'OpenSSL: openssl-req and openssl-x509 manual pages'
+      url: https://docs.openssl.org/3.0/man1/openssl-req/
+  commands:
+    - {cmd: "oc apply -f web.yaml && oc rollout status deployment/web --timeout=180s && oc rollout status deployment/client --timeout=180s", timeout: 400, meaning: "the annotated Service, the web server mounting the Secret, and a client"}
+    - {cmd: "oc get secret web-tls -o jsonpath='{.type}{\"\\n\"}{.metadata.annotations}{\"\\n\"}'", meaning: "the Secret the service CA issued"}
+    - {cmd: "oc get secret web-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -ext subjectAltName", meaning: "the certificate's names and issuer (never the key)"}
+    - {cmd: "oc exec deploy/client -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web.$(oc project -q).svc:8443/", meaning: "verified TLS by Service name"}
+    - {cmd: "oc exec deploy/client -- curl -sS -m 5 --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web:8443/", expect: fail, meaning: "the short name is not in the certificate"}
+    - {cmd: "oc exec deploy/client -- curl -sS -m 5 https://web.$(oc project -q).svc:8443/", expect: fail, meaning: "without the CA, the issuer is unknown"}
+    - {cmd: "oc create configmap lab-service-ca && oc annotate configmap lab-service-ca service.beta.openshift.io/inject-cabundle=true", meaning: "ask for the CA bundle in a ConfigMap"}
+    - {cmd: "sleep 5", meaning: "give the operator a moment"}
+    - {cmd: "oc get configmap lab-service-ca -o jsonpath='{.data.service-ca\\.crt}' | openssl x509 -noout -subject -enddate", meaning: "the injected service CA"}
+    - {cmd: "oc get configmaps", meaning: "the CA ConfigMaps every project gets"}
+    - {cmd: "openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj \"/CN=Academy Lab CA\" 2>/dev/null && openssl x509 -in ca.crt -noout -subject -issuer", meaning: "a lab CA, valid two days"}
+    - {cmd: "openssl req -new -newkey rsa:2048 -nodes -keyout routes.key -out routes.csr -subj \"/CN=lab-routes\" -addext \"subjectAltName=DNS:tls-edge.apps-crc.testing,DNS:tls-reen.apps-crc.testing\" 2>/dev/null && openssl x509 -req -in routes.csr -CA ca.crt -CAkey ca.key -days 2 -copy_extensions copy -out routes.crt 2>/dev/null && openssl x509 -in routes.crt -noout -subject -issuer -ext subjectAltName", meaning: "a Route certificate signed by the lab CA"}
+    - {cmd: "oc create route edge web-edge --service=web --port=http --hostname=tls-edge.apps-crc.testing --cert=routes.crt --key=routes.key --ca-cert=ca.crt", meaning: "edge Route with the lab certificate"}
+    - {cmd: "oc create route reencrypt web-reen --service=web --port=https --hostname=tls-reen.apps-crc.testing --cert=routes.crt --key=routes.key --ca-cert=ca.crt", meaning: "re-encrypt Route: lab certificate in front, service CA behind"}
+    - {cmd: "for r in web-edge web-reen; do for i in $(seq 1 30); do oc get route $r -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; done; sleep 5", timeout: 150, meaning: "wait until the router has admitted both Routes and reloaded"}
+    - {cmd: "curl -sS -m 5 --cacert ca.crt https://tls-edge.apps-crc.testing/ && curl -sS -m 5 --cacert ca.crt https://tls-reen.apps-crc.testing/", meaning: "both verified against the lab CA"}
+    - {cmd: "curl -sS -m 5 https://tls-edge.apps-crc.testing/; echo \"exit $?\"; curl -sk -m 5 https://tls-edge.apps-crc.testing/", meaning: "untrusted without the CA; -k checks nothing"}
+    - {cmd: "curl -sv -m 5 --cacert ca.crt -o /dev/null https://tls-reen.apps-crc.testing/ 2>&1 | grep -E 'subject:|issuer:|SSL certificate verify|< HTTP'", meaning: "the certificate a client sees through re-encrypt"}
+    - {cmd: "openssl req -new -newkey rsa:2048 -nodes -keyout public.key -out public.csr -subj \"/CN=tls-pass.apps-crc.testing\" -addext \"subjectAltName=DNS:tls-pass.apps-crc.testing\" 2>/dev/null && openssl x509 -req -in public.csr -CA ca.crt -CAkey ca.key -days 2 -copy_extensions copy -out public.crt 2>/dev/null && oc create secret tls public-tls --cert=public.crt --key=public.key", meaning: "a certificate for the pod, stored in a TLS Secret"}
+    - {cmd: "oc apply -f public.yaml && oc rollout status deployment/public --timeout=180s && oc create route passthrough web-pass --service=public --port=https --hostname=tls-pass.apps-crc.testing", timeout: 300, meaning: "the pod that terminates TLS, and its passthrough Route"}
+    - {cmd: "for i in $(seq 1 30); do oc get route web-pass -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5", timeout: 120, meaning: "wait until the router has admitted the Route and reloaded"}
+    - {cmd: "curl -sv -m 5 --cacert ca.crt https://tls-pass.apps-crc.testing/ 2>&1 | grep -E 'subject:|issuer:|SSL certificate verify|< HTTP|hello'", meaning: "the pod's own certificate, verified"}
+    - {cmd: "openssl s_client -connect tls-pass.apps-crc.testing:443 -servername tls-pass.apps-crc.testing -CAfile ca.crt </dev/null 2>/dev/null | grep -E '^subject=|^issuer=|Verify return code'", meaning: "a bare TLS connection with SNI, no HTTP"}
+    - {cmd: "oc create route reencrypt public-reen --service=public --port=https --hostname=tls-pubreen.apps-crc.testing", meaning: "re-encrypt to a backend the service CA did not sign"}
+    - {cmd: "for i in $(seq 1 30); do oc get route public-reen -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5", timeout: 120, meaning: "wait until the router has admitted the Route and reloaded"}
+    - {cmd: "curl -sk -m 5 -o /dev/null -w '%{http_code}\\n' https://tls-pubreen.apps-crc.testing/", meaning: "503: the router cannot verify the backend"}
+    - {cmd: "oc delete route public-reen && oc create route reencrypt public-reen --service=public --port=https --hostname=tls-pubreen.apps-crc.testing --dest-ca-cert=ca.crt", meaning: "the same Route with the backend's CA"}
+    - {cmd: "sleep 10", meaning: "give the router time to load the new Route"}
+    - {cmd: "curl -sk -m 5 -o /dev/null -w '%{http_code}\\n' https://tls-pubreen.apps-crc.testing/", meaning: "200 with the right destination CA"}
+    - {cmd: "oc get routes", meaning: "the four Routes and their terminations"}
+- id: n.ingress-dns-certs
+  title: Ingress, DNS and certificates
+  subtitle: The platform's front door and the operators behind it
+  module: b4-network-security
+  mode: REAL_LAB
+  minutes: 30
+  level: 3
+  supports: "OpenShift 4.21 Ingress, DNS, network and service CA operators. Every command was run on OpenShift Local 4.21 by the cluster administrator (kubeadmin): reads, and two changes validated with server-side dry runs that the API server checks but never stores. Copies of the DNS and default IngressController configuration taken before and after prove nothing changed (experiment X-NET-07). The pod DNS output is quoted from the existing lab.request-path recording."
+  concepts:
+    - net.ingresscontroller
+    - net.dns
+    - net.routes
+    - sec.certs
+  prerequisites:
+    - d.routes-tls
+    - o2.tls-exposure
+    - d.networkpolicy-ovn
+  record_on: cluster-admin
+  objective: |
+    Know which operator owns each piece of cluster networking, read its configuration and the workloads it generates,
+    validate a DNS zone forwarder and a custom ingress certificate without applying them, and tell the certificates
+    the platform renews from those your team owns.
+  flow:
+    - kind: teach
+      id: situation
+      title: One application fails, or all of them?
+      body: |
+        One team reports a Route returning 503. Another reports certificate warnings across every application.
+        Both arrive as “the network is broken,” but they point to different owners and different evidence.
+
+        You will read the operator configuration for ingress, DNS and certificates on a lab cluster, as its
+        administrator, and separate application faults from platform faults. Two platform changes are validated
+        with `--dry-run=server`: the API server checks them completely and stores nothing.
+    - kind: teach
+      id: ownership
+      title: Change the operator’s input
+      body: |
+        An **operator** reconciles configuration into running components. OpenShift's Ingress Operator manages
+        the HAProxy routers; the DNS Operator manages CoreDNS; the Cluster Network Operator manages cluster
+        networking; the service CA operator issues internal Service certificates.
+
+        Each reports health through a ClusterOperator. Edit the operator's configuration object, not a generated
+        Deployment or ConfigMap: reconciliation can undo direct edits.
+    - kind: show
+      id: operators
+      run: "oc get clusteroperators ingress dns network service-ca"
+      notice: "All four `Available` `True`, `Progressing` and `Degraded` `False`. `SINCE` counts from each operator's last change of state."
+    - kind: show
+      id: read-platform-inputs
+      body: "The routers are configured by IngressControllers in `openshift-ingress-operator`:"
+      run: "oc get ingresscontroller -n openshift-ingress-operator"
+      notice: "One, `default`, created at installation."
+    - kind: ask
+      id: recall-shard-input
+      recalls: n.ingress-sharding
+      prompt: In the sharding lesson, what did you create to get a second router?
+      choices:
+      - text: An IngressController in openshift-ingress-operator
+        why: The Ingress Operator generated the router Deployment and its Service from it, as it does from default.
+      - text: A router Deployment in openshift-ingress
+        why: That Deployment was generated by the operator; a direct edit would be undone.
+      - text: A Route labelled shard=academy
+        why: The label chose which Routes the second router served; it did not create the router.
+      answer: 0
+    - kind: show
+      id: default-spec
+      body: "Its `spec`, the part an administrator edits:"
+      run: "oc get ingresscontroller default -n openshift-ingress-operator -o yaml | sed -n '/^spec:/,/^status:/p'"
+      notice: |
+        Almost nothing is set: `replicas: 1` and a few policies. No `domain`, no `defaultCertificate`, no
+        `endpointPublishingStrategy`: the operator uses the platform's defaults and reports what it chose in `status`.
+    - kind: show
+      id: ingress-domain
+      body: "The default router's domain comes from the cluster-wide ingress configuration:"
+      run: "oc get ingress.config.openshift.io cluster -o jsonpath='{.spec.domain}{\"\\n\"}'"
+      notice: "`apps-crc.testing`: generated Route hosts end with it."
+    - kind: show
+      id: router-pods
+      run: "oc get pods -n openshift-ingress -o wide"
+      notice: |
+        `router-default-…` runs with the node's own address: this cluster publishes the router on the host network.
+        `routes-controller` belongs to OpenShift Local, not to the Ingress Operator.
+    - kind: show
+      id: generated-router
+      body: "How the router Deployment is tied to its IngressController:"
+      run: "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.labels}{\"\\n\"}'"
+      notice: "The label `ingresscontroller.operator.openshift.io/owning-ingresscontroller: default`: the operator generated this Deployment from the IngressController `default` and keeps it matching."
+    - kind: ask
+      id: edit-generated
+      prompt: "An administrator scales `deployment/router-default` to 2 replicas directly. What happens?"
+      choices:
+        - text: "Two routers run from now on"
+          why: "The Deployment is generated. The operator compares it with the IngressController, which still says one replica."
+        - text: "The Ingress Operator sets it back to one"
+          why: "The IngressController's `replicas` is the input. Change it there: `oc scale ingresscontroller/default -n openshift-ingress-operator --replicas=2` or a patch."
+        - text: "The API server refuses the change"
+          why: "The API server accepts the edit; the operator undoes it afterwards."
+      answer: 1
+    - kind: ask
+      id: overlap-prediction
+      recalls: n.ingress-sharding
+      prompt: "A second IngressController selects Routes labelled `shard=academy`. The default has no selector. Which routers serve a labelled Route?"
+      choices:
+        - text: Both the shard and default
+          why: 'Both selectors match: the shard explicitly and default without a restriction, as the two entries in the Route''s status showed.'
+        - text: Only the shard, because its selector is specific
+          why: Selectors do not assign exclusive ownership or override another controller.
+        - text: Only default, because it already served them
+          why: An additional matching controller admits the same Routes too.
+      answer: 0
+    - kind: teach
+      id: dns-operator
+      title: The DNS operator's input
+      body: |
+        Cluster DNS is CoreDNS, run by the DNS Operator from one cluster-scoped object:
+        `dns.operator.openshift.io/default`. It answers Service and pod names and forwards every other query
+        upstream.
+    - kind: try
+      id: try-read-dns
+      body: "As the administrator, print the DNS operator's configuration object as YAML."
+      accept: ["oc get dns.operator/default -o yaml", "oc get dns.operator default -o yaml", "oc get dns.operator.openshift.io default -o yaml", "oc get dns.operator.openshift.io/default -o yaml", "oc get dnses.operator.openshift.io default -o yaml", "oc get dns.operator/default --output=yaml"]
+      hints:
+        - match: "^oc get dns( |$)|^oc get dns default"
+          say: "`dns` alone is ambiguous: there is also `dns.config.openshift.io`. Name the operator's API: `dns.operator`."
+        - match: "openshift-dns"
+          say: "The configuration object is cluster-scoped: no `-n`. `openshift-dns` holds the generated workload."
+        - match: "configmap"
+          say: "The ConfigMap is generated from this object. The task asks for the operator's input."
+      hint: "`oc get dns.operator/default` with YAML output."
+      run: "oc get dns.operator/default -o yaml"
+      then: |
+        `spec.upstreamResolvers` sends other queries to the node's `/etc/resolv.conf` (`type: SystemResolvConf`) on
+        port 53. There is no `spec.servers`: no zone is forwarded anywhere special. `status.clusterIP` is the DNS
+        Service address that every pod's resolver uses.
+    - kind: show
+      id: dns-workloads
+      run: "oc get daemonsets -n openshift-dns"
+      notice: |
+        `dns-default` runs CoreDNS; `node-resolver` keeps the internal registry's name in the nodes' hosts files so
+        that image pulls on the node can resolve it. Pods use CoreDNS, not those hosts files.
+    - kind: show
+      id: corefile
+      body: "The configuration the operator generated for CoreDNS:"
+      run: "oc get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}'"
+      notice: |
+        CoreDNS listens on 5353 (the port NetworkPolicies must allow), answers `cluster.local` itself with the
+        `kubernetes` plugin, and forwards everything else to `/etc/resolv.conf`: the `forward .` line, made from
+        `upstreamResolvers`. `reload` makes CoreDNS pick up a new Corefile without a restart.
+    - kind: ask
+      id: persistent-dns-change
+      prompt: A direct CoreDNS ConfigMap edit is undone. Where should corporate zone forwarding be configured?
+      choices:
+        - text: Every node’s hosts file by hand
+          why: Pods do not inherit node hosts files, and manual node changes create configuration drift.
+        - text: The DNS operator’s default object
+          why: The operator generates CoreDNS configuration from that input, so reconciliation preserves the desired
+            forwarding rules.
+        - text: The same ConfigMap with a different editor
+          why: The ownership is unchanged; a direct edit can still be overwritten.
+      answer: 1
+    - kind: teach
+      id: zone-forwarding
+      title: Forward a zone, not every query
+      body: |
+        A corporate name such as `db.corp.example` may need resolvers different from the node defaults. Configure a
+        **zone forwarder** in `spec.servers`: queries for that zone go to the listed upstreams, everything else
+        follows `upstreamResolvers`. `spec.servers` is one list; a merge patch replaces it whole, so include existing
+        entries when you add one.
+
+        A server-side dry run sends the change to the API server, which validates it and returns the object it
+        would store, without storing it:
+    - kind: show
+      id: corporate-zone
+      run: "oc patch dns.operator/default --type=merge -p '{\"spec\":{\"servers\":[{\"name\":\"corporate\",\"zones\":[\"corp.example\"],\"forwardPlugin\":{\"policy\":\"Random\",\"upstreams\":[\"10.1.1.53\"]}}]}}' --dry-run=server -o jsonpath='{.spec.servers}{\"\\n\"}'"
+      notice: "The server accepted the entry: zone `corp.example`, upstream `10.1.1.53`, policy `Random`. The DNS pods would also have to reach `10.1.1.53` on port 53, and the record would have to exist there."
+    - kind: show
+      id: corporate-zone-not-stored
+      run: "oc get dns.operator/default -o jsonpath='{.metadata.generation} servers={.spec.servers}{\"\\n\"}'"
+      notice: "Generation `1` and no `servers`: the dry run stored nothing."
+    - kind: ask
+      id: pod-only-dns-failure
+      recalls: d.networkpolicy-ovn
+      prompt: Only one egress-isolated project cannot resolve an existing Service name. What do you inspect first?
+      choices:
+        - text: The cluster-wide corporate zone forwarder
+          why: An internal Service name is answered by cluster DNS, not by a corporate zone forwarder.
+        - text: The ingress wildcard certificate expiry date
+          why: DNS lookup and certificate verification are different stages. A certificate cannot resolve a Service name.
+        - text: That project's DNS egress rule
+          why: Only one project fails, so look at what is special about it. Its egress policy must allow DNS to the openshift-dns pods on 5353, as in the NetworkPolicies lesson. Then confirm the spelling of the name and its namespace.
+      answer: 2
+    - kind: show
+      id: pod-resolver-check
+      code: |
+        $ oc exec deploy/toolbox -n academy-net -- cat /etc/resolv.conf
+        search academy-net.svc.cluster.local svc.cluster.local cluster.local crc.testing
+        nameserver 10.217.4.10
+        options ndots:5
+        $ oc exec deploy/toolbox -n academy-net -- getent hosts web.academy-net.svc.cluster.local
+        10.217.4.69     web.academy-net.svc.cluster.local
+      origin: lab
+      caption: 'Existing recording: lab.request-path (dns).'
+      notice: |
+        The pod's resolver searches its project's names first, and its nameserver is `10.217.4.10`, the DNS
+        Service address in the operator's `status.clusterIP` above. A lookup that fails from the pod still needs more
+        evidence to separate a policy, a spelling mistake and an upstream failure.
+    - kind: try
+      id: query-corporate-name
+      body: Deployment toolbox exists in billing and contains getent. Type the command that resolves db.corp.example
+        from that workload.
+      accept:
+        - oc exec deploy/toolbox -n billing -- getent hosts db.corp.example
+        - oc exec deployment/toolbox -n billing -- getent hosts db.corp.example
+        - oc exec deployments/toolbox -n billing -- getent hosts db.corp.example
+        - oc -n billing exec deploy/toolbox -- getent hosts db.corp.example
+        - oc exec deploy/toolbox --namespace=billing -- getent hosts db.corp.example
+      hints:
+        - match: ^getent
+          say: That would test the workstation resolver; the task needs the pod’s network context.
+        - match: ^oc logs
+          say: Logs are not a name-resolution test. Run getent through exec.
+        - match: shop
+          say: The affected workload is in billing.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the command looks for the toolbox Deployment in your current project. It is in billing.
+      hint: Use exec on deployment/toolbox in billing, then -- getent hosts db.corp.example.
+      then: |
+        The lookup would test the path used by that pod. Compare it with a Service-name lookup and other projects before asking an administrator to change zone forwarding.
+    - kind: teach
+      id: certificate-ownership
+      title: Separate managed PKI from certificates you bring
+      body: |
+        [Certificates and non-HTTP traffic](/lesson/o2.tls-exposure) used the service CA for internal Services.
+        OpenShift rotates many internal certificates itself, including the service CA and control-plane
+        certificates. That does not cover every certificate users see. Read the two that matter most here.
+    - kind: show
+      id: ingress-certificate
+      body: "The default router's certificate, from its Secret (certificate only, never the key):"
+      run: "oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -startdate -enddate"
+      notice: |
+        A wildcard for `*.apps-crc.testing`, issued by `ingress-operator@…`, the Ingress Operator's own CA, valid for
+        two years. Browsers do not trust that CA. The documentation calls this generated certificate a placeholder:
+        the operator does not rotate it, so replace it with a certificate from a trusted CA.
+    - kind: show
+      id: service-ca-certificate
+      run: "oc get secret signing-key -n openshift-service-ca -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -startdate -enddate"
+      notice: "The service CA, `openshift-service-serving-signer@…`, valid for 26 months. The service CA operator rotates it automatically when less than 13 months remain."
+    - kind: ask
+      id: renewal-owner
+      prompt: A corporate wildcard certificate is configured as the ingress default. Who renews it?
+      choices:
+        - text: The Ingress Operator through its own internal CA
+          why: Replacing the corporate certificate with an internal one would not renew its external trust chain.
+        - text: Your team or its configured issuer automation
+          why: The Ingress Operator can serve the Secret; it cannot obtain a replacement signature from your corporate
+            CA on its own.
+        - text: The service CA operator before expiry
+          why: The service CA issues internal Service certificates, not corporate wildcard certificates.
+      answer: 1
+    - kind: teach
+      id: default-certificate-teach
+      title: Replacing the ingress certificate
+      body: |
+        A custom default certificate is a TLS Secret in `openshift-ingress`, with the full chain, referenced by name
+        from the default IngressController's `spec.defaultCertificate`. Changing it rolls the router out again,
+        so it was only validated here:
+    - kind: show
+      id: default-certificate
+      run: "oc patch ingresscontroller default -n openshift-ingress-operator --type=merge -p '{\"spec\":{\"defaultCertificate\":{\"name\":\"lab-wildcard\"}}}' --dry-run=server -o jsonpath='{.spec.defaultCertificate}{\"\\n\"}'"
+      notice: "`{\"name\":\"lab-wildcard\"}`: the API server accepted the reference."
+    - kind: show
+      id: default-certificate-missing
+      body: "Does the Secret it names exist? The administrator asks for it. Expect a `NotFound` error (exit status 1): the lab never created it, and that failure is the point."
+      run: "oc get secret lab-wildcard -n openshift-ingress"
+      notice: |
+        `NotFound`: the Secret does not exist, yet the dry run was accepted. The API server checks the field's
+        shape, not what it points to. Create and check the Secret first, then change the IngressController.
+    - kind: ask
+      id: trust-before-switch
+      prompt: The new default certificate is signed by your corporate CA. Which components need that CA in the cluster's trusted bundle?
+      choices:
+      - text: Components that call Routes, such as authentication and the console
+        why: They connect through the router and check its certificate against the cluster's trusted bundle, not a browser's.
+      - text: Pods that call Services by their .svc names
+        why: Those connections use service CA certificates, which the router's default certificate does not touch.
+      - text: 'None: the IngressController distributes the CA itself'
+        why: The IngressController only serves the Secret. Trust is configured separately, through the cluster-wide trusted CA bundle.
+      answer: 0
+    - kind: teach
+      id: external-api
+      title: The API endpoint has its own certificate configuration
+      body: |
+        For a corporate certificate on the external API hostname, use a TLS Secret in `openshift-config` and
+        reference it as a named serving certificate in `apiserver.config.openshift.io/cluster`.
+        Do not add a named certificate for `api-int`, the API hostname that nodes and cluster components use inside the
+        cluster: Red Hat warns this can degrade the cluster.
+
+        Trust also has separate configuration. A corporate CA for cluster proxy trust goes in a ConfigMap
+        referenced by `proxy.config.openshift.io/cluster`; registry trust uses the image configuration's
+        `additionalTrustedCA`. Supplying a server certificate and distributing client trust are different tasks.
+    - kind: show
+      id: api-and-proxy
+      run: "oc get apiserver cluster -o jsonpath='{.spec}{\"\\n\"}' && oc get proxy cluster -o jsonpath='{.spec}{\"\\n\"}'"
+      notice: "The API server has no `servingCerts` (only the audit profile), and the proxy has no trusted CA bundle: this cluster uses only certificates the platform made itself."
+    - kind: ask
+      id: fault-boundary
+      prompt: One Route returns 503; its Service has no ready endpoints. Where should investigation start?
+      choices:
+        - text: The application selector and readiness
+          why: The router was reached; missing ready backends points first to application objects, though other
+            503 causes also exist.
+        - text: The default ingress certificate for every Route
+          why: A completed HTTP response is different evidence from a failed TLS handshake.
+        - text: The DNS forwarder for every corporate zone
+          why: The request already reached the router; a cluster-wide zone change does not restore missing endpoints.
+      answer: 0
+    - kind: reflect
+      id: handoff
+      prompt: A team wants an internal-only router. Describe the evidence you need before calling the design complete.
+      model: |
+        Use selectors that exclude the internal set from other controllers, then check each Route’s admitted router entries. Confirm the publishing strategy, DNS, firewall reachability, certificate names and renewal ownership, and test from both an intended internal client and an excluded external location.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can locate the configuration that operators reconcile and the workloads they generate, read the DNS
+        configuration down to the Corefile, validate a zone forwarder and a certificate reference with a server-side
+        dry run, and identify who must renew each exposed certificate. The depth tables map faults to owners.
+
+        Next, [Quotas and LimitRanges](/lesson/o2.quotas-limits) gives shared projects resource
+        guardrails as well as the identity and traffic boundaries you have already studied.
+  sections:
+    - id: operator-map
+      title: Operator ownership and networking choices
+      depth: true
+      body: |
+        | ClusterOperator | Component | Configuration input |
+        |---|---|---|
+        | ingress | HAProxy routers in openshift-ingress | IngressController in openshift-ingress-operator; ingress.config.openshift.io/cluster domain |
+        | dns | CoreDNS dns-default DaemonSet in openshift-dns | dns.operator.openshift.io/default |
+        | network | OVN-Kubernetes | network.config.openshift.io/cluster and network.operator.openshift.io/cluster |
+        | service-ca | internal serving certificates and CA injection | Service and ConfigMap annotations; supported webhook CA injection |
+
+        | Networking feature | Purpose |
+        |---|---|
+        | OVN-Kubernetes | default pod networking; OpenShift SDN was removed in 4.17 |
+        | AdminNetworkPolicy / EgressFirewall / EgressIP | cluster guardrails, external-destination rules, stable egress addressing |
+        | user-defined networks | supported tenant network isolation; design depends on topology |
+        | MetalLB | LoadBalancer Services on suitable non-cloud infrastructure |
+        | Ingress objects | OpenShift creates managed Routes for supported Kubernetes Ingress configuration |
+        | Gateway API | role-oriented gateway and routing API with an Istio-based OpenShift implementation |
+
+        Gateway API for cluster ingress has been generally available since 4.19, the release in which the
+        Ingress Operator also took over the lifecycle of the Gateway API CRDs. On 4.21 the Ingress Operator
+        manages the supported CRDs and the OpenShift gateway implementation. Supported means the OpenShift API
+        surface only: vendor-specific resources such as Istio's VirtualService are not part of it, and not every
+        upstream kind or feature works with every controller, so check the 4.21 documentation.
+
+        The pod network can be expanded through the documented procedure. The serviceNetwork range cannot
+        be modified after installation, directly or through the ServiceCIDR API. Treat these as platform
+        network design constraints, rather than ordinary application settings.
+    - id: certificate-map
+      title: Certificate and trust ownership
+      depth: true
+      body: |
+        | Certificate or trust | Configuration | Renewal owner |
+        |---|---|---|
+        | generated ingress default | operator-created placeholder, valid two years | replace it; Ingress Operator does not rotate it |
+        | custom ingress default | TLS Secret in openshift-ingress, IngressController defaultCertificate | team or configured cert-manager/PKI automation |
+        | external API named certificate | TLS Secret in openshift-config, apiserver cluster object | team or configured issuer automation |
+        | internal Service serving certificate | annotated Service and generated TLS Secret | service CA; application still reloads material |
+        | service CA | 26-month CA, automatic rotation below 13 months remaining | platform; clients must refresh during overlap |
+        | corporate proxy trust | CA ConfigMap in openshift-config, proxy trustedCA reference | team maintains supplied CA bundle |
+        | registry trust | image.config.openshift.io/cluster additionalTrustedCA | team maintains registry CA bundle |
+
+        cert-manager Operator for Red Hat OpenShift can automate issuance and renewal using configured issuers,
+        including ACME and internal PKI. Installing it alone does not make every existing certificate managed.
+        Monitor expiry and test renewal. Updating a custom ingress Secret in place lets routers detect and reload
+        the new certificate; changing Secret content does not inherently require a rolling Deployment update.
+    - id: fault-map
+      title: Application or platform evidence
+      depth: true
+      body: |
+        | Symptom | First evidence | Likely ownership |
+        |---|---|---|
+        | one Route gives 503 | EndpointSlices, readiness, Service target port, router policy | application before platform |
+        | Route appears on unexpected router | status.ingress and shard selectors | platform sharding |
+        | many Route certificates warn | served chain, domain and expiry | shared ingress certificate |
+        | API external clients see wrong certificate | requested hostname, named serving certificate and chain | platform API configuration |
+        | pods cannot resolve one corporate zone | pod resolver, DNS egress, forwarder and upstream answer | application policy or platform forwarding |
+        | one short Service name fails | spelling, current namespace and resolver search suffixes | application configuration |
+
+        [Follow a request](/lab/lab.request-path) traces the application path;
+        [A DNS name that does not exist](/lab/inc.dns-typo) practises checking the query before changing CoreDNS.
+  review:
+    - q: Where do you configure the default router (replicas, certificate, publishing)?
+      a: The IngressController named default in openshift-ingress-operator; the router Deployment in openshift-ingress is generated from it.
+    - q: How do you send DNS queries for a corporate zone to specific DNS servers?
+      a: Add a servers entry (name, zones, forwardPlugin upstreams) to dns.operator.openshift.io/default; the operator regenerates the Corefile.
+    - q: Which platform certificates must you renew yourself?
+      a: The ones you bring (custom ingress default certificate, named API server certificates, application certificates);
+        and the ingress operator's generated default is never rotated, so replace it.
+    - q: What does --dry-run=server prove, and what not?
+      a: That the API server accepts the change (schema, validation, admission) and what it would store; not that referenced objects such as a Secret exist, nor how the operator will react.
+    - q: Which network plugin does OpenShift 4.21 use, and which range cannot change after installation?
+      a: OVN-Kubernetes. The pod network has a supported expansion procedure; the serviceNetwork range cannot be
+        modified post-installation, directly or through the ServiceCIDR API.
+  labs:
+    - lab.request-path
+    - lab.tls-exposure
+    - lab.networkpolicy
+  limits: |
+    The DNS zone forwarder and the custom ingress certificate were validated with server-side dry runs and not applied:
+    a forwarder needs a corporate resolver to forward to, and a new default certificate rolls out the only default
+    router, interrupting every Route on this cluster. Router sharding is shown in its own lesson.
+  enterprise: |
+    Typical enterprise layouts use separate ingress shards for internal and external traffic, certificates issued by the
+    corporate PKI or through cert-manager, conditional DNS forwarding to corporate resolvers, and expiry monitoring for
+    every certificate the platform team owns.
+  commands:
+    - {cmd: "oc get clusteroperators ingress dns network service-ca", as: admin, meaning: "the health of the four networking operators"}
+    - {cmd: "oc get ingresscontroller -n openshift-ingress-operator", as: admin, meaning: "the routers' configuration objects"}
+    - {cmd: "oc get ingresscontroller default -n openshift-ingress-operator -o yaml | sed -n '/^spec:/,/^status:/p'", as: admin, meaning: "the default IngressController's spec"}
+    - {cmd: "oc get ingress.config.openshift.io cluster -o jsonpath='{.spec.domain}{\"\\n\"}'", as: admin, meaning: "the cluster's ingress domain"}
+    - {cmd: "oc get pods -n openshift-ingress -o wide", as: admin, meaning: "the router pods"}
+    - {cmd: "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.labels}{\"\\n\"}'", as: admin, meaning: "the router Deployment names the IngressController that owns it"}
+    - {cmd: "oc get dns.operator/default -o yaml", as: admin, meaning: "the DNS operator's configuration and status"}
+    - {cmd: "oc get daemonsets -n openshift-dns", as: admin, meaning: "CoreDNS and the node resolver"}
+    - {cmd: "oc get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}'", as: admin, meaning: "the generated CoreDNS configuration"}
+    - {cmd: "oc patch dns.operator/default --type=merge -p '{\"spec\":{\"servers\":[{\"name\":\"corporate\",\"zones\":[\"corp.example\"],\"forwardPlugin\":{\"policy\":\"Random\",\"upstreams\":[\"10.1.1.53\"]}}]}}' --dry-run=server -o jsonpath='{.spec.servers}{\"\\n\"}'", as: admin, meaning: "a zone forwarder, validated by the API server and not stored"}
+    - {cmd: "oc get dns.operator/default -o jsonpath='{.metadata.generation} servers={.spec.servers}{\"\\n\"}'", as: admin, meaning: "nothing was stored"}
+    - {cmd: "oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -startdate -enddate", as: admin, meaning: "the default router's generated certificate"}
+    - {cmd: "oc get secret signing-key -n openshift-service-ca -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -noout -subject -startdate -enddate", as: admin, meaning: "the service CA certificate and its validity"}
+    - {cmd: "oc patch ingresscontroller default -n openshift-ingress-operator --type=merge -p '{\"spec\":{\"defaultCertificate\":{\"name\":\"lab-wildcard\"}}}' --dry-run=server -o jsonpath='{.spec.defaultCertificate}{\"\\n\"}'", as: admin, meaning: "a custom default certificate reference, validated and not stored"}
+    - {cmd: "oc get secret lab-wildcard -n openshift-ingress", as: admin, expect: fail, meaning: "the referenced Secret does not exist"}
+    - {cmd: "oc get apiserver cluster -o jsonpath='{.spec}{\"\\n\"}' && oc get proxy cluster -o jsonpath='{.spec}{\"\\n\"}'", as: admin, meaning: "no named API certificate, no proxy trust bundle"}
+  experiment:
+    id: X-NET-07
+    objective: "Read the Ingress, DNS and service CA operators' configuration as the administrator and validate two platform changes with server-side dry runs, then prove from copies taken before and after that neither the DNS operator nor the default IngressController changed."
+    changes:
+      - "None intended: read-only commands, and two server-side dry runs (dns.operator.openshift.io/default spec.servers; IngressController default spec.defaultCertificate) that the API server validates without storing"
+    preflight:
+      - cmd: |-
+          found=$(oc get secret lab-wildcard -n openshift-ingress --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc wait co/dns --for=condition=Available=True --timeout=30s && oc wait co/ingress --for=condition=Available=True --timeout=30s"}
+    snapshot:
+      - "oc get dns.operator default -o jsonpath='{.metadata.generation} {.spec}'"
+      - "oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.metadata.generation} {.spec}'"
+      - "oc get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}' | sha256sum"
+      - "oc get deployment router-default -n openshift-ingress -o jsonpath='{.metadata.generation}'"
+    rollback:
+      - "echo 'nothing to undo: no change was stored'"
+  references:
+    - title: 'OpenShift 4.21: Ingress Operator'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/configuring-ingress
+    - title: 'OpenShift 4.21: Configuring ingress cluster traffic (sharding)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/configuring-ingress-cluster-traffic
+    - title: 'OpenShift 4.21: Cluster Network Operator'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/cluster-network-operator
+    - title: 'OpenShift 4.21: DNS Operator (DNS forwarding)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/dns-operator
+    - title: 'OpenShift 4.21: Configuring certificates (ingress, API server, service CA)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/configuring-certificates
+    - title: 'OpenShift 4.21: Certificate types and descriptions'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/certificate-types-and-descriptions
+    - title: 'OKD 4.21: Adding API server certificates (no named certificate for api-int)'
+      url: https://docs.okd.io/4.21/security/certificates/api-server.html
+    - title: 'OpenShift 4.21: cert-manager Operator for Red Hat OpenShift'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/cert-manager-operator-for-red-hat-openshift
+    - title: 'OpenShift 4.21: Gateway API with OpenShift networking'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/ingress_and_load_balancing/index
+    - title: 'OpenShift 4.21: Release notes (Gateway API implementation)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/release_notes/ocp-4-21-release-notes
+    - title: 'Kubernetes: Dry-run in the API (server-side dry run)'
+      url: https://kubernetes.io/docs/reference/using-api/api-concepts/#dry-run
+    - title: 'Kubernetes: Debugging DNS resolution'
+      url: https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/

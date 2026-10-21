@@ -1,0 +1,178 @@
+- id: linux
+  title: Linux
+  short: Linux
+  accent: amber
+  icon: terminal
+  tagline: The shell, files, processes, services, networks and disks.
+  level: Beginner
+  audience: 'Anyone who has never used a Linux shell, and anyone who wants the Linux underneath containers to make sense.
+    Nothing is needed first, and no cluster: commands are shown with the output they gave on a real machine, and each lesson
+    lists the files it uses so that you can repeat it on your own.'
+  summary: 'Find your way in the shell, read and search files, understand users and permissions, inspect processes, services,
+    logs, networks and disks, log in to other machines with SSH, and automate with scripts, packages and scheduled jobs.
+
+
+    This is the ground the rest of the course stands on. A container is a Linux process, and most of what later goes wrong
+    with containers and clusters is read with facts learnt here: an exit status or a signal, a user ID and a permission, a
+    connection that is refused or times out. The lessons point out where these come back.'
+  outcome: 'You can investigate a Linux machine from the shell: what runs, as whom, with which files, ports and disks, and
+    why it fails; and you can automate routine work with scripts and scheduled jobs.'
+  modules:
+  - lx1-shell
+  - lx2-system
+  - lx3-admin
+- id: containers
+  title: Containers
+  short: Containers
+  accent: teal
+  icon: box
+  tagline: What a container really is; run, build, inspect and ship images.
+  level: Beginner
+  audience: 'Learners who know the Linux basics: processes and signals, users and permissions, ports (the Linux territory
+    teaches them). A workstation with Podman lets you repeat the commands; no cluster is needed.'
+  summary: 'A container as a Linux process with namespaces and cgroups; running services with Podman; building images; image
+    names, tags, digests and registries; containers that run as any user; troubleshooting containers that will not start;
+    several containers working together; moving images without a registry; inspecting and copying images with Skopeo.
+
+
+    It builds directly on Linux: processes and signals, users and permissions, mounts and ports reappear inside every container.
+    A container is also the unit that Kubernetes runs next, and an image that works whatever user ID starts it, built here,
+    is what OpenShift needs by default.'
+  outcome: You can run, build, inspect, move and debug container images, and predict how they will behave on a cluster.
+  modules:
+  - f1-containers
+  - ct1-podman
+  - ct2-images
+- id: start
+  title: Kubernetes
+  short: Kubernetes
+  accent: blue
+  icon: layers
+  tagline: Objects, the API, desired state and controllers; then what OpenShift adds.
+  level: Beginner to intermediate
+  audience: 'Learners who understand containers (the Containers territory), and Kubernetes users who want to see what OpenShift
+    adds. No cluster needed: the commands are shown with output recorded on a real cluster.'
+  summary: 'A short review of the Linux facts behind most cluster errors; what Kubernetes adds to running containers; objects,
+    YAML and the API; the parts of a cluster; desired state and reconciliation; the workload kinds; custom resources and operators;
+    and what OpenShift adds on top: projects, Routes, stricter security defaults, the `oc` client and a platform run by its
+    own operators.
+
+
+    It turns the single machine of the Containers territory into a cluster that keeps a described result true. It ends where
+    Application operations begins: the same objects, used every day on OpenShift. Its last lesson reads the platform''s health
+    as an administrator; an application learner needs only its first parts for now.'
+  outcome: You can explain what happens between `kubectl create deployment` and a running, reachable container, and say which
+    part of it is Kubernetes and which is OpenShift.
+  modules:
+  - f0-prereqs
+  - f2-kubernetes
+  - f3-openshift
+- id: admin1
+  title: Application operations
+  short: Applications
+  accent: coral
+  icon: rocket
+  tagline: Deploy, connect, configure, observe and recover workloads.
+  level: Intermediate
+  audience: 'Developers and administrators who run applications on a cluster. You need the Kubernetes territory first: objects
+    and desired state, pods and Deployments, `oc` and projects.'
+  summary: 'The CLI and the console; deploying from images, templates and manifests; pods, probes, requests and limits; Services,
+    Routes and Ingress; configuration, storage and StatefulSets; a troubleshooting method and support data; images, builds,
+    rollouts and release strategies.
+
+
+    Most of it is done as an ordinary user in your own project, the way most people meet OpenShift at work; the few administrator
+    steps say so. The incidents and challenges of the practice arena let you repeat each skill without instructions. Platform
+    administration, next, looks at the same cluster from the administrator''s seat.'
+  outcome: You can deploy, expose, configure, scale, update and repair applications, and explain each change you make.
+  modules:
+  - a1-cli
+  - a2-apps
+  - a5-network
+  - a4-config-storage
+  - a3-troubleshoot
+  - a6-images-updates
+- id: admin2
+  title: Platform administration
+  short: Administration
+  accent: violet
+  icon: shield
+  tagline: Run a shared cluster for many teams.
+  level: Intermediate to advanced
+  audience: Administrators who manage access, security, networking and upkeep of a shared cluster. You need Application operations
+    first. The demonstrations use administrator rights on a disposable cluster; practise them only on one.
+  summary: 'Identity providers, users, groups and RBAC; SCCs and ServiceAccounts; access analysis; NetworkPolicies and TLS;
+    quotas and project governance; declarative workflows with Kustomize and Helm; operators, administrative jobs and cluster
+    updates.
+
+
+    It changes seats: the objects you used in Application operations, now granted, secured, limited and maintained by the
+    cluster''s administrator. The health round of its first lesson is the check to run before and after every change that
+    follows. Enterprise platform engineering, next, scales these decisions to an organisation and to many clusters.'
+  outcome: You can grant the right access, secure workloads and traffic, govern projects and maintain the platform, and prove
+    each control works.
+  modules:
+  - b0-cluster-admin
+  - b2-authn-authz
+  - b3-workload-security
+  - l1-access
+  - b4-network-security
+  - b5-governance
+  - b1-declarative
+  - b6-operators-maintenance
+- id: platform
+  title: Enterprise platform engineering
+  short: Enterprise
+  accent: slate
+  icon: building
+  tagline: 'Identity, GitOps, observability, delivery, recovery and scale: recorded where one node can show it, read
+    where it cannot.'
+  level: Advanced
+  audience: Engineers who run OpenShift for an organisation, after Platform administration. This territory is incomplete.
+    About two in five of its lessons (11 of 27) are recorded demonstrations on a single-node lab cluster (scheduling and
+    node capacity, identity and credentials, the Git, Kustomize and Helm side of GitOps, the event router, export and
+    policy), eight of them with administrator changes rolled back and verified. Four readings also show recorded read-only
+    commands, and Argo CD itself is shown in a simulator. The rest are readings with checks, because their hands-on part
+    needs several nodes, operators or external systems. It has a diagnostic, two labs of its own (scheduling and placement
+    rules, which a single node can show) and no challenges yet.
+  summary: Installation and topologies; scheduling, capacity and cluster partitioning; corporate identity; GitOps with Argo
+    CD and OpenShift GitOps; observability; delivery and supply chain; backup and enterprise operations. Hands-on material
+    for most of these topics needs capabilities a single-node local cluster does not have (several nodes, cloud load balancers,
+    a monitoring stack you may change, backup storage).
+  outcome: 'Planned: you can design and operate these platform services, from corporate identity and GitOps to recovery, and
+    explain the trade-offs.'
+  status: coming-soon
+  modules:
+  - p0-install
+  - p1-scheduling
+  - p5-identity
+  - p6-gitops
+  - p2-reliability
+  - p3-delivery
+  - p4-enterprise
+  roadmap:
+  - Backup, restore and migration with OADP, hands-on (needs object storage and the OADP operator)
+  - 'Advanced scheduling in practice: spreading across nodes and zones, taint-based eviction and drains with PodDisruptionBudgets
+    (needs several nodes)'
+  - Argo CD running on the practice cluster, monitoring and alerting for your own workloads, log collection and forwarding,
+    hands-on
+  - LDAP and OIDC identity providers on a disposable cluster, with group synchronisation
+  - Node pools, the Machine Config Operator in practice, and specialist operators
+- id: practice
+  title: Practice arena
+  short: Practice
+  accent: green
+  icon: target
+  tagline: Solve original challenges and incidents on your own.
+  level: All levels
+  audience: Learners who have studied a track and want to prove they can do it without step-by-step instructions.
+  summary: A troubleshooting triage to find your gaps, outcome-graded challenges that you solve your own way, incidents to
+    investigate and repair, and a capstone that combines the application and platform tracks. Each one says whether it was
+    graded on a real cluster, shown from a recording, or not graded at all.
+  outcome: You can reach a required state on a real cluster without instructions, diagnose failures methodically, and explain
+    your decisions and their trade-offs.
+  modules:
+  - r1-app-challenges
+  - r2-admin-challenges
+  - r3-incidents
+  - r4-capstone

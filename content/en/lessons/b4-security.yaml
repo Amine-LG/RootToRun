@@ -1,0 +1,1596 @@
+# OpenShift workload security, written as teaching flows.
+# Both lessons are recorded on OpenShift Local as the ordinary user developer and the cluster administrator
+# (record_on: cluster-admin), each inside an experiment with a verified rollback (X-SCC-01, X-NODE-01).
+- id: f.scc
+  title: Security Context Constraints
+  subtitle: "Read a rejection, fix the workload, grant a narrow exception and take it back"
+  module: b3-workload-security
+  diagram: scc-admission
+  mode: REAL_LAB
+  minutes: 40
+  level: 2
+  supports: "OpenShift 4.21 SCCs (restricted-v2, anyuid, privileged) and oc 4.21. Every command was run on OpenShift Local 4.21 by the ordinary user developer, in a temporary project of their own, and by the cluster administrator kubeadmin, who granted and then removed one SCC exception for one ServiceAccount; the grant and the project were then removed and the cluster's SCCs and SCC bindings were compared with the copy taken before (experiment X-SCC-01)."
+  concepts:
+    - sec.scc
+    - container.security
+  prerequisites:
+    - a.container-security
+    - f.rbac
+    - o2.service-accounts
+  objective: |
+    Diagnose an SCC admission failure from real evidence, fix the workload rather than the policy, review a manifest
+    before applying it, and, when an exception is really needed, have it granted to one ServiceAccount in one project,
+    prove which SCC admitted the pod, and take the exception back.
+  record_on: cluster-admin
+  flow:
+    - kind: teach
+      id: situation
+      title: A Deployment with no pods
+      body: |
+        A vendor's Deployment requests one replica. It works on a laptop, but OpenShift shows zero pods, and there is
+        no container log to read. You need to find which security setting stopped it.
+
+        A **Security Context Constraint (SCC)** is an OpenShift admission policy: it checks the security settings a pod
+        asks for before the API server stores the pod. You will follow that check, repair the workload, and watch an
+        administrator grant a narrow exception when one is really needed.
+
+        Everything here ran on OpenShift Local 4.21: the ordinary user `developer` in their own project,
+        `academy-lesson-f-scc`, and the cluster administrator `kubeadmin` for the exception. The prompt in front of
+        each command names who ran it.
+    - kind: show
+      id: vendor-manifest
+      body: "The vendor's example asks for one thing at pod level: `runAsUser: 0`, the root user."
+      code: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: vendor-app
+          labels: {app: vendor-app}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels: {app: vendor-app}
+          template:
+            metadata:
+              labels: {app: vendor-app}
+            spec:
+              terminationGracePeriodSeconds: 2
+              securityContext:
+                runAsUser: 0                 # copied from the vendor's example
+              containers:
+              - name: app
+                image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                imagePullPolicy: IfNotPresent
+                command: ["sleep", "infinity"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities: {drop: [ALL]}
+                  seccompProfile: {type: RuntimeDefault}
+                resources:
+                  requests: {cpu: 10m, memory: 16Mi}
+                  limits: {memory: 64Mi}
+      caption: vendor-app.yaml
+      notice: |
+        The container settings already drop every capability, forbid privilege escalation and ask for the runtime's
+        default seccomp filter. Only the pod-level UID is unusual. The container only sleeps: it stands for the
+        vendor's application.
+    - kind: show
+      id: apply-vendor
+      run: "oc apply -f vendor-app.yaml"
+      notice: |
+        The Deployment is created. The warning comes from a different check, Kubernetes Pod Security Admission, which
+        this project runs in warning mode: it names `runAsUser=0` and the missing `runAsNonRoot`, but blocks nothing.
+    - kind: show
+      id: rollout-waits
+      body: "Wait for the Deployment to become available, for at most twenty seconds:"
+      run: "oc rollout status deploy/vendor-app --timeout=20s"
+      notice: "`0 out of 1 new replicas have been updated`, then `timed out waiting for the condition`. Something stops the pod."
+    - kind: try
+      id: no-pods
+      body: "List the Deployments, ReplicaSets and pods of the project in one command."
+      accept:
+        - "oc get deploy,rs,pods"
+        - "oc get deployments,replicasets,pods"
+        - "oc get deployment,replicaset,pod"
+        - "oc get deploy,rs,po"
+        - "oc get deploy,rs,pod"
+        - "oc get deployments,rs,pods"
+      hints:
+        - match: "^oc get (deploy|deployments?|rs|replicasets?|pods?|po) "
+          say: "Several kinds in one `oc get` are joined by commas, without spaces: `deploy,rs,pods`."
+        - match: "^oc get all"
+          say: "`all` lists more kinds than the three asked for. Name them: `deploy,rs,pods`."
+      hint: "`oc get` and the three kinds, separated by commas."
+      run: "oc get deploy,rs,pods"
+      then: |
+        The ReplicaSet wants one pod (`DESIRED 1`) and has none (`CURRENT 0`), and no pod is listed. Admission refused
+        the creation request before any pod existed, so there is no pod to describe. The ReplicaSet's events hold the
+        reason.
+    - kind: teach
+      id: read-rejection
+      title: Read the provider messages
+      body: |
+        A ReplicaSet event can list every SCC, called a provider in the message. Separate two kinds of evidence:
+        `not usable by user or serviceaccount` means the identity has no permission to use that SCC; a complaint
+        about a field means admission tried that SCC and found a value it does not allow.
+    - kind: show
+      id: describe-rs
+      run: "oc describe rs -l app=vendor-app"
+      highlight: ["FailedCreate"]
+      notice: |
+        The condition `ReplicaFailure` is `True` with reason `FailedCreate`, and the event, repeated 13 times in 22
+        seconds, says `unable to validate against any security context constraint`. `anyuid` is `not usable`: the
+        pod's ServiceAccount may not use it. `restricted-v2` was usable but refused UID 0, which `must be in the
+        ranges: [1000810000, 1000819999]` of this project. `restricted-v3` refused it too, for two reasons.
+
+        The question below quotes the same message from an earlier recording of this lesson, whose project had
+        the range `[1001520000, 1001529999]`: each project gets its own range.
+    - kind: ask
+      id: find-cause
+      prompt: The restricted-v2 message names the rejected UID. Which change addresses it before any exception is requested?
+      evidence: |
+        provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1001520000, 1001529999]
+      choices:
+        - text: Restart the container with the same security settings
+          why: No container exists to restart. Recreating the pod from the same template repeats the admission failure.
+        - text: Grant privileged access to every project workload
+          why: That widens access far beyond a UID problem and leaves the image unfixed.
+        - text: Remove the fixed UID and adapt writable paths
+          why: Let restricted-v2 assign the UID from the project's range, and build the image so that user can write the paths the application needs.
+      answer: 2
+    - kind: try
+      id: try-events
+      body: "The same message is in the project's event list. List only the events whose reason is `FailedCreate`, letting the API server do the filtering."
+      accept:
+        - "oc get events --field-selector reason=FailedCreate"
+        - "oc get events --field-selector=reason=FailedCreate"
+        - "oc get event --field-selector reason=FailedCreate"
+        - "oc get ev --field-selector reason=FailedCreate"
+        - "oc get events --field-selector reason=FailedCreate -n academy-lesson-f-scc"
+        - "oc get events -n academy-lesson-f-scc --field-selector reason=FailedCreate"
+        - "oc get events --field-selector=reason=FailedCreate -n academy-lesson-f-scc"
+        - "oc get events -n academy-lesson-f-scc --field-selector=reason=FailedCreate"
+      hints:
+        - match: "\\| *grep"
+          say: "`grep` filters on your machine after every event has been sent. Ask the API server instead: `--field-selector reason=FailedCreate`."
+        - match: "^oc describe"
+          say: "`describe` shows one object's events. The task asks for the project's event list, filtered by reason."
+        - match: "--field-selector[ =]type="
+          say: "`type` is Normal or Warning. The field that holds `FailedCreate` is `reason`."
+        - match: "failedcreate|Failedcreate|failedCreate"
+          say: "Field selector values are compared exactly: `FailedCreate`, with two capitals."
+      hint: "`oc get events` with `--field-selector reason=…`."
+      run: "oc get events --field-selector reason=FailedCreate"
+      then: |
+        One event, from `replicaset/vendor-app-75cbd798d4`, seen `2s` ago: the controller keeps retrying, and the
+        same event is updated at each refusal (`describe` counted 13 in 22 seconds).
+    - kind: teach
+      id: assigned-uid
+      title: Let the project supply the UID
+      body: |
+        With `restricted-v2`, an omitted `runAsUser` is set to the first UID of the project's allocated range. It is
+        not a new random number at every start. The project's annotation `openshift.io/sa.scc.uid-range` stores the
+        range: a value such as `1000810000/10000` means 10,000 UIDs starting at 1000810000.
+
+        As in [Container security](/lesson/a.container-security), images must work with an arbitrary UID. For the
+        usual group-0 convention, make the directories the application writes group-owned by 0 and group-writable in
+        the image. Group 0 does not make the process UID 0 or give it root's capabilities.
+    - kind: show
+      id: uid-range
+      body: "The developer can read the range of their own project:"
+      run: "oc get project academy-lesson-f-scc -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'"
+      notice: "`1000810000/10000`: the range in the rejection message, `[1000810000, 1000819999]`. It belongs to this project."
+    - kind: teach
+      id: review-tool
+      title: Review a manifest before applying it
+      body: |
+        `oc adm policy scc-subject-review -f <file>` runs the same SCC matching as admission on the pod that a
+        manifest would create, and creates nothing. Run by the developer, it checks what the developer and the pod's
+        ServiceAccount (`default` here) may use. `ALLOWED BY` names the SCC that would admit the pod.
+    - kind: try
+      id: review-before
+      body: "Review `vendor-app.yaml` in your current project with this command."
+      accept:
+        - "oc adm policy scc-subject-review -f vendor-app.yaml"
+        - "oc adm policy scc-subject-review --filename=vendor-app.yaml"
+        - "oc adm policy scc-subject-review --filename vendor-app.yaml"
+        - "oc adm policy scc-subject-review -f ./vendor-app.yaml"
+        - "oc adm policy scc-subject-review -f vendor-app.yaml -n academy-lesson-f-scc"
+        - "oc adm policy scc-subject-review -n academy-lesson-f-scc -f vendor-app.yaml"
+      hints:
+        - match: "^oc apply|^oc create"
+          say: "That would create the Deployment again. The review creates nothing."
+        - match: "scc-review"
+          say: "`scc-review` asks which ServiceAccounts could create the pod. `scc-subject-review` checks the identities that would create it."
+        - match: "(^| )-z( |$)"
+          say: "Leave out `-z`: the manifest's ServiceAccount and your own identity are checked without it."
+      hint: "`oc adm policy scc-subject-review` and `-f` with the file."
+      run: "oc adm policy scc-subject-review -f vendor-app.yaml"
+      then: "`ALLOWED BY <none>`: no SCC available here admits the manifest as written, as the rejection said."
+    - kind: show
+      id: fixed-manifest
+      body: "The fix is in the manifest: no fixed UID, and a promise that the pod never runs as root."
+      code: |
+        # vendor-app-fixed.yaml: the same Deployment; only the pod-level securityContext changed
+              securityContext:
+                runAsNonRoot: true           # was: runAsUser: 0
+      caption: vendor-app-fixed.yaml (the changed lines)
+    - kind: show
+      id: review-fixed
+      run: "oc adm policy scc-subject-review -f vendor-app-fixed.yaml"
+      notice: "`restricted-v2`: the default SCC would admit the fixed manifest. Nothing was created."
+    - kind: show
+      id: review-z
+      body: |
+        A tempting shortcut is `-z`, to check one ServiceAccount by name. Here it gives a different answer for the
+        same fixed manifest:
+      run: "oc adm policy scc-subject-review -z default -f vendor-app-fixed.yaml"
+      notice: |
+        `<none>`. With `-z`, the review treats the ServiceAccount as a user with no groups. `restricted-v2` is
+        granted to the group `system:authenticated`, so it is not counted. Use `-z` to check a grant made to the
+        ServiceAccount itself, not to predict whether an ordinary pod is admitted.
+    - kind: try
+      id: review-another-pod
+      body: In your current directory, worker.yaml is a Pod manifest for ServiceAccount worker in project billing.
+        Type the SCC subject-review command for that file and project.
+      accept:
+        - oc adm policy scc-subject-review -f worker.yaml -n billing
+        - oc adm policy scc-subject-review -n billing -f worker.yaml
+        - oc adm policy scc-subject-review --filename=worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing --filename=worker.yaml
+        - oc adm policy scc-subject-review -f ./worker.yaml -n billing
+        - oc adm policy scc-subject-review --filename worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing --filename worker.yaml
+        - oc adm policy scc-subject-review -f worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing -f worker.yaml
+        - oc adm policy scc-subject-review -f worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing -f worker.yaml
+        - oc adm policy scc-subject-review --filename worker.yaml -n billing
+        - oc adm policy scc-subject-review -n billing --filename worker.yaml
+        - oc adm policy scc-subject-review --filename worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing --filename worker.yaml
+        - oc adm policy scc-subject-review --filename=worker.yaml -n billing
+        - oc adm policy scc-subject-review -n billing --filename=worker.yaml
+        - oc adm policy scc-subject-review --filename=worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing --filename=worker.yaml
+        - oc adm policy scc-subject-review -n billing -f ./worker.yaml
+        - oc adm policy scc-subject-review -f ./worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing -f ./worker.yaml
+        - oc adm policy scc-subject-review -f ./worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing -f ./worker.yaml
+        - oc adm policy scc-subject-review --filename ./worker.yaml -n billing
+        - oc adm policy scc-subject-review -n billing --filename ./worker.yaml
+        - oc adm policy scc-subject-review --filename ./worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing --filename ./worker.yaml
+        - oc adm policy scc-subject-review --filename ./worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing --filename ./worker.yaml
+        - oc adm policy scc-subject-review --filename=./worker.yaml -n billing
+        - oc adm policy scc-subject-review -n billing --filename=./worker.yaml
+        - oc adm policy scc-subject-review --filename=./worker.yaml --namespace billing
+        - oc adm policy scc-subject-review --namespace billing --filename=./worker.yaml
+        - oc adm policy scc-subject-review --filename=./worker.yaml --namespace=billing
+        - oc adm policy scc-subject-review --namespace=billing --filename=./worker.yaml
+      hints:
+        - match: ^oc apply
+          say: Applying creates a real object; this task asks for an admission review.
+        - match: scc-review
+          say: The subject-review command checks the ServiceAccount named by this Pod; scc-review asks which ServiceAccounts
+            could create it.
+        - match: "(^| )-z( |$)|--serviceaccount"
+          say: "With `-z` the ServiceAccount is checked as a user without groups, so SCCs granted to all authenticated users are left out. The Pod already names its ServiceAccount; give the file and the project only."
+        - match: shop
+          say: The Pod belongs to billing; the review must use that project.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the review uses your current project. The Pod belongs to billing.
+      hint: Use the scc-subject-review subcommand of oc adm policy, with -f for the file and -n for the project.
+      then: |
+        The review would evaluate worker.yaml for its ServiceAccount, and for you, in billing. It would not create or
+        start the pod.
+    - kind: show
+      id: apply-fixed
+      run: "oc apply -f vendor-app-fixed.yaml"
+      notice: "`configured`, and no Pod Security warning this time: the template no longer asks for root. The Deployment starts a new ReplicaSet."
+    - kind: show
+      id: rollout-fixed
+      run: "oc rollout status deploy/vendor-app --timeout=120s"
+      notice: "`successfully rolled out`: the new ReplicaSet's pod was admitted."
+    - kind: show
+      id: assigned-uid-recorded
+      run: "oc exec deploy/vendor-app -- id"
+      notice: |
+        The process runs as the first UID of the project's range, the value in the rejection message. `gid=0(root)`
+        is the primary group, which the image's group permissions rely on; it is not the root user.
+    - kind: show
+      id: scc-of-fixed
+      body: "Which SCC admitted it is written on the pod, in the annotation `openshift.io/scc`:"
+      run: "oc get pods -l app=vendor-app -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'"
+      notice: "`restricted-v2`, the default. No exception was needed: the vendor's `runAsUser: 0` was a habit, not a requirement."
+    - kind: ask
+      id: uid-transfer
+      prompt: A restricted-v2 project range is 1004000000/10000. A pod omits runAsUser. Which UID is assigned?
+      choices:
+        - text: A fresh random UID on every restart
+          why: The range is allocated to the project; the default is its first UID.
+        - text: '1004000000'
+          why: MustRunAsRange defaults to the minimum of the allocated range.
+        - text: 0, if the image declares USER root
+          why: SCC admission supplies runAsUser in the pod spec, overriding the image user.
+      answer: 1
+    - kind: teach
+      id: whose-grant
+      title: Use the workload identity
+      body: |
+        A **ServiceAccount** is the API identity of a workload ([ServiceAccounts](/lesson/o2.service-accounts) covers
+        them). For a Deployment's pods, SCC admission uses the pod's ServiceAccount, not the person who created the
+        Deployment. For a pod created directly, the creator's SCCs count too.
+
+        Permission to use an SCC is RBAC's `use` verb on `securitycontextconstraints` in `security.openshift.io`. Only
+        a cluster administrator can grant it. Granting it to `default` spreads it to every workload that omits
+        `serviceAccountName`, so an exception goes to a dedicated ServiceAccount.
+    - kind: teach
+      id: when-needed
+      title: When the requirement is real
+      body: |
+        A second component, `legacy`, comes from an old image that really must start as UID 0 and cannot be rebuilt
+        yet. In this lesson its container also only sleeps; it stands for such an image. The developer gives it its
+        own ServiceAccount, `legacy-sa`, so that an exception would reach this workload only, and asks the
+        administrator for one. The team's manifest keeps the usual hardening, including the seccomp line.
+    - kind: try
+      id: create-sa
+      body: "Create the ServiceAccount `legacy-sa` in your current project."
+      accept:
+        - "oc create serviceaccount legacy-sa"
+        - "oc create sa legacy-sa"
+        - "oc create serviceaccount legacy-sa -n academy-lesson-f-scc"
+        - "oc create sa legacy-sa -n academy-lesson-f-scc"
+      hints:
+        - match: "^oc new-|^oc adm"
+          say: "A ServiceAccount is created like other simple objects: `oc create serviceaccount <name>`."
+        - match: "service-account|serviceAccount"
+          say: "The kind is written `serviceaccount` (or `sa`)."
+      hint: "`oc create`, the kind `serviceaccount`, the name."
+      run: "oc create serviceaccount legacy-sa"
+      then: "`serviceaccount/legacy-sa created`. Creating it grants nothing."
+    - kind: show
+      id: hardened-manifest
+      code: |
+        # legacy-hardened.yaml (pod template, abridged): the Deployment legacy
+            spec:
+              serviceAccountName: legacy-sa
+              securityContext:
+                runAsUser: 0
+              containers:
+              - name: app
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities: {drop: [ALL]}
+                  seccompProfile: {type: RuntimeDefault}
+      caption: legacy-hardened.yaml (abridged)
+    - kind: show
+      id: admin-review-hardened
+      body: |
+        Before granting anything, the administrator asks which SCC would admit this pod. `kubeadmin` may use every
+        SCC, so the answer is the SCC admission would choose if access were not the question:
+      run: "oc adm policy scc-subject-review -f legacy-hardened.yaml -n academy-lesson-f-scc"
+      notice: "`Deployment/legacy` is `ALLOWED BY privileged`, the broadest SCC of all, for a pod that asks only for UID 0. Read why before granting anything."
+    - kind: show
+      id: compare-sccs
+      run: "oc get scc anyuid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIORITY:.priority,RUNASUSER:.runAsUser.type,SECCOMP:.seccompProfiles,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID"
+      notice: |
+        `anyuid` (priority 10) allows any UID (`RunAsAny`) but its `SECCOMP` column is `<none>`: it allows no seccomp
+        profile to be named. The manifest names `RuntimeDefault`, so `anyuid` cannot admit it, and `privileged`, which
+        allows every profile (`[*]`), is the SCC that fits.
+    - kind: ask
+      id: which-repair
+      prompt: The review named privileged only because of the seccomp line. What is the narrowest way forward?
+      choices:
+        - text: Grant privileged to legacy-sa, as the review says
+          why: "An SCC permits settings; it does not add them to the pod. But privileged would let every pod run as legacy-sa ask for host access, far more than this one needs. The review names the SCC that fits, not the one you should grant."
+        - text: Add runtime/default to the anyuid SCC itself
+          why: Default SCCs belong to the platform. Editing them changes every workload that uses them, and updates can undo it.
+        - text: Drop the seccomp line and grant anyuid to legacy-sa
+          why: The pod then fits anyuid, which allows UID 0 and keeps the other restrictions. The next steps show the price it pays.
+      answer: 2
+    - kind: show
+      id: admin-review-legacy
+      body: "`legacy.yaml` is the same manifest without the `seccompProfile` line. The same review:"
+      run: "oc adm policy scc-subject-review -f legacy.yaml -n academy-lesson-f-scc"
+      notice: "`anyuid`: the narrower SCC now fits."
+    - kind: ask
+      id: priority-prediction
+      prompt: Both SCCs can admit a pod. Which one wins?
+      evidence: |
+        anyuid: priority 10
+        restricted-v2: priority unset (counts as 0)
+      guess: true
+      choices:
+        - text: anyuid
+          why: Priority is compared first, so 10 is tried before 0. The next step explains the order.
+        - text: restricted-v2, because it restricts more
+          why: Restrictiveness only breaks ties between equal priorities; it does not override a higher priority. The next step explains the order.
+        - text: Both SCCs, with their rules merged
+          why: Exactly one SCC supplies the defaults and validates the pod; settings are never combined. The next step explains it.
+      answer: 0
+    - kind: teach
+      id: selection
+      title: One SCC wins
+      body: |
+        Admission sorts the SCCs a pod may use by highest `priority`, then most restrictive, then name. An unset
+        priority counts as 0. It tries each candidate's defaults and validation and stops at the first that fits.
+        Settings are not combined across SCCs.
+
+        The built-in `anyuid` has priority 10; `restricted-v2` has none. If both are usable and `anyuid` validates the
+        pod, `anyuid` wins even when restricted-v2 would also work. Priority cannot make invalid settings valid: as
+        the review showed, a pod that `anyuid` does not fit falls through to the next SCC that does.
+    - kind: teach
+      id: exception-lifecycle
+      title: Keep exceptions narrow and temporary
+      body: |
+        An administrator grants an SCC by binding its ClusterRole, `system:openshift:scc:<name>`, to a ServiceAccount.
+        Name the project with `-n`: the command then creates a RoleBinding in that project. Without `-n` it creates a
+        ClusterRoleBinding instead, for a ServiceAccount of the administrator's current project.
+
+        SCC selection happens when a pod is created. Granting or revoking does not change running pods. An exception
+        needs an owner, a reason and a review date. Do not modify the platform's default SCCs.
+    - kind: try
+      id: try-grant
+      body: "As the administrator, grant `anyuid` to the ServiceAccount `legacy-sa` of the project `academy-lesson-f-scc`, and to nothing else."
+      accept:
+        - "oc adm policy add-scc-to-user anyuid -z legacy-sa -n academy-lesson-f-scc"
+        - "oc adm policy add-scc-to-user anyuid -z legacy-sa --namespace academy-lesson-f-scc"
+        - "oc adm policy add-scc-to-user anyuid -z legacy-sa --namespace=academy-lesson-f-scc"
+        - "oc adm policy add-scc-to-user anyuid --serviceaccount=legacy-sa -n academy-lesson-f-scc"
+        - "oc adm policy add-scc-to-user anyuid --serviceaccount legacy-sa -n academy-lesson-f-scc"
+        - "oc adm policy add-scc-to-user anyuid -n academy-lesson-f-scc -z legacy-sa"
+        - "oc adm policy add-scc-to-user -z legacy-sa anyuid -n academy-lesson-f-scc"
+      hints:
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n`, oc creates a ClusterRoleBinding for a ServiceAccount of your own current project. Name the project with `-n academy-lesson-f-scc`."
+        - match: "add-scc-to-user legacy-sa"
+          say: "The SCC comes first, then the subject: `add-scc-to-user anyuid -z legacy-sa`."
+        - match: "-z default|--serviceaccount[= ]default"
+          say: "`default` runs every pod that names no ServiceAccount. The exception is for `legacy-sa` only."
+        - match: "privileged"
+          say: "The review showed that `anyuid` admits `legacy.yaml`. `privileged` would admit it too, and would let every pod of that account ask for host access."
+        - match: "add-role-to-user|add-cluster-role"
+          say: "The command made for SCCs is `oc adm policy add-scc-to-user`; it creates the binding to the right ClusterRole."
+        - match: "add-scc-to-group"
+          say: "The subject is one ServiceAccount, given with `-z`, not a group."
+      hint: "`oc adm policy add-scc-to-user`, the SCC, `-z` and the ServiceAccount, and the project."
+      run: "oc adm policy add-scc-to-user anyuid -z legacy-sa -n academy-lesson-f-scc"
+      then: "`clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid added: \"legacy-sa\"`: a binding now names the ServiceAccount."
+    - kind: show
+      id: grant-binding
+      body: "The administrator reads what the command created:"
+      run: "oc get rolebinding system:openshift:scc:anyuid -n academy-lesson-f-scc -o wide"
+      notice: "A RoleBinding in `academy-lesson-f-scc`, from the ClusterRole `system:openshift:scc:anyuid` to one subject: `academy-lesson-f-scc/legacy-sa`."
+    - kind: try
+      id: apply-legacy
+      body: "Back in the developer's terminal, create the Deployment from `legacy.yaml`."
+      accept:
+        - "oc apply -f legacy.yaml"
+        - "oc create -f legacy.yaml"
+        - "oc apply -f ./legacy.yaml"
+        - "oc apply --filename=legacy.yaml"
+      hints:
+        - match: "legacy-hardened"
+          say: "The hardened manifest names a seccomp profile, which anyuid does not admit. Use `legacy.yaml`."
+      hint: "`oc apply -f` and the file."
+      run: "oc apply -f legacy.yaml"
+      then: |
+        Created, and without the Pod Security warning that the first root manifest got. The 4.21 documentation
+        describes why: OpenShift sets a project's Pod Security warning level from the SCCs its ServiceAccounts may
+        use, and `legacy-sa` may now use `anyuid`. After the revoke, later in this lesson, the warning comes back.
+    - kind: show
+      id: rollout-legacy
+      run: "oc rollout status deploy/legacy --timeout=120s"
+      notice: "`successfully rolled out`: the pod was admitted."
+    - kind: show
+      id: chosen-scc
+      run: "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'"
+      notice: "The pod runs as `legacy-sa` and was admitted by `anyuid`. The annotation is the record of which SCC supplied its settings."
+    - kind: show
+      id: legacy-id
+      run: "oc exec deploy/legacy -- id"
+      notice: "`uid=0(root)`: what the exception was for."
+    - kind: ask
+      id: guess-seccomp
+      guess: true
+      prompt: "vendor-app runs under restricted-v2 with RuntimeDefault; legacy runs under anyuid with no profile named. Which has a seccomp filter?"
+      choices:
+        - text: Both, because every container gets the runtime's default filter
+          why: The default filter is applied when the pod asks for it. The next two steps read the kernel's answer.
+        - text: Only vendor-app
+          why: Only vendor-app's manifest names `RuntimeDefault`. The next two steps confirm it.
+        - text: Neither, because seccomp needs a privileged container
+          why: seccomp filters are set up by the runtime for ordinary containers. The next two steps read them.
+      answer: 1
+    - kind: show
+      id: vendor-seccomp
+      body: "The price of dropping the seccomp line. `Seccomp:` in a process's status is 0 with no filter and 2 with a filter. First the vendor app, admitted by restricted-v2:"
+      run: "oc exec deploy/vendor-app -- grep '^Seccomp:' /proc/1/status"
+      notice: "2: a seccomp filter is active."
+    - kind: show
+      id: legacy-seccomp
+      run: "oc exec deploy/legacy -- grep '^Seccomp:' /proc/1/status"
+      notice: |
+        `0`: no seccomp filter at all. That is the price of fitting `anyuid` here: the pod runs as root without the
+        syscall filter the vendor app has. A custom SCC that allows UID 0 and requires `runtime/default` would keep
+        it; the next lesson shows how a custom SCC is built and granted.
+    - kind: show
+      id: default-refused
+      body: "The exception follows the ServiceAccount. A pod that asks for root as the project's `default` ServiceAccount, created directly by the developer:"
+      run: "oc create -f root-pod.yaml"
+      notice: "Forbidden, with the same reasons as the first rejection: `anyuid` is `not usable by user or serviceaccount`, neither by the developer nor by `default`."
+    - kind: ask
+      id: revoke-running
+      prompt: The anyuid binding is removed. What happens to pods already running under anyuid?
+      choices:
+        - text: They immediately change to the project UID
+          why: SCC admission does not rewrite a running pod after an RBAC change.
+        - text: They are evicted by the permission check
+          why: SCC access is checked at admission, not by a continuous eviction controller.
+        - text: They keep their admitted settings
+          why: Revocation affects future creation requests. The next steps show a running pod staying and its replacement refused.
+      answer: 2
+    - kind: show
+      id: revoke
+      body: "The administrator takes the exception back:"
+      run: "oc adm policy remove-scc-from-user anyuid -z legacy-sa -n academy-lesson-f-scc"
+      notice: "`removed: \"legacy-sa\"`."
+    - kind: try
+      id: restart-legacy
+      body: "As the developer, ask the Deployment `legacy` for new pods without changing its manifest."
+      accept:
+        - "oc rollout restart deploy/legacy"
+        - "oc rollout restart deployment/legacy"
+        - "oc rollout restart deployment legacy"
+        - "oc rollout restart deploy legacy"
+        - "oc rollout restart deployments/legacy"
+      hints:
+        - match: "delete pod"
+          say: "Deleting the pod also makes a new one, but the task asks the Deployment for a fresh rollout: `oc rollout restart`."
+        - match: "rollout (status|undo|history)"
+          say: "The subcommand that starts new pods is `restart`."
+        - match: "scale"
+          say: "Scaling changes the number of pods. A restart replaces them."
+      hint: "`oc rollout restart` and the Deployment."
+      run: "oc rollout restart deploy/legacy"
+      then: |
+        `restarted`, and the Pod Security warning is back (`runAsUser=0`, the missing seccomp profile): with the
+        grant gone, the project's warning level returned to `restricted`. A new ReplicaSet now tries to create a pod.
+    - kind: show
+      id: restart-refused
+      body: "As the developer, wait for the new pod, for at most thirty seconds. With the grant gone, this is expected to time out:"
+      run: "oc rollout status deploy/legacy --timeout=30s"
+      notice: "`0 out of 1 new replicas have been updated`, then `timed out`: no new pod becomes available. The next steps show what is still running and why the replacement is missing."
+    - kind: show
+      id: old-pod-stays
+      run: "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'"
+      notice: "The same pod, `legacy-988f579f-56gqk`, is still `Running` under `anyuid`. A rolling update removes it only when a replacement is ready, and none can be created."
+    - kind: show
+      id: rs-after-revoke
+      run: "oc get rs -l app=legacy"
+      notice: "The new ReplicaSet `legacy-6d48845d68` wants one pod and has none, like the vendor app at the start; the old one still runs its pod."
+    - kind: show
+      id: rs-refusal
+      body: "As the developer, read the refusal itself: the FailedCreate events of the project's ReplicaSets, keeping the header and the lines of the `legacy` ReplicaSets, so the generated name is not needed:"
+      run: "oc get events --field-selector involvedObject.kind=ReplicaSet,reason=FailedCreate -o custom-columns=REPLICASET:.involvedObject.name,MESSAGE:.message | grep -E '^(REPLICASET|legacy-)'"
+      notice: |
+        The new ReplicaSet's pod is `forbidden: unable to validate against any security context constraint`, the
+        same message as the vendor app's at the start: `anyuid` is again `not usable by user or serviceaccount` for
+        `legacy-sa`, and `restricted-v2` refuses UID 0. The running pod was admitted before the revoke and keeps
+        its settings; its replacement is checked now, without the grant.
+    - kind: teach
+      id: user-namespaces
+      title: A separate user namespace
+      body: |
+        OpenShift 4.21 also provides `restricted-v3`, available to authenticated users. It requires `hostUsers: false`:
+        a **Linux user namespace** maps container UIDs to different, unprivileged UIDs on the node. Without that
+        request, a pod cannot use restricted-v3 and normally uses restricted-v2, which is why `restricted-v3` refused
+        the root pods in this lesson with `Host Users must be set to false`.
+
+        This mapping does not grant root inside a restricted-v3 container; its SCC still constrains container UIDs.
+        Compatible storage must support ID-mapped mounts.
+    - kind: reflect
+      id: explain-rejection
+      prompt: Explain why a Deployment has no pod to describe after an SCC rejection, and where you would fix a
+        root-only image.
+      model: |
+        The ReplicaSet's creation request was refused before a pod was stored, so its FailedCreate event holds the
+        evidence. Remove the fixed root UID from the template and adapt writable image paths for the assigned UID;
+        request an exception only if the requirement cannot be removed, for a dedicated ServiceAccount in one
+        project, after reviewing which SCC would admit the manifest and why.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can tell an unavailable SCC from an incompatible setting, review a manifest before applying it, read
+        which SCC admitted a pod, and follow an exception from request to grant to removal, knowing that running
+        pods keep what they were admitted with.
+
+        [ServiceAccounts and SCC exceptions](/lab/lab.sa-scc) practises the lifecycle on your own. Next,
+        [Run privileged workloads safely](/lesson/n.privileged-workloads) takes the hardest case: a node agent that
+        needs host access.
+  sections:
+    - id: scc-controls
+      title: SCC controls and common repairs
+      depth: true
+      body: |
+        | Area | restricted-v2 rule | Repair to consider |
+        |---|---|---|
+        | runAsUser | MustRunAsRange; default minimum project UID | omit a copied fixed UID; adapt the image |
+        | SELinux | MustRunAs; project MCS level | use storage with compatible labels |
+        | fsGroup | MustRunAs; allocated project group | check namespace group allocation |
+        | supplementalGroups | RunAsAny | choose only groups needed for storage |
+        | capabilities | drop ALL; NET_BIND_SERVICE may be added | prefer a high application port, such as 8080 |
+        | privilege escalation | unset or false | remove a request for true |
+        | privileged container | forbidden | remove it; identify the actual operation needed |
+        | host network, PID, IPC, ports | forbidden | use cluster networking |
+        | hostPath | forbidden | choose an appropriate PVC or ConfigMap |
+        | seccomp | runtime/default | investigate a specific blocked syscall |
+        | read-only root filesystem | not required | a custom SCC can require it |
+
+        restricted-v2 allows volume types such as configMap, secret, projected, emptyDir, CSI and
+        persistentVolumeClaim; consult the installed SCC for the complete version-specific list.
+        `nonroot-v2` permits fixed nonzero UIDs; `anyuid` permits UID 0 but keeps the other restrictions, and on
+        OpenShift 4.21 it lists no allowed seccomp profile, so a pod that names one does not fit it. The hostnetwork
+        and hostmount families relax host access; `privileged` allows the broadest access. These require explicit
+        grants. A low port can require NET_BIND_SERVICE depending on the privileged-port sysctl; NET_ADMIN is a
+        different capability and restricted-v2 does not allow adding it.
+
+        Namespace allocation annotations are `openshift.io/sa.scc.uid-range`,
+        `openshift.io/sa.scc.supplemental-groups` and `openshift.io/sa.scc.mcs`.
+    - id: access-and-admission
+      title: Access reviews and independent admission checks
+      depth: true
+      body: |
+        | Evidence | Meaning |
+        |---|---|
+        | ReplicaSet FailedCreate, no pod | admission refused the requested pod |
+        | openshift.io/scc on a pod | one SCC admitted that pod |
+        | scc-subject-review, run as yourself | which SCC would admit the manifest for you and its ServiceAccount |
+        | scc-subject-review -z | the ServiceAccount alone, without its groups |
+        | RBAC can-i result | RBAC use grants in the specified scope |
+        | SCC users and groups fields | direct grants, with cluster-wide scope |
+        | running pod, failed file write | investigate runtime checks rather than admission |
+
+        A required `openshift.io/required-scc` annotation on a workload's pod template pins admission to that SCC:
+        the identity must be allowed to use it and the pod must satisfy it. Pinning grants no access, and it protects
+        a workload from silently moving to another SCC when someone grants one with a higher priority.
+        The scc-review subcommand asks which ServiceAccounts could create a Pod; scc-subject-review checks its
+        subject. Both are reviews, not test executions of the image.
+
+        Kubernetes Pod Security Admission is independent of SCCs. On this cluster user projects are labelled to warn
+        and audit at the `restricted` level and do not enforce it, which is why the recorded `oc apply` printed a
+        warning and still created the Deployment. Namespace label synchronisation adjusts those labels to the SCCs
+        the project's ServiceAccounts may use. An explicit enforce label can also reject a pod, so an SCC admission
+        success does not exempt a pod from other admission policies.
+  review:
+    - q: Where do you find the reason when a Deployment has zero pods because of SCC?
+      a: 'Events of its ReplicaSet (FailedCreate: unable to validate against any security context constraint), with oc describe rs or oc get events --field-selector reason=FailedCreate.'
+    - q: How is permission to use an SCC granted?
+      a: 'Through RBAC: the use verb on the securitycontextconstraints resource, bound to the pod''s ServiceAccount. oc adm policy add-scc-to-user <scc> -z <sa> -n <project> creates a RoleBinding to system:openshift:scc:<scc>.'
+    - q: Which annotation tells you which SCC admitted a pod?
+      a: openshift.io/scc.
+    - q: In what order does admission try the SCCs a pod may use?
+      a: Highest priority first, then most restrictive first, then by name; the first one that validates wins.
+    - q: Whose SCCs count for pods created by a Deployment?
+      a: Only the pod's ServiceAccount's (for a pod created directly, the creating user's too).
+    - q: Why can an administrator's scc-subject-review name privileged for a pod that only needs root?
+      a: The administrator may use every SCC, so the review names the first one that fits. If the pod names a seccomp profile, anyuid (which lists none) does not fit, and privileged does. Read why before granting.
+    - q: You granted or revoked an SCC. Why do the running pods not change?
+      a: The SCC is chosen once, at pod creation. New pods are checked against the access that exists when they are created.
+  labs:
+    - lab.container-anatomy
+    - lab.sa-scc
+  limits: |
+    The recording runs on single-node OpenShift Local, in a project created for the recording. The containers only
+    sleep: they stand for applications whose requirements the lesson describes. An exception granted directly in an
+    SCC's `users` or `groups` field is not shown, because it changes a cluster-wide object; the 4.21 documentation
+    uses RBAC grants, as here.
+  enterprise: |
+    SCC exceptions are security decisions: they need an owner, a justification, an expiry or review date, and
+    a dedicated ServiceAccount so the exception does not spread to other workloads.
+  references:
+    - title: 'OpenShift 4.21: Managing security context constraints'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies
+    - title: 'OpenShift 4.21: Understanding and managing pod security admission'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/understanding-and-managing-pod-security-admission
+    - title: 'OpenShift 4.21: Running pods in Linux user namespaces'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html-single/nodes/index#nodes-pods-user-namespaces-configuring_nodes-pods-user-namespaces
+    - title: 'oc 4.21 source: add-scc-to-user and remove-scc-from-user'
+      url: https://github.com/openshift/oc/blob/release-4.21/pkg/cli/admin/policy/modify_scc.go
+    - title: 'Kubernetes: Pod Security Admission'
+      url: https://kubernetes.io/docs/concepts/security/pod-security-admission/
+  commands:
+    - {cmd: "oc apply -f vendor-app.yaml", as: developer, meaning: "the vendor's Deployment, which asks for runAsUser 0"}
+    - {cmd: "oc rollout status deploy/vendor-app --timeout=20s", as: developer, expect: fail, meaning: "times out: no pod becomes available"}
+    - {cmd: "oc get deploy,rs,pods", as: developer, meaning: "the ReplicaSet wants one pod and has none"}
+    - {cmd: "oc describe rs -l app=vendor-app", as: developer, meaning: "the FailedCreate event with every SCC's reason"}
+    - {cmd: "oc get events --field-selector reason=FailedCreate", as: developer, meaning: "the same refusals in the project's event list"}
+    - {cmd: "oc get project academy-lesson-f-scc -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'", as: developer, meaning: "the project's UID range"}
+    - {cmd: "oc adm policy scc-subject-review -f vendor-app.yaml", as: developer, meaning: "no SCC would admit the manifest as written"}
+    - {cmd: "oc adm policy scc-subject-review -f vendor-app-fixed.yaml", as: developer, meaning: "restricted-v2 would admit the fixed manifest"}
+    - {cmd: "oc adm policy scc-subject-review -z default -f vendor-app-fixed.yaml", as: developer, meaning: "with -z, the ServiceAccount is checked without its groups"}
+    - {cmd: "oc apply -f vendor-app-fixed.yaml", as: developer, meaning: "the fixed template: no fixed UID, runAsNonRoot true"}
+    - {cmd: "oc rollout status deploy/vendor-app --timeout=120s", as: developer, meaning: "the new pod is admitted"}
+    - {cmd: "oc exec deploy/vendor-app -- id", as: developer, meaning: "the first UID of the project's range, group 0"}
+    - {cmd: "oc get pods -l app=vendor-app -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\\.io/scc'", as: developer, meaning: "restricted-v2 admitted it"}
+    - {cmd: "oc create serviceaccount legacy-sa", as: developer, meaning: "a dedicated identity for the component that needs an exception"}
+    - {cmd: "oc adm policy scc-subject-review -f legacy-hardened.yaml -n academy-lesson-f-scc", as: admin, meaning: "for an administrator, the SCC admission would choose: privileged, because of the seccomp line"}
+    - {cmd: "oc get scc anyuid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIORITY:.priority,RUNASUSER:.runAsUser.type,SECCOMP:.seccompProfiles,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID", as: admin, meaning: "anyuid lists no seccomp profile"}
+    - {cmd: "oc adm policy scc-subject-review -f legacy.yaml -n academy-lesson-f-scc", as: admin, meaning: "without the seccomp line, anyuid fits"}
+    - {cmd: "oc adm policy add-scc-to-user anyuid -z legacy-sa -n academy-lesson-f-scc", as: admin, meaning: "the exception: a RoleBinding in this project for one ServiceAccount"}
+    - {cmd: "oc get rolebinding system:openshift:scc:anyuid -n academy-lesson-f-scc -o wide", as: admin, meaning: "the binding the grant created"}
+    - {cmd: "oc apply -f legacy.yaml", as: developer, meaning: "the component that needs UID 0"}
+    - {cmd: "oc rollout status deploy/legacy --timeout=120s", as: developer, meaning: "admitted"}
+    - {cmd: "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'", as: developer, meaning: "admitted by anyuid, running as legacy-sa"}
+    - {cmd: "oc exec deploy/legacy -- id", as: developer, meaning: "uid 0"}
+    - {cmd: "oc exec deploy/vendor-app -- grep '^Seccomp:' /proc/1/status", as: developer, meaning: "the seccomp mode under restricted-v2"}
+    - {cmd: "oc exec deploy/legacy -- grep '^Seccomp:' /proc/1/status", as: developer, meaning: "the seccomp mode under anyuid with no profile named"}
+    - {cmd: "oc create -f root-pod.yaml", as: developer, expect: fail, meaning: "the default ServiceAccount still cannot run as root"}
+    - {cmd: "oc adm policy remove-scc-from-user anyuid -z legacy-sa -n academy-lesson-f-scc", as: admin, meaning: "the exception is taken back"}
+    - {cmd: "oc rollout restart deploy/legacy", as: developer, meaning: "ask for new pods"}
+    - {cmd: "oc rollout status deploy/legacy --timeout=30s", as: developer, expect: fail, meaning: "the replacement pod is refused"}
+    - {cmd: "oc get pods -l app=legacy -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,PHASE:.status.phase'", as: developer, meaning: "the running pod keeps anyuid"}
+    - {cmd: "oc get rs -l app=legacy", as: developer, meaning: "the new ReplicaSet has no pod"}
+    - {cmd: "oc get events --field-selector involvedObject.kind=ReplicaSet,reason=FailedCreate -o custom-columns=REPLICASET:.involvedObject.name,MESSAGE:.message | grep -E '^(REPLICASET|legacy-)'", as: developer, meaning: "the SCC refusal of the replacement pod, after the revoke"}
+  files:
+    vendor-app.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: vendor-app
+        labels: {app: vendor-app}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: vendor-app}
+        template:
+          metadata:
+            labels: {app: vendor-app}
+          spec:
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsUser: 0                 # copied from the vendor's example
+            containers:
+            - name: app
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    vendor-app-fixed.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: vendor-app
+        labels: {app: vendor-app}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: vendor-app}
+        template:
+          metadata:
+            labels: {app: vendor-app}
+          spec:
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsNonRoot: true           # was: runAsUser: 0
+            containers:
+            - name: app
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    legacy-hardened.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: legacy
+        labels: {app: legacy}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: legacy}
+        template:
+          metadata:
+            labels: {app: legacy}
+          spec:
+            serviceAccountName: legacy-sa
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsUser: 0
+            containers:
+            - name: app
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    legacy.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: legacy
+        labels: {app: legacy}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: legacy}
+        template:
+          metadata:
+            labels: {app: legacy}
+          spec:
+            serviceAccountName: legacy-sa
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsUser: 0
+            containers:
+            - name: app
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+    root-pod.yaml: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: root-probe
+      spec:
+        serviceAccountName: default
+        terminationGracePeriodSeconds: 2
+        securityContext:
+          runAsUser: 0
+        containers:
+        - name: app
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+  experiment:
+    id: X-SCC-01
+    objective: "Show an SCC rejection and its repair as the developer, then have the administrator grant anyuid to one ServiceAccount in one project, prove which SCC admitted the pod, revoke the grant, and leave no SCC binding behind."
+    changes:
+      - "RoleBinding system:openshift:scc:anyuid in project academy-lesson-f-scc, naming only the ServiceAccount legacy-sa (created by the administrator, removed)"
+      - "Project academy-lesson-f-scc, the developer's temporary lesson project, with the Deployments vendor-app and legacy and the ServiceAccount legacy-sa (deleted by the rollback)"
+    preflight:
+      - {cmd: "oc get clusterrole system:openshift:scc:anyuid -o name"}
+      - cmd: |-
+          ans=$(oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-lesson-f-scc:legacy-sa -n academy-lesson-f-scc 2>/dev/null)
+          test "$ans" = no
+      - cmd: |-
+          found=$(oc get clusterrolebinding system:openshift:scc:anyuid --ignore-not-found -o name) || exit 1
+          test -z "$found"
+    snapshot:
+      - "oc get scc -o json | jq -S '[.items[] | {name:.metadata.name,body:del(.metadata,.status)}] | sort_by(.name)'"
+      - "oc get clusterrolebindings -o json | jq -S '[.items[] | {name:.metadata.name,roleRef,subjects}] | sort_by(.name)'"
+      - "oc get clusterrole system:openshift:scc:anyuid -o jsonpath='{.rules}'"
+    rollback:
+      - "oc delete rolebinding system:openshift:scc:anyuid -n academy-lesson-f-scc --ignore-not-found"
+      - "oc delete project academy-lesson-f-scc --ignore-not-found --wait=false"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          found=$(oc get namespace academy-lesson-f-scc --ignore-not-found -o name) || exit 1
+          test -z "$found" && exit 0
+          sleep 5
+        done
+        exit 1
+    verify:
+      - cmd: |-
+          found=$(oc get namespace academy-lesson-f-scc --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - cmd: |-
+          ans=$(oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:academy-lesson-f-scc:legacy-sa -n academy-lesson-f-scc 2>/dev/null)
+          test "$ans" = no
+- id: n.selinux-node
+  title: SELinux, seccomp and the node underneath
+  subtitle: "The checks after admission, read inside the pod and on the node"
+  module: b3-workload-security
+  mode: GUIDED_INVESTIGATION
+  minutes: 30
+  level: 2
+  supports: "OpenShift 4.21 on RHCOS, Kubernetes 1.34 security contexts. Every command was run on OpenShift Local 4.21: by the ordinary user developer, in a temporary project of their own, and by the cluster administrator kubeadmin, who read the node through oc debug node/crc with read-only commands. The debug pods ran in a namespace created for the recording and deleted afterwards; the node's configuration was only read, and the cluster was checked for leftover debug namespaces and pods (experiment X-NODE-01)."
+  concepts:
+    - linux.selinux
+    - container.security
+    - sec.scc
+  prerequisites:
+    - f.scc
+    - e.storage
+  objective: |
+    Explain the four independent locks on every OpenShift container (UID and file permissions, capabilities,
+    seccomp, SELinux), read the SELinux level OpenShift gives each project inside a pod and on the node, and recognise
+    a "Permission denied" that file permissions cannot explain.
+  record_on: cluster-admin
+  flow:
+    - kind: teach
+      id: situation
+      title: The pod runs, but a write fails
+      body: |
+        Your pod starts successfully, but the application cannot write its data. A colleague changes the file mode
+        to allow everyone and the error remains. Which permission check did that change actually address?
+
+        [Security Context Constraints](/lesson/f.scc) explained admission. This lesson follows the Linux checks
+        after admission: file permissions, capabilities, seccomp and SELinux. Everything here ran on OpenShift Local
+        4.21: the ordinary user `developer` read the evidence inside a pod of their project,
+        `academy-lesson-n-selinux-node`, and the cluster administrator `kubeadmin` read the same labels on the node.
+    - kind: teach
+      id: permissions
+      title: Start with the process identity
+      body: |
+        **Discretionary access control (DAC)** is the UID, group and mode-bit check from Linux file permissions.
+        It is one check on access, not the whole security model. Under restricted-v2, OpenShift assigns a project
+        UID; images using the group-0 convention give that user access through the group permission bits.
+
+        First read the actual identity, then the directory's owner and mode. Do not infer privileges from the
+        word `root` in a group name.
+    - kind: show
+      id: box-manifest
+      body: "The developer runs a small Deployment with an `emptyDir` volume, `box-data`, mounted at `/data`:"
+      code: |
+        spec:
+          template:
+            spec:
+              securityContext:
+                runAsNonRoot: true
+              containers:
+              - name: box
+                image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                # a copy of sleep with a name that is easy to find among the node's processes
+                command: ["/bin/sh", "-c", "cp /bin/sleep /tmp/box-app && exec /tmp/box-app infinity"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities: {drop: [ALL]}
+                  seccompProfile: {type: RuntimeDefault}
+                volumeMounts:
+                - {name: box-data, mountPath: /data}
+              volumes:
+              - {name: box-data, emptyDir: {}}
+      caption: box.yaml (the pod template, abridged)
+    - kind: ask
+      id: guess-uid
+      guess: true
+      recalls: f.scc
+      prompt: "The manifest sets runAsNonRoot but no runAsUser, and the image's default user is root. Which UID will the process have?"
+      choices:
+        - text: 0, the image's default user
+          why: runAsNonRoot forbids UID 0, and restricted-v2 sets a UID of its own. The next steps show which.
+        - text: The first UID of the project's range
+          why: restricted-v2 fills in runAsUser from the project's range when the pod sets none. The next steps show it.
+        - text: A random UID at every start
+          why: The UID comes from the project's allocation and stays the same. The next steps show it.
+      answer: 1
+    - kind: show
+      id: apply-box
+      run: "oc apply -f box.yaml"
+      notice: "Created, with no warning: the pod asks for nothing that restricted-v2 refuses."
+    - kind: show
+      id: rollout-box
+      run: "oc rollout status deploy/box --timeout=120s"
+      notice: "`successfully rolled out`."
+    - kind: show
+      id: identity
+      run: "oc exec deploy/box -- id"
+      notice: |
+        `uid=1001540000`, not 0: a UID from the project's allocated range, which restricted-v2 fills in when the pod
+        sets none. This lesson does not read the range; [Security Context Constraints](/lesson/f.scc) does, and shows
+        that the default is its first UID. `gid=0(root)` names a group, not the root user. Another project has a
+        different allocation.
+    - kind: ask
+      id: recall-group
+      prompt: The process above tries to create a file in a directory owned by root:root with mode 0755. Which permission set applies?
+      recalls: f.scc
+      choices:
+        - text: Others r-x because the UID is large
+          why: Group membership is checked before the others bits; the numeric size of a UID has no privilege meaning.
+        - text: Group r-x
+          why: The UID differs from the owner but the process belongs to group 0, so the group bits apply and do
+            not allow writing.
+        - text: Owner rwx because the group is root
+          why: A matching group does not make the UID match the file owner.
+      answer: 1
+    - kind: teach
+      id: selinux
+      title: Labels are an independent check
+      body: |
+        **SELinux** applies mandatory access control: the node's policy checks labels on the process and on the
+        object it tries to access, independently of mode bits. OpenShift nodes run RHCOS (Red Hat Enterprise Linux
+        CoreOS), which keeps SELinux enforcing; disabling it is unsupported.
+
+        A label has the form `user:role:type:level`. The **type** describes the policy domain: ordinary confined
+        containers use `container_t`, and their writable files commonly use `container_file_t`.
+        Passing the DAC check does not grant access to a file with an incompatible SELinux label.
+    - kind: ask
+      id: mode-prediction
+      prompt: Back to the opening case. After `chmod 777` on the data directory, the write still fails with `Permission denied`. What do you inspect next?
+      choices:
+        - text: The SELinux labels of the process and the directory
+          why: Mode bits now allow everyone, so DAC is no longer the refusal. SELinux compares labels independently; the next steps show how to read them.
+        - text: The directory's owner, to `chown` it to the pod's UID
+          why: Ownership belongs to the same DAC check that mode 777 already opened to everyone. Changing the owner cannot satisfy a label check.
+        - text: The capabilities, to add `DAC_OVERRIDE` to the container
+          why: '`DAC_OVERRIDE` bypasses mode bits, which mode 777 already opened. It does not bypass SELinux, which is a separate check.'
+      answer: 0
+    - kind: teach
+      id: mcs
+      title: A project gets its own categories
+      body: |
+        The label's **level** includes Multi-Category Security (MCS) categories. For ordinary restricted-v2 pods,
+        OpenShift supplies the project's level from the annotation `openshift.io/sa.scc.mcs`. Pods in the same
+        project normally share it; another project receives a different level. The node's policy uses those
+        categories to separate container data even when processes share the type `container_t`.
+
+        Read the project's allocation and the admitted pod's `seLinuxOptions` together. Matching levels are necessary
+        for access but not sufficient: the mode bits and the requested operation must allow it too.
+    - kind: show
+      id: read-labels
+      body: "The developer reads the level allocated to their project:"
+      run: "oc get project academy-lesson-n-selinux-node -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs}{\"\\n\"}'"
+      notice: "`s0:c39,c29`: sensitivity `s0` and two categories, `c39` and `c29`. That is this project's level."
+    - kind: show
+      id: pod-level
+      body: "SCC admission copied it into the pod:"
+      run: "oc get pods -l app=box -o jsonpath='{.items[0].spec.securityContext.seLinuxOptions}{\"\\n\"}'"
+      notice: "`{\"level\":\"s0:c39,c29\"}`: the same level, in the pod's `seLinuxOptions`. The manifest never asked for it."
+    - kind: show
+      id: process-label
+      body: "A process can read its own label in `/proc/self/attr/current`:"
+      run: "oc exec deploy/box -- cat /proc/self/attr/current"
+      notice: |
+        `system_u:system_r:container_t:s0:c29,c39`: the confined container type and the project's categories. The
+        kernel prints them in ascending order, `c29,c39`, where the annotation said `c39,c29`; they are the same pair.
+    - kind: ask
+      id: guess-file-label
+      guess: true
+      prompt: "This process writes a new file on its emptyDir volume. Which categories will the file's label carry?"
+      choices:
+        - text: None, only `s0`, like system files
+          why: Files a confined container creates on its volume are labelled for it. The next step shows the label.
+        - text: The project's categories, `c29,c39`
+          why: The volume was labelled with the pod's level, and new files inherit it. The next step shows it.
+        - text: A new pair, chosen for each file
+          why: Categories belong to the project, not to files. The next step shows the label.
+      answer: 1
+    - kind: show
+      id: file-label
+      body: "Files the container writes on its volume carry a label too. `ls -Z` prints it:"
+      run: "oc exec deploy/box -- sh -c 'echo saved > /data/report.txt && ls -Z /data'"
+      notice: "`system_u:object_r:container_file_t:s0:c29,c39 report.txt`: the container file type with the same categories. The file belongs to this project's level."
+    - kind: try
+      id: inspect-other-pod
+      body: Pod worker-abc exists in project billing. Type a command to read its full YAML, including the admitted
+        security context.
+      accept:
+        - oc get pod worker-abc -n billing -o yaml
+        - oc get pod worker-abc -o yaml -n billing
+        - oc get pod worker-abc --namespace=billing --output=yaml
+        - oc get pod worker-abc --output=yaml --namespace=billing
+        - oc get pod worker-abc --namespace billing --output yaml
+        - oc get pod worker-abc --output yaml --namespace billing
+        - oc get pods worker-abc -n billing -o yaml
+        - oc get pods worker-abc -o yaml -n billing
+        - oc get pods worker-abc --namespace=billing --output=yaml
+        - oc get pods worker-abc --output=yaml --namespace=billing
+        - oc get pods worker-abc --namespace billing --output yaml
+        - oc get pods worker-abc --output yaml --namespace billing
+        - oc get pod/worker-abc -n billing -o yaml
+        - oc get pod/worker-abc -o yaml -n billing
+        - oc get pod/worker-abc --namespace=billing --output=yaml
+        - oc get pod/worker-abc --output=yaml --namespace=billing
+        - oc get pod/worker-abc --namespace billing --output yaml
+        - oc get pod/worker-abc --output yaml --namespace billing
+        - oc get pods/worker-abc -n billing -o yaml
+        - oc get pods/worker-abc -o yaml -n billing
+        - oc get pods/worker-abc --namespace=billing --output=yaml
+        - oc get pods/worker-abc --output=yaml --namespace=billing
+        - oc get pods/worker-abc --namespace billing --output yaml
+        - oc get pods/worker-abc --output yaml --namespace billing
+        - oc get pod worker-abc -n billing -o=yaml
+        - oc get pod worker-abc -o=yaml -n billing
+        - oc get pod worker-abc -n billing --output yaml
+        - oc get pod worker-abc --output yaml -n billing
+        - oc get pod worker-abc -n billing --output=yaml
+        - oc get pod worker-abc --output=yaml -n billing
+        - oc get pod worker-abc --namespace billing -o yaml
+        - oc get pod worker-abc -o yaml --namespace billing
+        - oc get pod worker-abc --namespace billing -o=yaml
+        - oc get pod worker-abc -o=yaml --namespace billing
+        - oc get pod worker-abc --namespace billing --output=yaml
+        - oc get pod worker-abc --output=yaml --namespace billing
+        - oc get pod worker-abc --namespace=billing -o yaml
+        - oc get pod worker-abc -o yaml --namespace=billing
+        - oc get pod worker-abc --namespace=billing -o=yaml
+        - oc get pod worker-abc -o=yaml --namespace=billing
+        - oc get pod worker-abc --namespace=billing --output yaml
+        - oc get pod worker-abc --output yaml --namespace=billing
+        - oc get pods worker-abc -n billing -o=yaml
+        - oc get pods worker-abc -o=yaml -n billing
+        - oc get pods worker-abc -n billing --output yaml
+        - oc get pods worker-abc --output yaml -n billing
+        - oc get pods worker-abc -n billing --output=yaml
+        - oc get pods worker-abc --output=yaml -n billing
+        - oc get pods worker-abc --namespace billing -o yaml
+        - oc get pods worker-abc -o yaml --namespace billing
+        - oc get pods worker-abc --namespace billing -o=yaml
+        - oc get pods worker-abc -o=yaml --namespace billing
+        - oc get pods worker-abc --namespace billing --output=yaml
+        - oc get pods worker-abc --output=yaml --namespace billing
+        - oc get pods worker-abc --namespace=billing -o yaml
+        - oc get pods worker-abc -o yaml --namespace=billing
+        - oc get pods worker-abc --namespace=billing -o=yaml
+        - oc get pods worker-abc -o=yaml --namespace=billing
+        - oc get pods worker-abc --namespace=billing --output yaml
+        - oc get pods worker-abc --output yaml --namespace=billing
+        - oc get pod/worker-abc -n billing -o=yaml
+        - oc get pod/worker-abc -o=yaml -n billing
+        - oc get pod/worker-abc -n billing --output yaml
+        - oc get pod/worker-abc --output yaml -n billing
+        - oc get pod/worker-abc -n billing --output=yaml
+        - oc get pod/worker-abc --output=yaml -n billing
+        - oc get pod/worker-abc --namespace billing -o yaml
+        - oc get pod/worker-abc -o yaml --namespace billing
+        - oc get pod/worker-abc --namespace billing -o=yaml
+        - oc get pod/worker-abc -o=yaml --namespace billing
+        - oc get pod/worker-abc --namespace billing --output=yaml
+        - oc get pod/worker-abc --output=yaml --namespace billing
+        - oc get pod/worker-abc --namespace=billing -o yaml
+        - oc get pod/worker-abc -o yaml --namespace=billing
+        - oc get pod/worker-abc --namespace=billing -o=yaml
+        - oc get pod/worker-abc -o=yaml --namespace=billing
+        - oc get pod/worker-abc --namespace=billing --output yaml
+        - oc get pod/worker-abc --output yaml --namespace=billing
+        - oc get pods/worker-abc -n billing -o=yaml
+        - oc get pods/worker-abc -o=yaml -n billing
+        - oc get pods/worker-abc -n billing --output yaml
+        - oc get pods/worker-abc --output yaml -n billing
+        - oc get pods/worker-abc -n billing --output=yaml
+        - oc get pods/worker-abc --output=yaml -n billing
+        - oc get pods/worker-abc --namespace billing -o yaml
+        - oc get pods/worker-abc -o yaml --namespace billing
+        - oc get pods/worker-abc --namespace billing -o=yaml
+        - oc get pods/worker-abc -o=yaml --namespace billing
+        - oc get pods/worker-abc --namespace billing --output=yaml
+        - oc get pods/worker-abc --output=yaml --namespace billing
+        - oc get pods/worker-abc --namespace=billing -o yaml
+        - oc get pods/worker-abc -o yaml --namespace=billing
+        - oc get pods/worker-abc --namespace=billing -o=yaml
+        - oc get pods/worker-abc -o=yaml --namespace=billing
+        - oc get pods/worker-abc --namespace=billing --output yaml
+        - oc get pods/worker-abc --output yaml --namespace=billing
+        - oc -n billing get pod worker-abc -o yaml
+        - oc --namespace=billing get pod worker-abc --output=yaml
+      hints:
+        - match: ^oc logs
+          say: Application logs do not show the whole admitted pod spec; retrieve the object as YAML.
+        - match: -n shop|--namespace[= ]shop
+          say: This Pod belongs to billing; use its project.
+        - match: -o json
+          say: JSON contains the settings too, but this task asks for YAML so it can be compared with the example.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the command looks for worker-abc in your current project. The Pod is in billing.
+      hint: Retrieve the Pod with get, select billing with -n, and choose YAML with -o.
+      then: |
+        The YAML would show the pod's admitted settings, including its SELinux level and seccomp profile. It would not
+        prove that SELinux caused an application error.
+    - kind: teach
+      id: volumes
+      title: A shared volume also has labels
+      body: |
+        SELinux labels live on files, so a volume carries them too, as `report.txt` showed. When a pod starts, the
+        node can relabel the files of a volume with that pod's level, if the storage type supports it. If a pod from
+        a second project relabels the same shared filesystem with its own categories, the first project's pods can
+        lose access even though the file modes allow it. Other storage types handle labels differently; check the
+        driver.
+
+        When SELinux refuses an access, the node records an **AVC denial** (AVC stands for access vector cache) in
+        its audit log: the process label, the file label and the refused operation. The application sees only
+        "permission denied".
+
+        [Storage](/lesson/e.storage) separates volume lifetime from pod lifetime, but a long-lived shared volume is not
+        a safe way to share data between projects; prefer a service API. restricted-v2 also forbids hostPath volumes.
+    - kind: ask
+      id: shared-data
+      prompt: "A shared filesystem was relabelled for billing. Now shop's pods get \"permission denied\" although the modes allow writes. What evidence do you request?"
+      choices:
+        - text: The application log repeated after another chmod
+          why: The same error text cannot identify which kernel check refused the access, and mode bits do not change labels.
+        - text: The ReplicaSet event for a rejected Pod
+          why: These pods exist and are accessing files; admission rejection is a different stage.
+        - text: The node denial with both labels
+          why: An AVC denial names the process label, the file label and the refused operation. Differing categories alone suggest a cause but do not prove it.
+      answer: 2
+    - kind: teach
+      id: capabilities
+      title: Root operations are divided into capabilities
+      body: |
+        **Linux capabilities** split privileged operations into separate permissions. A process with UID 0 is
+        not automatically given every capability inside a container. restricted-v2 drops all capabilities;
+        a pod may explicitly add NET_BIND_SERVICE, but not NET_ADMIN.
+
+        `/proc/1/status` describes process 1 of the container: `CapEff` holds its effective capabilities, `CapBnd`
+        the most it could ever gain, and `Seccomp` its syscall filter mode (0 none, 2 a filter). A failed ownership
+        change might involve capabilities; the error text alone still does not prove it.
+    - kind: show
+      id: effective-capabilities
+      run: "oc exec deploy/box -- grep -E '^(CapEff|CapBnd|Seccomp)' /proc/1/status"
+      notice: |
+        `CapEff` and `CapBnd` are all zeros: no capability now, and none can be gained. `Seccomp: 2` with one filter
+        (`Seccomp_filters: 1`): the runtime's default filter, which the pod asked for with `RuntimeDefault`, is active.
+    - kind: ask
+      id: choose-image-repair
+      prompt: Startup runs chown on a root-owned directory without CAP_CHOWN. Which repair removes that runtime
+        dependency?
+      choices:
+        - text: Change only the file SELinux type
+          why: Labels are a separate check; they do not grant the missing ownership-change capability.
+        - text: Prepare ownership in the image
+          why: Build-time ownership and group-writable paths avoid needing a privileged ownership change at startup.
+        - text: Add NET_BIND_SERVICE to the Pod
+          why: That capability relates to binding low network ports, not changing file ownership.
+      answer: 1
+    - kind: teach
+      id: seccomp
+      title: A syscall can be filtered too
+      body: |
+        A **system call** asks the kernel to perform an operation. **seccomp** filters those calls.
+        `seccompProfile.type: RuntimeDefault` selects the container runtime's default profile, rather than
+        one universal list supplied by Kubernetes. Profiles and the resulting errors depend on the runtime.
+
+        An unusual tool can fail while ordinary application work succeeds. Confirm the blocked call and the
+        profile before proposing a narrowly scoped exception. Running as root does not remove a seccomp filter.
+    - kind: teach
+      id: node-access
+      title: Evidence from the node
+      body: |
+        The developer has shown everything a pod can see. The node's own view (its SELinux mode, the label of a
+        process among all the others, the label of a volume on disk, the audit log) needs the administrator.
+        RHCOS nodes are not logged in to with SSH: `oc debug node/crc` starts a privileged pod on the node with the
+        host's filesystem at `/host`, and `chroot /host` runs the node's own tools.
+
+        That pod is privileged, so where it runs matters. Without `--to-namespace`, oc creates a temporary namespace
+        for it and deletes it afterwards. Here the administrator creates the namespace, so the recording can prove
+        that nothing is left. The default debug image, `tools`, would be pulled onto the node (about 240 MB
+        compressed); `--image-stream` picks the `cli` image, which this node already has. Any image with `chroot`
+        will do, because after `chroot /host` only the node's tools run.
+    - kind: show
+      id: debug-ns-manifest
+      code: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: academy-x-node-debug
+          annotations:
+            openshift.io/node-selector: ""       # no project node selector: the debug pod may land on any node
+          labels:
+            pod-security.kubernetes.io/enforce: privileged
+            pod-security.kubernetes.io/audit: privileged
+            pod-security.kubernetes.io/warn: privileged
+            security.openshift.io/scc.podSecurityLabelSync: "false"
+      caption: node-debug-ns.yaml
+      notice: |
+        The labels tell Pod Security Admission to expect privileged pods here and stop OpenShift from adjusting them,
+        as oc does for its own temporary namespaces. Only the administrator can create pods in it.
+    - kind: show
+      id: create-debug-ns
+      run: "oc create -f node-debug-ns.yaml"
+      notice: "`namespace/academy-x-node-debug created`."
+    - kind: try
+      id: try-getenforce
+      body: "As the administrator, ask node `crc` whether SELinux is enforcing, with the node's own `getenforce`."
+      accept:
+        - "oc debug node/crc -- chroot /host getenforce"
+        - "oc debug node/crc --to-namespace=academy-x-node-debug -- chroot /host getenforce"
+        - "oc debug node/crc --to-namespace academy-x-node-debug -- chroot /host getenforce"
+        - "oc debug node/crc --image-stream=openshift/cli:latest -- chroot /host getenforce"
+        - "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host getenforce"
+        - "oc debug node/crc --image-stream=openshift/cli:latest --to-namespace=academy-x-node-debug -- chroot /host getenforce"
+      hints:
+        - match: "-- getenforce$"
+          say: "Without `chroot /host`, the command runs from the debug image, not from the node. Put `chroot /host` before it."
+        - match: "^oc debug crc"
+          say: "Name the kind: `node/crc`. A bare name is looked up as a pod."
+        - match: "^ssh|^oc rsh"
+          say: "RHCOS nodes are reached with `oc debug node/crc`, not SSH or a pod shell."
+        - match: "node-logs"
+          say: "`oc adm node-logs` reads the node's journals. `getenforce` needs a command run on the node."
+        - match: "setenforce"
+          say: "`setenforce` changes the mode. The task only reads it, with `getenforce`."
+      hint: "`oc debug node/crc`, then `--`, then `chroot /host` and the command."
+      run: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host getenforce"
+      then: |
+        `Enforcing`. Around it, oc reported `Starting pod/crc-debug-sfg7t` and `Removing debug pod` when the command
+        ended, and suggested `chroot /host`. The recording added `--to-namespace` and `--image-stream`, for the
+        reasons above.
+    - kind: show
+      id: two-levels
+      body: "Every namespace gets its own level, the new one included:"
+      run: "oc get namespace academy-lesson-n-selinux-node academy-x-node-debug -o custom-columns='NAME:.metadata.name,MCS:.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs'"
+      notice: |
+        `s0:c39,c29` and `s0:c39,c34`. They share `c39` but not the other category. A process may use a file only if
+        the file's categories are all among its own, so neither namespace's pods can use the other's files.
+    - kind: show
+      id: node-process
+      body: "The container's process among all the node's processes. `ps -eZ` prints each process's label:"
+      run: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ps -eZ | grep box-app'"
+      notice: "One line among all the node's processes: `box-app`, PID 245701 on the node, labelled `container_t:s0:c29,c39`, the label the pod read from the inside."
+    - kind: show
+      id: node-files
+      body: "The volume on the node's disk, under the kubelet's directory for the pod:"
+      run: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ls -Z /var/lib/kubelet/pods/*/volumes/kubernetes.io~empty-dir/box-data'"
+      notice: "`report.txt`, labelled `container_file_t:s0:c29,c39` on the node's disk, as it was inside the pod."
+    - kind: ask
+      id: guess-debug-type
+      guess: true
+      prompt: "The debug pod read a process and a file of another namespace. Which SELinux type does it run as?"
+      choices:
+        - text: container_t, with its own namespace's categories
+          why: With those categories it could not have read `c29,c39` files. The next step shows its type.
+        - text: spc_t, which SELinux does not confine
+          why: A privileged container runs as the super-privileged type. The next step shows it.
+        - text: unconfined_t, like an administrator's login shell
+          why: Containers get container types; the next step shows which one.
+      answer: 1
+    - kind: show
+      id: debug-label
+      body: "And the debug pod itself:"
+      run: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host id -Z"
+      notice: |
+        `system_u:system_r:spc_t:s0`: the super-privileged container type, with no categories. SELinux does not
+        confine it. That is why it can read every process and file on the node, and why only administrators may
+        start it.
+    - kind: show
+      id: node-evidence
+      body: "Finally, the audit log: did SELinux refuse anything in the last ten minutes?"
+      run: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host ausearch -m AVC,USER_AVC -ts recent"
+      notice: |
+        `<no matches>`: no SELinux denial was logged in the last ten minutes, so nothing in this lesson was refused by
+        SELinux. `ausearch` exits with 1 when it finds nothing, and oc passes that on as `error: non-zero exit code
+        from debug container`. Here that is the answer, not a failure.
+    - kind: ask
+      id: confirmed-seccomp
+      prompt: An administrator confirms a runtime seccomp profile blocks the tool's required call. What should the
+        team do?
+      choices:
+        - text: Review an exception for that workload
+          why: Confirm the need, then scope the exception or choose a tool that avoids the call.
+        - text: Disable seccomp on all cluster nodes
+          why: That removes protection from unrelated workloads to solve one requirement.
+        - text: Run every container as root instead
+          why: UID changes do not remove an installed syscall filter.
+      answer: 0
+    - kind: show
+      id: debug-pods-gone
+      body: "Each `oc debug` removed its pod when its command ended. The administrator checks, then deletes the namespace:"
+      run: "oc get pods -n academy-x-node-debug"
+      notice: "`No resources found`: each of the five debug pods was removed."
+    - kind: show
+      id: delete-debug-ns
+      run: "oc delete namespace academy-x-node-debug"
+      notice: "`namespace \"academy-x-node-debug\" deleted`. The node was only read."
+    - kind: reflect
+      id: explain-locks
+      prompt: A colleague says Permission denied proves the image needs root. Give an evidence-based response.
+      model: |
+        First inspect the UID, groups, directory mode and ownership. If DAC allows the operation, compare the labels
+        of the process and the file and ask for a node AVC record; check capabilities or the runtime seccomp profile
+        when the failing operation requires them. One error string cannot identify which independent check refused
+        it, and running as root removes none of the other three.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can read an admitted pod's identity, labels, capabilities and seccomp mode from the inside, read the same
+        labels on the node as an administrator without leaving anything behind, and tell file permissions from
+        SELinux, capabilities and seccomp.
+        [Container anatomy](/lab/lab.container-anatomy) lets you inspect a container on your own.
+
+        Next, [Effective permissions are paths](/lesson/l.access-paths) turns from what a container may do to who
+        may act on the cluster, and why a permission can arrive by more than one path.
+  sections:
+    - id: four-checks
+      title: Runtime checks and useful evidence
+      depth: true
+      body: |
+        | Check | Question | Evidence and repair |
+        |---|---|---|
+        | DAC | do UID, groups and modes allow the access? | inspect id and directory modes; fix writable image paths |
+        | capabilities | is this privileged operation allowed? | inspect CapEff for the relevant process; remove runtime privilege needs |
+        | seccomp | is this syscall allowed by the active filter? | identify the actual syscall and runtime profile; review a scoped exception |
+        | SELinux | do policy and labels allow this operation? | node AVC record; fix labels or sharing design |
+        | SCC admission, before runtime | is the requested Pod allowed at all? | no pod and ReplicaSet FailedCreate; fix the template |
+
+        A high UID is not random at each start: restricted-v2 defaults to the project's minimum UID.
+        Group 0 is a group and does not supply capabilities. SELinux type enforcement and MCS category checks
+        add restrictions beyond file modes; not every file has a container-private MCS label.
+        Labels alone are not conclusive proof of a denial, and absence of a displayed AVC is not proof that
+        all SELinux checks passed: audit visibility and policy logging matter.
+
+        RHCOS is an image-based operating system managed through cluster updates and MachineConfigs.
+        Administrators use node journal collection (`oc adm node-logs`) or debug sessions for host evidence, and
+        read before they change anything. SSH is possible but discouraged; ad hoc changes can be lost or produce
+        configuration drift.
+    - id: volume-labelling
+      title: SELinux volume behaviour in 4.21
+      depth: true
+      body: |
+        | Volume case | Default or limitation |
+        |---|---|
+        | supported RWO/RWX filesystem volume | recursive relabelling can walk every file, increasing startup time |
+        | supported ReadWriteOncePod volume | an SELinux mount context can avoid a recursive walk |
+        | RWO/RWX SELinux mount option | Technology Preview in OpenShift 4.21, requiring the documented feature gates |
+        | seLinuxChangePolicy: Recursive | keeps recursive behaviour; applies to newly created pods |
+        | storage without suitable label support | depends on the storage implementation; inspect its documentation |
+        | hostPath under restricted-v2 | rejected at admission |
+
+        Namespace label `storage.openshift.io/selinux-change-policy=Recursive` can default that policy for new pods;
+        a pod-level setting can override it. Check CSI driver support before assuming mount-option behaviour.
+        This does not change the separate ID-mapped mount requirement of user-namespaced restricted-v3 pods.
+
+        Workstation Podman commonly allocates SELinux categories per container, while ordinary OpenShift
+        restricted-v2 pods receive a project level. A successful laptop test therefore does not establish
+        that UID allocation, labels and capability sets match the cluster.
+  review:
+    - q: Which SELinux type do ordinary confined container processes use on OpenShift?
+      a: container_t (their writable files are container_file_t).
+    - q: Where does a pod's SELinux level (MCS categories) come from?
+      a: From the project's openshift.io/sa.scc.mcs annotation, applied by SCC admission because restricted-v2 uses
+        seLinuxContext MustRunAs.
+    - q: How can a process read its own SELinux label, and a file's?
+      a: cat /proc/self/attr/current for the process; ls -Z for files (ps -eZ lists the labels of every process on a node).
+    - q: What does seccompProfile RuntimeDefault do, and how do you see it is active?
+      a: It selects the container runtime's default syscall filter; Seccomp 2 in /proc/<pid>/status shows a filter is active.
+    - q: How do administrators read a node's files and processes on RHCOS without SSH?
+      a: oc debug node/<name> starts a privileged debug pod (type spc_t) with the host at /host; chroot /host runs the node's tools. oc adm node-logs reads the journals.
+  labs:
+    - lab.container-anatomy
+  limits: |
+    No SELinux denial was provoked: producing one would need two projects sharing a volume or a change to a node,
+    and the node is only read here. The AVC search shows what the audit log held during the recording. Node
+    commands need cluster-admin; learners without it can still read every developer-side step on their own pods.
+  enterprise: |
+    Security assessments in regulated organisations ask how tenants are isolated on shared nodes. The precise answer
+    is layered: separate UID ranges, dropped capabilities, seccomp, and SELinux MCS categories per project, plus
+    NetworkPolicies for traffic. Keeping SELinux enforcing on every node is part of the platform's compliance
+    baseline, and node debug sessions are themselves privileged access that is logged and reviewed.
+  references:
+    - title: 'OpenShift 4.21: Managing security context constraints'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies
+    - title: 'Kubernetes: Configure a security context (SELinux, seccomp)'
+      url: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    - title: 'Kubernetes: Restrict a container''s syscalls with seccomp'
+      url: https://kubernetes.io/docs/tutorials/security/seccomp/
+    - title: 'OpenShift 4.21: Container security (SELinux and MCS in projects)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/container-security
+    - title: 'OpenShift 4.21: Understanding persistent storage (SELinux relabelling)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/storage/understanding-persistent-storage
+    - title: 'RHEL 9: Troubleshooting problems related to SELinux'
+      url: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux
+    - title: 'OpenShift 4.21: Gathering data about your cluster (node logs and debug)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/gathering-cluster-data
+  commands:
+    - {cmd: "oc apply -f box.yaml", as: developer, meaning: "a small Deployment with an emptyDir volume"}
+    - {cmd: "oc rollout status deploy/box --timeout=120s", as: developer, meaning: "running"}
+    - {cmd: "oc exec deploy/box -- id", as: developer, meaning: "the project's first UID and group 0"}
+    - {cmd: "oc get project academy-lesson-n-selinux-node -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs}{\"\\n\"}'", as: developer, meaning: "the SELinux level allocated to the project"}
+    - {cmd: "oc get pods -l app=box -o jsonpath='{.items[0].spec.securityContext.seLinuxOptions}{\"\\n\"}'", as: developer, meaning: "the level SCC admission put into the pod"}
+    - {cmd: "oc exec deploy/box -- cat /proc/self/attr/current", as: developer, meaning: "the process's own SELinux label"}
+    - {cmd: "oc exec deploy/box -- sh -c 'echo saved > /data/report.txt && ls -Z /data'", as: developer, meaning: "a file on the volume and its label"}
+    - {cmd: "oc exec deploy/box -- grep -E '^(CapEff|CapBnd|Seccomp)' /proc/1/status", as: developer, meaning: "capabilities and seccomp mode of process 1"}
+    - {cmd: "oc create -f node-debug-ns.yaml", as: admin, meaning: "a namespace for the debug pods, labelled privileged for Pod Security"}
+    - {cmd: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host getenforce", as: admin, timeout: 240, meaning: "SELinux mode on the node"}
+    - {cmd: "oc get namespace academy-lesson-n-selinux-node academy-x-node-debug -o custom-columns='NAME:.metadata.name,MCS:.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs'", as: admin, meaning: "each namespace has its own level"}
+    - {cmd: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ps -eZ | grep box-app'", as: admin, timeout: 240, meaning: "the container's process and its label on the node"}
+    - {cmd: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ls -Z /var/lib/kubelet/pods/*/volumes/kubernetes.io~empty-dir/box-data'", as: admin, timeout: 240, meaning: "the volume's file and its label on the node's disk"}
+    - {cmd: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host id -Z", as: admin, timeout: 240, meaning: "the debug pod's own label"}
+    - {cmd: "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host ausearch -m AVC,USER_AVC -ts recent", as: admin, expect: any, timeout: 240, meaning: "SELinux denials in the last ten minutes"}
+    - {cmd: "oc get pods -n academy-x-node-debug", as: admin, meaning: "no debug pod left"}
+    - {cmd: "oc delete namespace academy-x-node-debug", as: admin, meaning: "remove the debug namespace"}
+  files:
+    box.yaml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: box
+        labels: {app: box}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels: {app: box}
+        template:
+          metadata:
+            labels: {app: box}
+          spec:
+            terminationGracePeriodSeconds: 2
+            securityContext:
+              runAsNonRoot: true
+            containers:
+            - name: box
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              imagePullPolicy: IfNotPresent
+              # a copy of sleep with a name that is easy to find among the node's processes
+              command: ["/bin/sh", "-c", "cp /bin/sleep /tmp/box-app && exec /tmp/box-app infinity"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              volumeMounts:
+              - {name: box-data, mountPath: /data}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+            volumes:
+            - {name: box-data, emptyDir: {}}
+    node-debug-ns.yaml: |
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: academy-x-node-debug
+        annotations:
+          openshift.io/node-selector: ""
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
+          security.openshift.io/scc.podSecurityLabelSync: "false"
+  experiment:
+    id: X-NODE-01
+    objective: "Read SELinux evidence on the node as the administrator (getenforce, process and file labels, the audit log) through oc debug node, with the debug pods in a namespace the experiment creates and deletes, and prove that no debug namespace or pod remains and the node's configuration is unchanged."
+    changes:
+      - "Namespace academy-x-node-debug, labelled privileged for Pod Security (created, deleted)"
+      - "Debug pods crc-debug-* in academy-x-node-debug, one per oc debug node/crc command, each removed by oc when its command ended; on node crc only read-only commands ran (getenforce, ps, ls, id, ausearch)"
+      - "Project academy-lesson-n-selinux-node, the developer's temporary lesson project, with one Deployment (deleted by the rollback)"
+    preflight:
+      - cmd: |-
+          found=$(oc get namespace academy-x-node-debug --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc wait node/crc --for=condition=Ready --timeout=30s"}
+    snapshot:
+      - "oc get namespace academy-x-node-debug --ignore-not-found -o name"
+      - "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/desiredConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable} {.spec.taints}'"
+      - "oc get machineconfigs -o name"
+    rollback:
+      - "oc delete namespace academy-x-node-debug --ignore-not-found --wait=false"
+      - "oc delete project academy-lesson-n-selinux-node --ignore-not-found --wait=false"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          a=$(oc get namespace academy-x-node-debug --ignore-not-found -o name) || exit 1
+          b=$(oc get namespace academy-lesson-n-selinux-node --ignore-not-found -o name) || exit 1
+          test -z "$a$b" && exit 0
+          sleep 5
+        done
+        exit 1
+    verify:
+      - cmd: |-
+          found=$(oc get namespace academy-x-node-debug --ignore-not-found -o name) || exit 1
+          test -z "$found"
+      - {cmd: "oc wait node/crc --for=condition=Ready --timeout=60s"}

@@ -1,0 +1,417 @@
+# Linux path, module lx1-shell: remote access, written as a teaching flow.
+- id: lx.ssh-security
+  title: "Logging in to other machines with SSH"
+  subtitle: "Keys instead of passwords, how a client recognises a server, and copying files"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "OpenSSH and rsync 3.2 on RHEL 9 (the OpenSSH version differs between RHEL 9 minor releases; the commands used here behave the same in each). Recorded on a RHEL 9 workstation as an ordinary user, in a practice directory; no connection to another machine is made, and the demonstration keys are created for the recording and removed with it."
+  concepts: [linux.ssh]
+  prerequisites: [lx.users-permissions]
+  objective: |
+    Create a key pair and say which half goes where, explain how a client recognises a server and what the
+    host-key warning means, fix the permission problems SSH refuses to work with, and copy directories with rsync
+    without the trailing-slash surprise.
+  flow:
+    - kind: ask
+      id: recall-perms
+      recalls: lx.users-permissions
+      prompt: "A look back. A file has mode `600`. Who may read it?"
+      choices:
+        - text: "Only its owner"
+          why: "6 for the owner (read and write), 0 for the group and 0 for everyone else."
+        - text: "Its owner and its group"
+          why: "The group's digit is the middle one, 0: no permission at all."
+        - text: "Everyone, but only the owner may change it"
+          why: "That would be 644. With 600 the others digit is 0."
+      answer: 0
+    - kind: teach
+      id: what-ssh
+      title: "A shell on another machine"
+      body: |
+        Most Linux machines you will work on are somewhere else: a server in a data centre, or a **virtual machine**
+        (a computer simulated in software, one of several sharing a physical machine) in a cloud. **SSH** (secure shell) gives you a shell on them, over an encrypted connection: `ssh user@host`
+        connects to the SSH server (`sshd`) on that host, logging in as `user`, an account on the remote machine, and,
+        once you have proved who you are, gives you a prompt there. Everything typed and printed travels encrypted.
+
+        You can prove who you are with a password, but the usual way, and often the only one allowed, is a **key
+        pair**.
+    - kind: teach
+      id: keys
+      title: "Key pairs: one half stays, one half travels"
+      body: |
+        A key pair is two linked files. The **private key** stays on your machine, readable only by you. The
+        **public key** can be shown to anyone: you give it to every server you want to log in to. A server that
+        has your public key can check that you hold the private key, without the private key ever leaving your
+        machine.
+
+        `ssh-keygen` creates a pair. `-t ed25519` picks a modern key type, `-f ./id_demo` the file name of the
+        private key (the public one adds `.pub`), `-C demo-key` a comment stored in the public key, and `-q` keeps
+        the command quiet. The recording sets an empty passphrase (`-N ''`) so that it runs unattended. For a real
+        key, give it a passphrase, which encrypts the private key on disk.
+    - kind: show
+      id: keygen
+      run: "ssh-keygen -t ed25519 -N '' -C demo-key -f ./id_demo -q && ls -l id_demo id_demo.pub"
+      notice: "Two files: `id_demo`, the private key, mode `600` (owner only), and `id_demo.pub`, the public key, mode `644`. ssh-keygen set those modes itself."
+    - kind: ask
+      id: which-file
+      prompt: "`ssh-keygen -f ./id_demo` created `id_demo` and `id_demo.pub`. Which one is the private key?"
+      choices:
+        - text: "`id_demo`"
+          why: "The name given with `-f` is the private key; the public half adds `.pub`. The mode `600` in the listing agrees."
+        - text: "`id_demo.pub`"
+          why: "`.pub` marks the public key, mode `644`, which may be shown to anyone."
+        - text: "Both of them"
+          why: "Only one half is secret. The public half exists to be given away."
+      answer: 0
+    - kind: show
+      id: inside
+      body: "The key's **fingerprint**, a short summary used to compare keys by eye (`-l` prints it, `-f` names the key file):"
+      run: "ssh-keygen -lf id_demo.pub"
+      notice: "Four parts: the key size in bits, the fingerprint, the comment `demo-key` and the key type."
+    - kind: show
+      id: inside-files
+      body: "What the files contain. `cut -d' ' -f1,3` keeps fields 1 and 3 of the public key's line, splitting at spaces, and `ls -l` shows both files' permissions:"
+      run: "cut -d' ' -f1,3 id_demo.pub; ls -l id_demo id_demo.pub"
+      notice: |
+        The public key is one line: its type, a long encoded value (left out here by `cut`), and the comment.
+        `ssh-keygen` made the private key `id_demo` readable and writable by you only (`-rw-------`), while the
+        public key may be read by anyone (`-rw-r--r--`). The private key is the secret: never paste it anywhere.
+    - kind: ask
+      id: which-half
+      prompt: "You want to log in to `web1` with your key. What do you put on `web1`?"
+      choices:
+        - text: "The public key, in `~/.ssh/authorized_keys`"
+          why: "The server keeps the public halves of the keys allowed to log in, one per line, in that file in the target user's home."
+        - text: "The private key, in `~/.ssh/id_ed25519`"
+          why: "The private key never leaves your machine. Whoever holds it can log in as you."
+        - text: "Both halves, so that it can check them"
+          why: "The server only needs the public key to check a login. Copying the private key would expose it."
+      answer: 0
+    - kind: teach
+      id: authorized
+      body: |
+        On the server, the public keys allowed to log in as a user are listed in that user's
+        `~/.ssh/authorized_keys`. Run on your own machine, `ssh-copy-id -i ./id_demo.pub user@host` appends the
+        key named with `-i` to that file for the account `user` on `host`, using your password one last time. Then
+        `ssh -i ./id_demo user@host` logs in with that key; `-i` names it, because a key outside `~/.ssh` is not
+        found by itself. The recording builds the same structure in a practice directory, with no connection:
+    - kind: show
+      id: authorized-show
+      run: "mkdir -p demo-home/.ssh && cat id_demo.pub >> demo-home/.ssh/authorized_keys && chmod 700 demo-home/.ssh && chmod 600 demo-home/.ssh/authorized_keys && ls -ld demo-home/.ssh demo-home/.ssh/authorized_keys"
+      notice: "`.ssh` with mode `700` and `authorized_keys` with `600`: only the owner can enter or change them. These are the conservative settings usually recommended on a server; the next part explains what SSH actually checks."
+    - kind: teach
+      id: strict
+      title: "SSH insists on permissions"
+      body: |
+        The private key must stay secret: SSH ignores one that gives the group or others any permission at all,
+        even reading alone. The public key may be readable, as it is meant to be shown. On the server, `sshd`
+        checks ownership and write access instead: if `authorized_keys`, the `.ssh` directory or the home directory
+        is owned by another user, or is writable by group or others, key logins are refused (and SSH falls back to
+        asking for a password). Modes `700` and
+        `600` are the conservative recommendation. Here is the client's side, the private key rule. With no
+        server to connect to, the recording uses `ssh-keygen -y` (print the public half of a private key), which
+        loads the key with the same permission check as `ssh`:
+    - kind: show
+      id: too-open
+      run: "chmod 644 id_demo && ssh-keygen -y -f ./id_demo"
+      highlight: ["too open", "bad permissions"]
+      notice: "Mode `644` lets everyone read the private key, so SSH ignores it with a very visible warning."
+    - kind: try
+      id: try-chmod
+      body: "Fix the permissions of the private key `id_demo` so that SSH accepts it."
+      accept: ["chmod 600 id_demo", "chmod 400 id_demo", "chmod go-rwx id_demo", "chmod go= id_demo", "chmod og-rwx id_demo", "chmod 600 ./id_demo", "chmod 400 ./id_demo", "chmod go-r id_demo", "chmod g-r,o-r id_demo", "chmod u=rw,go= id_demo", "chmod 700 id_demo", "chmod 700 ./id_demo", "chmod go-rwx ./id_demo"]
+      hints:
+        - match: "^chmod 644"
+          say: "That is the mode SSH rejected above: others can read it. Only the owner should be able to."
+        - match: "^chmod 755"
+          say: "That still lets group and others read the key. Only the owner should be able to."
+        - match: "id_demo\\.pub"
+          say: "The public key may stay readable. The problem is the private key, `id_demo`."
+      hint: "The owner reads and writes; group and others get nothing: `chmod 600`."
+      run: "chmod 600 id_demo && ssh-keygen -y -f ./id_demo | cut -d' ' -f1 && echo \"key loaded\""
+      then: "With `600`, SSH accepts the key and can derive its public half from it."
+    - kind: teach
+      id: host-keys
+      title: "How the client recognises the server"
+      body: |
+        Authentication goes both ways. The server proves its identity too, with its own **host key**. The first
+        time you connect, SSH shows the server's fingerprint and asks whether to trust it; your answer is saved in
+        `~/.ssh/known_hosts`. Every later connection checks the server against that line.
+
+        If the key ever differs, SSH stops with a loud warning that the remote host identification has changed.
+        That can be harmless (the server was reinstalled) or an attack (someone is impersonating it). Find out
+        which before you remove the old line with `ssh-keygen -R host`.
+    - kind: show
+      id: known-hosts
+      body: "A known_hosts file with one entry. Building it is supplied setup: the recording generates a host key and writes its name and public half into `known_hosts` (`cut -c1-60` only shortens the output). The part to read is `ssh-keygen -F` (find a host in the file) and `-lf` (the key's fingerprint):"
+      run: "ssh-keygen -t ed25519 -N '' -C '' -q -f ./host_key && echo \"server1.example.com $(cut -d' ' -f1,2 host_key.pub)\" > known_hosts && ssh-keygen -F server1.example.com -f known_hosts | cut -c1-60 && ssh-keygen -lf host_key.pub"
+      notice: "One line per server: its name, then its key. The fingerprint is what you compare with the one the server's administrator gives you."
+    - kind: ask
+      id: changed-key
+      prompt: "SSH stops with \"REMOTE HOST IDENTIFICATION HAS CHANGED\" for a server you use daily. What do you do first?"
+      choices:
+        - text: "Check whether it was rebuilt; compare fingerprints"
+          why: "A reinstalled server has a new key, which is harmless; an unexpected change may be an attack. Only once you know, remove the old line with `ssh-keygen -R`."
+        - text: "Delete the whole `~/.ssh/known_hosts` file and reconnect"
+          why: "That silences the check for every server, including the one that might be impersonated."
+        - text: "Connect again with `-o StrictHostKeyChecking=no` set"
+          why: "That turns off exactly the protection that warned you."
+      answer: 0
+    - kind: teach
+      id: agent-copy
+      title: "Copying files: scp and rsync"
+      body: |
+        To copy files over SSH, `scp` copies files and, with `-r`, directories. **rsync** copies directories
+        efficiently, sending only what changed. Its form is `rsync -a SOURCE DESTINATION`: `-a` (archive) copies
+        recursively and keeps permissions, times and other attributes. Either side can be `user@host:path`.
+
+        The trailing slash on the source changes the destination path: with it, rsync copies the contents of the
+        directory; without it, the directory itself.
+
+        `rsync` is not part of every installation. If your shell answers `rsync: command not found`, install it with
+        `sudo dnf install rsync` (which needs administrator rights).
+    - kind: ask
+      id: guess-slash
+      guess: true
+      prompt: "The directory `site` contains `index.html`. With `rsync -a site dest1/` and `rsync -a site/ dest2/`, where does `index.html` end up in each case?"
+      choices:
+        - text: "`dest1/site/index.html` and `dest2/index.html`"
+          why: "See the next step."
+        - text: "`dest1/index.html` in both cases"
+          why: "The trailing slash on the source makes a difference. The next step shows it."
+        - text: "`site/index.html` inside both"
+          why: "Only one of the two keeps the directory's name. The next step shows which."
+      answer: 0
+    - kind: show
+      id: rsync
+      run: "mkdir -p site/css && touch site/index.html site/css/main.css && rsync -a site dest1/ && rsync -a site/ dest2/ && find dest1 dest2 | sort"
+      notice: "Without the slash, `site` itself was copied into `dest1`; with it, only its contents went into `dest2`. The same rule applies when the destination is `user@host:path`."
+    - kind: try
+      id: try-rsync
+      body: "Back up `site` into `backup/` so that the result is `backup/site/…` with the files inside it, not the files loose in `backup/`."
+      accept: ["rsync -a site backup/", "rsync -a site backup", "rsync -av site backup/", "rsync -av site backup", "rsync -a ./site backup/", "rsync -ar site backup/", "rsync -a site ./backup/"]
+      hints:
+        - match: "site/ "
+          say: "A trailing slash on the source copies only its contents. Without it, the directory itself goes into the destination."
+        - match: "^cp "
+          say: "`cp` needs `-r` for directories; this lesson is about `rsync -a`."
+      hint: "`rsync -a`, the source without a trailing slash, then the destination."
+      run: "rsync -a site backup/ && find backup | sort"
+      then: "`backup/site` and its files: the directory kept its name because the source had no trailing slash."
+    - kind: reflect
+      id: explain-keys
+      prompt: "Explain to a colleague how key-based SSH login works, and why the private key's permissions matter."
+      model: |
+        You create a key pair; the public key goes into `~/.ssh/authorized_keys` on the server, the private key stays
+        on your machine. When you connect, the server checks that you hold the private key matching one of the listed
+        public keys, without the private key ever being sent. Whoever can read the private key can log in as you, so
+        SSH ignores a private key that others can read. The server also checks ownership and write access on
+        `authorized_keys`, `.ssh` and the home directory, and refuses keys if others could change them.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can create a key pair and put each half in the right place, explain the host-key check and what to do
+        when it fails, fix the permissions SSH insists on, and copy directories with rsync.
+
+        That completes the first module: moving around, files, text, editing, permissions and remote access.
+        Logging in to a cluster later works differently (usually a token rather than a key pair), but the rule you met
+        here carries over: a credential file that others can read is a leaked credential.
+
+        Next: what runs on a Linux machine, how processes are started and stopped, and what their exit status says
+        about how they ended.
+  sections:
+    - id: sudo-least-privilege
+      title: sudo and least privilege
+      depth: true
+      body: "Give each person the smallest set of rights that lets them do their job, and make every use visible:\n\n- Individual\
+        \ accounts, never a shared root password. Disable direct root login over SSH\n  (`PermitRootLogin no`) and password\
+        \ logins where keys are in place (`PasswordAuthentication no`).\n- Grant specific commands rather than everything,\
+        \ in a file under `/etc/sudoers.d/` edited with\n  `visudo`, for example `%webops ALL=(root) /usr/bin/systemctl restart\
+        \ httpd`.\n- `sudo -l` shows what you may run. Every use is logged with the user and command, which is the\n  audit\
+        \ trail that a shared root password never gives.\n"
+    - id: ssh-agent
+      title: "ssh-agent: typing the passphrase once"
+      depth: true
+      body: |
+        If your private key has a passphrase, typing it at every connection gets tiresome. **ssh-agent** holds the
+        unlocked key in memory for your session: `ssh-add KEYFILE` gives it the key once, and later connections
+        use it.
+    - id: selinux
+      title: SELinux in one section
+      depth: true
+      body: 'File modes are **discretionary**: the owner decides. SELinux adds **mandatory** rules from a system
+
+        policy, which apply to processes running as root too. Every process and file has a **label** (a context) such as
+
+        `system_u:object_r:shadow_t:s0`: user, role, **type** and level. The targeted policy on RHEL mostly
+
+        compares types: a process running as `sshd_t` may read files of certain types, and nothing else.
+
+
+        | Command | Shows |
+
+        |---|---|
+
+        | `getenforce`, `sestatus` | the mode: `Enforcing` (denials are applied and logged), `Permissive` (only logged), `Disabled`
+        |
+
+        | `ls -Z`, `ps -eZ`, `id -Z` | labels of files, processes and your session |
+
+        | `ausearch -m AVC -ts recent` (root) | the denials, as `avc: denied` records in the audit log |
+
+
+        When access is refused and modes look right, read the AVC record: it names the process type, the file
+
+        type and the action. Then fix the **label**, not the mode: `restorecon -Rv /path` restores the default
+
+        label; `semanage fcontext -a -t <type> ''/srv/web(/.*)?''` followed by `restorecon` makes a new location
+
+        permanent; a boolean (`setsebool -P`) enables an optional behaviour.
+
+
+        `setenforce 0` is not a fix. It switches the whole machine to permissive until the next reboot,
+
+        removes protection from every service, and leaves the wrong label in place to fail again later.
+
+
+        **Containers** run as type `container_t` with a pair of **MCS categories** (such as `s0:c534,c726`)
+
+        unique to each container, so one container cannot read another''s files even if both run as the same
+
+        UID. A host directory mounted into a container keeps its host label, which `container_t` may not read.
+
+        Podman''s `:Z` volume option relabels the directory with that container''s private label; `:z` uses a
+
+        shared label for several containers. Never use either on system directories such as `/home` or
+
+        `/usr`: they would be relabelled for containers and break the host.
+
+        '
+    - id: firewalld
+      title: firewalld in brief
+      depth: true
+      body: 'RHEL filters incoming connections with **firewalld**. Network interfaces belong to **zones** (`public`
+
+        by default), and each zone lists the services and ports it allows.
+
+
+        | Command | Effect |
+
+        |---|---|
+
+        | `firewall-cmd --list-all` | what the default zone allows |
+
+        | `firewall-cmd --add-service=https` | allow now (runtime), lost at reload or reboot |
+
+        | `firewall-cmd --permanent --add-service=https` | saved, effective after `firewall-cmd --reload` |
+
+        | `firewall-cmd --runtime-to-permanent` | save what you tested at runtime |
+
+
+        A port that works locally but fails from other machines often points here: the service listens, and
+
+        the firewall turns the packets away. With the default zone target, firewalld rejects them, which
+
+        clients usually report at once as "No route to host"; only a zone or rule set to drop makes the client
+
+        wait for a timeout.
+
+        '
+    - id: in-openshift
+      title: 'Later in the course: nodes, keys, tokens and labels on the cluster'
+      depth: true
+      body: '**Reaching a node.** OpenShift nodes run RHCOS, and SSH logins use the user `core` with keys set at
+
+        installation. The OpenShift 4.21 documentation says SSH access to nodes is not recommended, because
+
+        RHCOS nodes are immutable and rely on Operators to apply changes. A manual change to a file the Machine
+
+        Config Operator manages is configuration drift, and the node is marked degraded. The supported
+
+        path is `oc debug` with the node''s name, as in `oc debug node/<master>`: a privileged pod on that node, where `chroot
+        /host` gives a shell on
+
+        the host, authorised and audited through the API. SSH remains the fallback when the API or the kubelet
+
+        is not working.
+
+
+        **Keys versus tokens.** `oc` does not use SSH keys. After `oc login` your kubeconfig holds a bearer
+
+        token: whoever has the token is you until it expires. Protect the kubeconfig like a private key
+
+        (mode `600`, never in a repository or a ticket).
+
+
+        | | SSH key | API token |
+
+        |---|---|---|
+
+        | secret on your side | private key, never sent | the token itself, sent with every request |
+
+        | if it leaks | remove the public key from `authorized_keys` | delete the token; it also expires |
+
+        | where access is decided | each server''s `authorized_keys` | RBAC in the cluster |
+
+
+        **SELinux in pods.** Every OpenShift project receives its own MCS categories (the restricted-v2 SCC
+
+        takes them from the namespace''s `openshift.io/sa.scc.mcs` annotation), and the runtime labels a pod''s
+
+        volumes to match, which is what `:Z` does for Podman. The same SCC forbids host directory volumes, so
+
+        the relabelling problem rarely reaches application teams. Node-level SELinux is covered in
+
+        [SELinux, seccomp and the node underneath](/lesson/n.selinux-node).
+
+
+        **Firewalls.** Inside the cluster, the role of firewalld is played by NetworkPolicies. With
+
+        OVN-Kubernetes, denied packets get no answer, so a timeout points there, as a firewall rule that drops
+
+        does on a host.
+
+        '
+  limits: |
+    No connection to another machine is made: the server side (`authorized_keys`, `known_hosts`) is built in a
+    practice directory, and the client's permission check is shown with `ssh-keygen -y`, which loads a private key
+    the same way `ssh` does. The rsync steps need `rsync` installed on your machine.
+  review:
+    - q: "Which half of an SSH key pair goes on the server, and where?"
+      a: "The public key, in the target user's `~/.ssh/authorized_keys`. The private key never leaves your machine."
+    - q: "What does the warning REMOTE HOST IDENTIFICATION HAS CHANGED mean?"
+      a: "The server's host key differs from the one in known_hosts: a rebuilt server, or someone impersonating it. Check before removing the old line."
+    - q: "Which permissions does SSH require on a private key?"
+      a: "No permission at all for the group and others, for example `600`; otherwise SSH ignores the key."
+    - q: "What does a trailing slash on rsync's source mean?"
+      a: "Copy the directory's contents; without it, the directory itself is copied into the destination."
+  commands:
+    - cmd: "ssh-keygen -t ed25519 -N '' -C demo-key -f ./id_demo -q && ls -l id_demo id_demo.pub"
+      meaning: "a key pair"
+    - cmd: "ssh-keygen -lf id_demo.pub"
+      meaning: "the key's fingerprint"
+    - cmd: "cut -d' ' -f1,3 id_demo.pub; ls -l id_demo id_demo.pub"
+      meaning: "the public key's fields, and the two files' permissions"
+    - cmd: "mkdir -p demo-home/.ssh && cat id_demo.pub >> demo-home/.ssh/authorized_keys && chmod 700 demo-home/.ssh && chmod 600 demo-home/.ssh/authorized_keys && ls -ld demo-home/.ssh demo-home/.ssh/authorized_keys"
+      meaning: "an authorized_keys file with the right modes"
+    - cmd: "chmod 644 id_demo && ssh-keygen -y -f ./id_demo"
+      expect: fail
+      meaning: "a private key readable by others is ignored"
+    - cmd: "chmod 600 id_demo && ssh-keygen -y -f ./id_demo | cut -d' ' -f1 && echo \"key loaded\""
+      meaning: "with 600 it is accepted"
+    - cmd: "ssh-keygen -t ed25519 -N '' -C '' -q -f ./host_key && echo \"server1.example.com $(cut -d' ' -f1,2 host_key.pub)\" > known_hosts && ssh-keygen -F server1.example.com -f known_hosts | cut -c1-60 && ssh-keygen -lf host_key.pub"
+      meaning: "a known_hosts entry and a host key's fingerprint"
+    - cmd: "mkdir -p site/css && touch site/index.html site/css/main.css && rsync -a site dest1/ && rsync -a site/ dest2/ && find dest1 dest2 | sort"
+      meaning: "rsync with and without a trailing slash"
+    - cmd: "rsync -a site backup/ && find backup | sort"
+      meaning: "copy a directory with rsync"
+  references:
+    - {title: "OpenSSH: ssh-keygen(1)", url: "https://man.openbsd.org/ssh-keygen"}
+    - {title: "OpenSSH: sshd(8) (authorized_keys, StrictModes)", url: "https://man.openbsd.org/sshd"}
+    - {title: "OpenSSH: ssh(1) (host key verification)", url: "https://man.openbsd.org/ssh"}
+    - {title: "rsync(1) manual", url: "https://download.samba.org/pub/rsync/rsync.1"}
+    - {title: "RHEL 9: Securing networks (OpenSSH)", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/securing_networks/index"}
+    - {title: "RHEL 9: Using SELinux", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/index"}

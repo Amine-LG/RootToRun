@@ -1,0 +1,572 @@
+{
+ "lab": "ch.right-size",
+ "kind": "challenge",
+ "lab_hash": "f9d2f0d7734799f1",
+ "recorded_at": "2026-10-14T16:49:32+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m,memory=160Mi --limits=cpu=200m,memory=160Mi",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/report resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/cache resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/report -n academy-ch-size --timeout=150s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"report\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"report\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"report\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"report\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"report\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"report\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"report\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"report\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/cache -n academy-ch-size --timeout=150s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment \"cache\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "report-deploy",
+    "title": "report wants 2 replicas and has 2 Ready",
+    "expect": "spec.replicas 2, ready 2/2",
+    "status": "fail",
+    "observed": "spec.replicas 2, ready 0/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "report-ready",
+    "title": "report: 2 Ready pods, no restarts",
+    "expect": "2 of 2 match",
+    "status": "fail",
+    "observed": "0 of 2 match · report-68b445c74b-xq6m6: Pending, report-68b445c74b-z7fxw: Pending"
+   },
+   {
+    "id": "report-guaranteed",
+    "title": "report pods are Guaranteed",
+    "expect": "QoS Guaranteed",
+    "status": "fail",
+    "observed": "0 of 2 match · report-68b445c74b-xq6m6: Pending QoS Burstable, report-68b445c74b-z7fxw: Pending QoS Burstable"
+   },
+   {
+    "id": "report-cpu",
+    "title": "each report pod reserves at most 1 CPU (all its containers together)",
+    "expect": "2 of 2 match",
+    "status": "fail",
+    "observed": "0 of 2 match · report-68b445c74b-xq6m6: Pending, report-68b445c74b-z7fxw: Pending"
+   },
+   {
+    "id": "report-intact",
+    "title": "report still runs its real workload (only the resources changed)",
+    "expect": "the 64 MiB load is still there",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+   },
+   {
+    "id": "cache-requests",
+    "title": "every running cache container has CPU and memory requests",
+    "expect": "1 of 1 match",
+    "status": "fail",
+    "observed": "0 of 1 match · cache-755d559ff-9dcp5: Running [ready, restarts 0]"
+   },
+   {
+    "id": "cache-ready",
+    "title": "cache runs 1 Ready pod",
+    "expect": "1 of 1 match",
+    "status": "pass",
+    "observed": "1 of 1 match · cache-755d559ff-9dcp5: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791996583.240456
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "report-deploy",
+    "title": "report wants 2 replicas and has 2 Ready",
+    "expect": "spec.replicas 2, ready 2/2",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "report-ready",
+    "title": "report: 2 Ready pods, no restarts",
+    "expect": "2 of 2 match",
+    "status": "pass",
+    "observed": "2 of 2 match · report-877d55dd7-bq8dz: Running [ready, restarts 0], report-877d55dd7-vcm6s: Running [ready, restarts 0]"
+   },
+   {
+    "id": "report-guaranteed",
+    "title": "report pods are Guaranteed",
+    "expect": "QoS Guaranteed",
+    "status": "pass",
+    "observed": "2 of 2 match · report-877d55dd7-bq8dz: Running [ready, restarts 0] QoS Guaranteed, report-877d55dd7-vcm6s: Running [ready, restarts 0] QoS Guaranteed"
+   },
+   {
+    "id": "report-cpu",
+    "title": "each report pod reserves at most 1 CPU (all its containers together)",
+    "expect": "2 of 2 match",
+    "status": "pass",
+    "observed": "2 of 2 match · report-877d55dd7-bq8dz: Running [ready, restarts 0], report-877d55dd7-vcm6s: Running [ready, restarts 0]"
+   },
+   {
+    "id": "report-intact",
+    "title": "report still runs its real workload (only the resources changed)",
+    "expect": "the 64 MiB load is still there",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+   },
+   {
+    "id": "cache-requests",
+    "title": "every running cache container has CPU and memory requests",
+    "expect": "1 of 1 match",
+    "status": "pass",
+    "observed": "1 of 1 match · cache-54bdcd44f-z2tq9: Running [ready, restarts 0]"
+   },
+   {
+    "id": "cache-ready",
+    "title": "cache runs 1 Ready pod",
+    "expect": "1 of 1 match",
+    "status": "pass",
+    "observed": "1 of 1 match · cache-54bdcd44f-z2tq9: Running [ready, restarts 0]"
+   }
+  ],
+  "at": 1791996594.635278
+ },
+ "trials": [
+  {
+   "id": "cpu-only",
+   "title": "Only the CPU request lowered: the pods schedule, then the kernel kills them",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "report-deploy",
+     "title": "report wants 2 replicas and has 2 Ready",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "fail",
+     "observed": "spec.replicas 2, ready 0/2, updated 2, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "report-ready",
+     "title": "report: 2 Ready pods, no restarts",
+     "expect": "2 of 2 match",
+     "status": "fail",
+     "observed": "0 of 3 match · report-68b445c74b-sjxfl: Pending, report-86f4688df9-d8tsw: Running [CrashLoopBackOff, restarts 1], report-86f4688df9-fp5th: Running [CrashLoopBackOff, restarts 1]"
+    },
+    {
+     "id": "report-guaranteed",
+     "title": "report pods are Guaranteed",
+     "expect": "QoS Guaranteed",
+     "status": "fail",
+     "observed": "0 of 3 match · report-68b445c74b-sjxfl: Pending QoS Burstable, report-86f4688df9-d8tsw: Running [CrashLoopBackOff, restarts 1] QoS Burstable, report-86f4688df9-fp5th: Running [CrashLoopBackOff, restarts 1] QoS Burstable"
+    },
+    {
+     "id": "report-cpu",
+     "title": "each report pod reserves at most 1 CPU (all its containers together)",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 3 match · report-68b445c74b-sjxfl: Pending, report-86f4688df9-d8tsw: Running [CrashLoopBackOff, restarts 1], report-86f4688df9-fp5th: Running [CrashLoopBackOff, restarts 1]"
+    },
+    {
+     "id": "report-intact",
+     "title": "report still runs its real workload (only the resources changed)",
+     "expect": "the 64 MiB load is still there",
+     "status": "pass",
+     "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+    },
+    {
+     "id": "cache-requests",
+     "title": "every running cache container has CPU and memory requests",
+     "expect": "1 of 1 match",
+     "status": "fail",
+     "observed": "0 of 1 match · cache-755d559ff-zt8gv: Running [ready, restarts 0]"
+    },
+    {
+     "id": "cache-ready",
+     "title": "cache runs 1 Ready pod",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-755d559ff-zt8gv: Running [ready, restarts 0]"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:cpu-only",
+     "cmd": "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/report resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "burstable",
+   "title": "Report running, but Burstable; cache untouched",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "report-deploy",
+     "title": "report wants 2 replicas and has 2 Ready",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "report-ready",
+     "title": "report: 2 Ready pods, no restarts",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-c49899875-bdtml: Running [ready, restarts 0], report-c49899875-xftkg: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-guaranteed",
+     "title": "report pods are Guaranteed",
+     "expect": "QoS Guaranteed",
+     "status": "fail",
+     "observed": "0 of 2 match · report-c49899875-bdtml: Running [ready, restarts 0] QoS Burstable, report-c49899875-xftkg: Running [ready, restarts 0] QoS Burstable"
+    },
+    {
+     "id": "report-cpu",
+     "title": "each report pod reserves at most 1 CPU (all its containers together)",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-c49899875-bdtml: Running [ready, restarts 0], report-c49899875-xftkg: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-intact",
+     "title": "report still runs its real workload (only the resources changed)",
+     "expect": "the 64 MiB load is still there",
+     "status": "pass",
+     "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+    },
+    {
+     "id": "cache-requests",
+     "title": "every running cache container has CPU and memory requests",
+     "expect": "1 of 1 match",
+     "status": "fail",
+     "observed": "0 of 1 match · cache-755d559ff-jjg5z: Running [ready, restarts 0]"
+    },
+    {
+     "id": "cache-ready",
+     "title": "cache runs 1 Ready pod",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-755d559ff-jjg5z: Running [ready, restarts 0]"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:burstable",
+     "cmd": "oc set resources deploy/report -n academy-ch-size --requests=cpu=200m,memory=96Mi --limits=memory=160Mi",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/report resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "limits-only",
+   "title": "A correct alternative: limits only, so the requests default to the limits",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "report-deploy",
+     "title": "report wants 2 replicas and has 2 Ready",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "report-ready",
+     "title": "report: 2 Ready pods, no restarts",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-7bc46b6dc6-8h25b: Running [ready, restarts 0], report-7bc46b6dc6-tqvv5: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-guaranteed",
+     "title": "report pods are Guaranteed",
+     "expect": "QoS Guaranteed",
+     "status": "pass",
+     "observed": "2 of 2 match · report-7bc46b6dc6-8h25b: Running [ready, restarts 0] QoS Guaranteed, report-7bc46b6dc6-tqvv5: Running [ready, restarts 0] QoS Guaranteed"
+    },
+    {
+     "id": "report-cpu",
+     "title": "each report pod reserves at most 1 CPU (all its containers together)",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-7bc46b6dc6-8h25b: Running [ready, restarts 0], report-7bc46b6dc6-tqvv5: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-intact",
+     "title": "report still runs its real workload (only the resources changed)",
+     "expect": "the 64 MiB load is still there",
+     "status": "pass",
+     "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+    },
+    {
+     "id": "cache-requests",
+     "title": "every running cache container has CPU and memory requests",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-5f5666d794-nhq9b: Running [ready, restarts 0]"
+    },
+    {
+     "id": "cache-ready",
+     "title": "cache runs 1 Ready pod",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-5f5666d794-nhq9b: Running [ready, restarts 0]"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:limits-only",
+     "cmd": "oc apply -n academy-ch-size -f -",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/report configured\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:limits-only",
+     "cmd": "oc set resources deploy/cache -n academy-ch-size --requests=cpu=20m,memory=24Mi --limits=memory=64Mi",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/cache resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "g4-sleeper",
+   "title": "Sized correctly, but the workload was replaced by sleep",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "report-deploy",
+     "title": "report wants 2 replicas and has 2 Ready",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "report-ready",
+     "title": "report: 2 Ready pods, no restarts",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-85d766c5d5-zw9nl: Running [ready, restarts 0], report-85d766c5d5-zzhqt: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-guaranteed",
+     "title": "report pods are Guaranteed",
+     "expect": "QoS Guaranteed",
+     "status": "pass",
+     "observed": "2 of 2 match · report-85d766c5d5-zw9nl: Running [ready, restarts 0] QoS Guaranteed, report-85d766c5d5-zzhqt: Running [ready, restarts 0] QoS Guaranteed"
+    },
+    {
+     "id": "report-cpu",
+     "title": "each report pod reserves at most 1 CPU (all its containers together)",
+     "expect": "2 of 2 match",
+     "status": "pass",
+     "observed": "2 of 2 match · report-85d766c5d5-zw9nl: Running [ready, restarts 0], report-85d766c5d5-zzhqt: Running [ready, restarts 0]"
+    },
+    {
+     "id": "report-intact",
+     "title": "report still runs its real workload (only the resources changed)",
+     "expect": "the 64 MiB load is still there",
+     "status": "fail",
+     "observed": "spec.template.spec.containers[?name=worker].command = ['sleep', 'infinity']"
+    },
+    {
+     "id": "cache-requests",
+     "title": "every running cache container has CPU and memory requests",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-54bdcd44f-qdh6n: Running [ready, restarts 0]"
+    },
+    {
+     "id": "cache-ready",
+     "title": "cache runs 1 Ready pod",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-54bdcd44f-qdh6n: Running [ready, restarts 0]"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:g4-sleeper",
+     "cmd": "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/cache resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-sleeper",
+     "cmd": "oc patch deploy/report -n academy-ch-size --type=strategic -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"worker\",\"command\":[\"sleep\",\"infinity\"],\"resources\":{\"requests\":{\"cpu\":\"200m\",\"memory\":\"48Mi\"},\"limits\":{\"cpu\":\"200m\",\"memory\":\"48Mi\"}}}]}}}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/report patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "greedy-cpu",
+   "title": "Guaranteed and running, but reserving 2 CPUs on a shared node",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "report-deploy",
+     "title": "report wants 2 replicas and has 2 Ready",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "fail",
+     "observed": "spec.replicas 2, ready 0/2, updated 1, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "report-ready",
+     "title": "report: 2 Ready pods, no restarts",
+     "expect": "2 of 2 match",
+     "status": "fail",
+     "observed": "0 of 3 match · report-68b445c74b-cjnjz: Pending, report-68b445c74b-sqp9k: Pending, report-7d4d7cf8f5-2v6b4: Pending"
+    },
+    {
+     "id": "report-guaranteed",
+     "title": "report pods are Guaranteed",
+     "expect": "QoS Guaranteed",
+     "status": "fail",
+     "observed": "1 of 3 match · report-68b445c74b-cjnjz: Pending QoS Burstable, report-68b445c74b-sqp9k: Pending QoS Burstable, report-7d4d7cf8f5-2v6b4: Pending QoS Guaranteed"
+    },
+    {
+     "id": "report-cpu",
+     "title": "each report pod reserves at most 1 CPU (all its containers together)",
+     "expect": "2 of 2 match",
+     "status": "fail",
+     "observed": "0 of 3 match · report-68b445c74b-cjnjz: Pending, report-68b445c74b-sqp9k: Pending, report-7d4d7cf8f5-2v6b4: Pending"
+    },
+    {
+     "id": "report-intact",
+     "title": "report still runs its real workload (only the resources changed)",
+     "expect": "the 64 MiB load is still there",
+     "status": "pass",
+     "observed": "spec.template.spec.containers[?name=worker].command = ['/bin/sh', '-c', \"echo 'loading report data (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'loaded, waiting for work'; exec sleep infinity\"]"
+    },
+    {
+     "id": "cache-requests",
+     "title": "every running cache container has CPU and memory requests",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-54bdcd44f-2k5jk: Running [ready, restarts 0]"
+    },
+    {
+     "id": "cache-ready",
+     "title": "cache runs 1 Ready pod",
+     "expect": "1 of 1 match",
+     "status": "pass",
+     "observed": "1 of 1 match · cache-54bdcd44f-2k5jk: Running [ready, restarts 0]"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:greedy-cpu",
+     "cmd": "oc set resources deploy/report -n academy-ch-size --requests=cpu=2,memory=160Mi --limits=cpu=2,memory=160Mi",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/report resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:greedy-cpu",
+     "cmd": "oc set resources deploy/cache -n academy-ch-size --requests=cpu=10m,memory=32Mi",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/cache resource requirements updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 235,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-size: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

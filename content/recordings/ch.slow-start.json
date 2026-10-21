@@ -1,0 +1,567 @@
+{
+ "lab": "ch.slow-start",
+ "kind": "challenge",
+ "lab_hash": "6ed3442623346ab2",
+ "recorded_at": "2026-10-20T17:35:40+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/shop --startup --get-url=http://:8080/ --period-seconds=5 --failure-threshold=12 -n academy-ch-slow",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop probes updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/shop patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/shop -n academy-ch-slow --timeout=240s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 out of 2 new replicas have been updated...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"shop\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"shop\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "deploy",
+    "title": "shop wants 2 replicas, rolled out and not paused",
+    "expect": "spec.replicas 2, ready 2/2",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "ready",
+    "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+    "expect": "2 matching pod",
+    "status": "fail",
+    "observed": "0 matching pod"
+   },
+   {
+    "id": "readiness",
+    "title": "every shop container has an HTTP readiness probe on 8080",
+    "expect": "httpd: ok",
+    "status": "fail",
+    "observed": "httpd: readiness probe missing (needs httpGet)"
+   },
+   {
+    "id": "liveness",
+    "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+    "expect": "httpd: ok",
+    "status": "pass",
+    "observed": "httpd: ok"
+   },
+   {
+    "id": "no-unavailable",
+    "title": "updates keep every replica available (maxUnavailable 0)",
+    "expect": "maxUnavailable = 0",
+    "status": "fail",
+    "observed": "spec.strategy.rollingUpdate.maxUnavailable = '25%'"
+   },
+   {
+    "id": "route",
+    "title": "Route shop answers",
+    "expect": "HTTP 200 shop ok",
+    "status": "fail",
+    "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1792517753.3632884
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "deploy",
+    "title": "shop wants 2 replicas, rolled out and not paused",
+    "expect": "spec.replicas 2, ready 2/2",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "ready",
+    "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+    "expect": "2 matching pod",
+    "status": "pass",
+    "observed": "2 matching pod"
+   },
+   {
+    "id": "readiness",
+    "title": "every shop container has an HTTP readiness probe on 8080",
+    "expect": "httpd: ok",
+    "status": "pass",
+    "observed": "httpd: ok"
+   },
+   {
+    "id": "liveness",
+    "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+    "expect": "httpd: ok",
+    "status": "pass",
+    "observed": "httpd: ok"
+   },
+   {
+    "id": "no-unavailable",
+    "title": "updates keep every replica available (maxUnavailable 0)",
+    "expect": "maxUnavailable = 0",
+    "status": "pass",
+    "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+   },
+   {
+    "id": "route",
+    "title": "Route shop answers",
+    "expect": "HTTP 200 shop ok",
+    "status": "pass",
+    "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 200 · shop ok"
+   }
+  ],
+  "at": 1792517820.273917
+ },
+ "trials": [
+  {
+   "id": "liveness-removed",
+   "title": "The liveness probe removed altogether",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "deploy",
+     "title": "shop wants 2 replicas, rolled out and not paused",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "ready",
+     "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+     "expect": "2 matching pod",
+     "status": "fail",
+     "observed": "0 matching pod"
+    },
+    {
+     "id": "readiness",
+     "title": "every shop container has an HTTP readiness probe on 8080",
+     "expect": "httpd: ok",
+     "status": "fail",
+     "observed": "httpd: readiness probe missing (needs httpGet)"
+    },
+    {
+     "id": "liveness",
+     "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+     "expect": "httpd: ok",
+     "status": "fail",
+     "observed": "httpd: liveness probe missing (needs httpGet or tcpSocket)"
+    },
+    {
+     "id": "no-unavailable",
+     "title": "updates keep every replica available (maxUnavailable 0)",
+     "expect": "maxUnavailable = 0",
+     "status": "fail",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = '25%'"
+    },
+    {
+     "id": "route",
+     "title": "Route shop answers",
+     "expect": "HTTP 200 shop ok",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 200 · shop ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:liveness-removed",
+     "cmd": "oc set probe deploy/shop --liveness --remove -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "readiness-only",
+   "title": "Only a readiness probe added, nothing else changed",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "deploy",
+     "title": "shop wants 2 replicas, rolled out and not paused",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "fail",
+     "observed": "spec.replicas 2, ready 2/2, updated 1, total 3, observedGeneration current: True"
+    },
+    {
+     "id": "ready",
+     "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+     "expect": "2 matching pod",
+     "status": "fail",
+     "observed": "0 matching pod"
+    },
+    {
+     "id": "readiness",
+     "title": "every shop container has an HTTP readiness probe on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "liveness",
+     "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "no-unavailable",
+     "title": "updates keep every replica available (maxUnavailable 0)",
+     "expect": "maxUnavailable = 0",
+     "status": "fail",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = '25%'"
+    },
+    {
+     "id": "route",
+     "title": "Route shop answers",
+     "expect": "HTTP 200 shop ok",
+     "status": "fail",
+     "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:readiness-only",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "long-delay",
+   "title": "A correct alternative to the reference solution, with different probe settings",
+   "kind": "alternative",
+   "expect": "verified",
+   "got": "verified",
+   "ok": true,
+   "results": [
+    {
+     "id": "deploy",
+     "title": "shop wants 2 replicas, rolled out and not paused",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "ready",
+     "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+     "expect": "2 matching pod",
+     "status": "pass",
+     "observed": "2 matching pod"
+    },
+    {
+     "id": "readiness",
+     "title": "every shop container has an HTTP readiness probe on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "liveness",
+     "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "no-unavailable",
+     "title": "updates keep every replica available (maxUnavailable 0)",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "route",
+     "title": "Route shop answers",
+     "expect": "HTTP 200 shop ok",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 200 · shop ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:long-delay",
+     "cmd": "oc set probe deploy/shop --liveness --get-url=http://:8080/ --initial-delay-seconds=45 --period-seconds=10 --failure-threshold=3 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:long-delay",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:long-delay",
+     "cmd": "oc patch deploy/shop -n academy-ch-slow --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/strategy/rollingUpdate/maxUnavailable\",\"value\":0}]'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "g4-true-liveness",
+   "title": "The liveness probe replaced by a command that always succeeds",
+   "kind": "wrong",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "deploy",
+     "title": "shop wants 2 replicas, rolled out and not paused",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "ready",
+     "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+     "expect": "2 matching pod",
+     "status": "pass",
+     "observed": "2 matching pod"
+    },
+    {
+     "id": "readiness",
+     "title": "every shop container has an HTTP readiness probe on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "liveness",
+     "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+     "expect": "httpd: ok",
+     "status": "fail",
+     "observed": "httpd: liveness probe exec (needs httpGet or tcpSocket)"
+    },
+    {
+     "id": "no-unavailable",
+     "title": "updates keep every replica available (maxUnavailable 0)",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "route",
+     "title": "Route shop answers",
+     "expect": "HTTP 200 shop ok",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 200 · shop ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:g4-true-liveness",
+     "cmd": "oc set probe deploy/shop --liveness --remove -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-true-liveness",
+     "cmd": "oc patch deploy/shop -n academy-ch-slow --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/livenessProbe\",\"value\":{\"exec\":{\"command\":[\"/bin/true\"]}}}]'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-true-liveness",
+     "cmd": "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:g4-true-liveness",
+     "cmd": "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  },
+  {
+   "id": "tcp-readiness",
+   "title": "Restarts stopped, but readiness only checks that a TCP port is open",
+   "kind": "partial",
+   "expect": "partial",
+   "got": "partial",
+   "ok": true,
+   "results": [
+    {
+     "id": "deploy",
+     "title": "shop wants 2 replicas, rolled out and not paused",
+     "expect": "spec.replicas 2, ready 2/2",
+     "status": "pass",
+     "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+    },
+    {
+     "id": "ready",
+     "title": "shop: 2 pods Ready by their readiness probe, no restarts",
+     "expect": "2 matching pod",
+     "status": "pass",
+     "observed": "2 matching pod"
+    },
+    {
+     "id": "readiness",
+     "title": "every shop container has an HTTP readiness probe on 8080",
+     "expect": "httpd: ok",
+     "status": "fail",
+     "observed": "httpd: readiness probe tcpSocket (needs httpGet)"
+    },
+    {
+     "id": "liveness",
+     "title": "every shop container keeps a liveness probe that checks httpd on 8080",
+     "expect": "httpd: ok",
+     "status": "pass",
+     "observed": "httpd: ok"
+    },
+    {
+     "id": "no-unavailable",
+     "title": "updates keep every replica available (maxUnavailable 0)",
+     "expect": "maxUnavailable = 0",
+     "status": "pass",
+     "observed": "spec.strategy.rollingUpdate.maxUnavailable = 0"
+    },
+    {
+     "id": "route",
+     "title": "Route shop answers",
+     "expect": "HTTP 200 shop ok",
+     "status": "pass",
+     "observed": "http://shop-academy-ch-slow.apps-crc.testing/ → HTTP 200 · shop ok"
+    }
+   ],
+   "entries": [
+    {
+     "step": "trial:tcp-readiness",
+     "cmd": "oc set probe deploy/shop --startup --get-url=http://:8080/ --period-seconds=5 --failure-threshold=12 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:tcp-readiness",
+     "cmd": "oc set probe deploy/shop --readiness --open-tcp=8080 -n academy-ch-slow",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop probes updated\n",
+     "stderr": "",
+     "ok": true
+    },
+    {
+     "step": "trial:tcp-readiness",
+     "cmd": "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'",
+     "as": "learner",
+     "expect": "ok",
+     "run": null,
+     "code": 0,
+     "stdout": "deployment.apps/shop patched\n",
+     "stderr": "",
+     "ok": true
+    }
+   ]
+  }
+ ],
+ "seconds": 463,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-ch-slow: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

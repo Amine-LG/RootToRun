@@ -1,0 +1,1084 @@
+# Linux path, module lx3-admin, written as teaching flows.
+- id: lx.shell-scripts
+  title: "Putting commands in a script"
+  subtitle: "An executable file of commands: arguments, conditions, loops and an honest exit status"
+  module: lx3-admin
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson; each command continues from what the previous ones left."
+  concepts: [linux.scripting, linux.shell]
+  prerequisites: [lx.storage-filesystems, lx.exit-status, lx.text-tools, lx.users-permissions]
+  objective: |
+    Make a script runnable, check its syntax, pass it arguments safely with "$@", read how it decides with tests
+    and loops, and make it report success or failure through its exit status.
+  flow:
+    - kind: ask
+      id: recall-status
+      recalls: lx.exit-status
+      prompt: "A look back. Which line removes old files only if `cd /srv/old` worked?"
+      choices:
+        - text: "`cd /srv/old && rm -f ./*.tmp`"
+          why: "`&&` runs the second command only when the first succeeded."
+        - text: "`cd /srv/old; rm -f ./*.tmp`"
+          why: "`;` runs `rm` whatever happened, in the wrong directory if `cd` failed."
+        - text: "`cd /srv/old || rm -f ./*.tmp`"
+          why: "`||` runs `rm` only when `cd` fails: exactly the dangerous case."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "The same five commands, every morning"
+      body: |
+        In the text lesson you built a pipeline to count errors in a log. Doing that every morning, for several
+        logs, means retyping it and making mistakes. A **script** is a text file containing those commands, so that
+        they run the same way every time, for whatever files you give it.
+
+        This lesson reads a small but careful script, `summarise.sh`, which counts lines and errors in each log
+        file it is given. It is supplied with the lesson, together with two logs in `logs/` and two tiny scripts
+        used further down, `args.sh` and `check.sh` (all under "Before you start: source files"). It was saved as a plain
+        file, without permission to run. Its parts are taught one at a time below: first running it, then arguments, a loop, a condition and the exit status.
+    - kind: show
+      id: first-try
+      body: "First attempt: run it straight after creating it."
+      run: "./summarise.sh logs/app.log; echo \"exit=$?\""
+      notice: |
+        "Permission denied", exit status 126: the file exists but has no `x` permission, exactly the situation from
+        the permissions lesson. A script is a program like any other: to run it as `./summarise.sh`, the kernel needs
+        `x`.
+    - kind: show
+      id: anatomy
+      run: "head -3 summarise.sh; chmod u+x summarise.sh && ls -l summarise.sh && bash -n summarise.sh && echo \"syntax OK\""
+      highlight: ["#!/usr/bin/env bash", "rwx"]
+      notice: |
+        The first line, the **shebang** (`#!`), names the interpreter that runs the file: here `bash`, found through
+        `env` wherever it is installed. After `chmod u+x`, the owner may run it. `bash -n` reads the script without
+        running it and reports syntax errors: a cheap check before trusting a script.
+    - kind: try
+      id: try-run
+      body: "It now has `x`. Run it again, this time on both logs in the `logs` directory, `app.log` and `old.log`, in a single command."
+      accept: ["./summarise.sh logs/app.log logs/old.log", "./summarise.sh ./logs/app.log ./logs/old.log", "bash summarise.sh logs/app.log logs/old.log", "bash ./summarise.sh logs/app.log logs/old.log", "./summarise.sh logs/*.log", "./summarise.sh logs/{app,old}.log"]
+      hints:
+        - match: "^summarise\\.sh"
+          say: "Without a path, the shell searches `$PATH`, which does not include the current directory. Write `./summarise.sh`."
+        - match: "^\\./summarise\\.sh$"
+          say: "The script needs to know which logs to read: give the files as arguments."
+        - match: "^\\./summarise\\.sh (\\./)?logs/(app|old)\\.log$"
+          say: "That summarises one log. Like most commands, the script takes several files: list both after its name."
+        - match: "^cat "
+          say: "That prints the file. Run the script, with the logs as its arguments."
+      hint: "`./summarise.sh`, then the two log files, separated by a space."
+      run: "./summarise.sh logs/app.log logs/old.log; echo \"exit=$?\""
+      then: |
+        For each file, in the order given: the number of lines and of errors, and the most frequent error
+        messages, the same pipeline you built in the text lesson. Exit status 0: everything went well.
+    - kind: teach
+      id: arguments
+      title: "Arguments: $1, $# and \"$@\""
+      body: |
+        Inside a script, the words given after its name are its **arguments**: `$1` is the first, `$2` the second,
+        `$#` how many there are, and `"$@"` all of them, each kept as one word. The quotes matter as much as in the
+        expansion lesson: a file called `My Report.txt` must stay one argument. A tiny script, `args.sh`, shows the
+        difference between `"$@"` and `$*`. Its source is printed first, then its output for two arguments, one
+        of them with a space (the first output line is the count and the first argument):
+    - kind: show
+      id: args
+      run: "cat args.sh; bash args.sh \"My Report.txt\" draft"
+      notice: |
+        A **loop** has the form `for NAME in LIST; do COMMANDS; done`: it runs the commands once for each word of
+        the list, with `NAME` set to that word. The first loop goes through `"$@"` and prints each word in brackets:
+        two words, `My Report.txt` kept whole. The second goes through unquoted `$*`, which splits `My Report.txt`
+        into two words and would break any command working on that file.
+    - kind: ask
+      id: which-loop
+      prompt: "A script must print the size in bytes of every file given as an argument (`wc -c FILE`), names with spaces included. Which loop is right?"
+      choices:
+        - text: "`for f in \"$@\"; do wc -c \"$f\"; done`"
+          why: "`\"$@\"` gives each argument as one word, and `\"$f\"` keeps it whole when used, as the first loop in `args.sh` showed."
+        - text: "`for f in $*; do wc -c $f; done`"
+          why: "Unquoted, `$*` and `$f` split names at spaces, so `My Report.txt` becomes two files that do not exist."
+        - text: "`for f in \"$1\"; do wc -c \"$f\"; done`"
+          why: "`$1` is only the first argument; the others would be ignored."
+      answer: 0
+    - kind: teach
+      id: tests
+      title: "Tests and conditions"
+      body: |
+        A **test** is a command that succeeds or fails: `[[ -f FILE ]]` succeeds if FILE is a regular file, and
+        `[[ -r FILE ]]` if it is readable. As for every command, success is status 0 and failure is not 0, so a
+        test works with `&&`, `||` and `if`. In `[[ … ]]`, `!` means "not" and `||` means "or".
+    - kind: show
+      id: tests-demo
+      run: "[[ -f logs/app.log ]]; echo \"app.log: $?\"; [[ -f logs/missing.log ]]; echo \"missing.log: $?\""
+      notice: "The same test gives 0 (success) for the file that exists and 1 (failure) for the one that does not."
+    - kind: teach
+      id: if-block
+      body: |
+        An `if` block runs commands only when its test succeeds: `if TEST; then COMMANDS; fi`. `continue` inside a
+        loop skips the rest of the current round and goes on with the next word. The script `check.sh` combines
+        both: for each argument, if it is not a readable regular file, say so and move on. Its source and an
+        example run:
+    - kind: show
+      id: check-show
+      run: "cat check.sh; bash check.sh logs/app.log logs/missing.log"
+      notice: "`logs/app.log` passes the test and is reported; `logs/missing.log` fails it, so the `if` block prints the skip message and `continue` jumps to the end of the loop."
+    - kind: ask
+      id: what-continue
+      prompt: "In `check.sh`, a file fails the test. What does `continue` do?"
+      choices:
+        - text: "Skips to the next file"
+          why: "`continue` ends the current round and starts the next word of the list, as `logs/missing.log` showed: no further output for it."
+        - text: "Stops the whole script"
+          why: "That would be `exit`. `continue` only skips the rest of the current round."
+        - text: "Runs the test again"
+          why: "Nothing is retried; the loop moves on to the next argument."
+      answer: 0
+    - kind: teach
+      id: decisions
+      title: "Checking before acting"
+      body: |
+        `summarise.sh` uses exactly these pieces, plus one more check at the start. `[[ $# -ge 1 ]] || usage` means:
+        if the number of arguments (`$#`) is not at least 1 (`-ge` is "greater than or equal"), call the function
+        `usage`, which prints how to use the script and stops with status 2. Inside the loop, it has the same
+        `if … continue` as `check.sh`, with one addition: it remembers in `status` that something failed.
+
+        At the end, `exit "$status"` reports 0 if every file was processed, 1 otherwise. Here are both checks at work:
+    - kind: show
+      id: no-args
+      run: "./summarise.sh; echo \"exit=$?\""
+      notice: "No argument: the usage message, on standard error, and status 2."
+    - kind: show
+      id: missing
+      run: "./summarise.sh logs/app.log logs/missing.log; echo \"exit=$?\""
+      notice: |
+        The good file is summarised, the missing one reported on standard error, and the exit status is 1. That
+        last part matters: a program that calls the script can tell success from failure by the status alone,
+        without reading its messages. A script that hides failures behind `exit 0` makes every such caller
+        believe all is well.
+
+        In the recording, the skip message appears after `exit=1` because the recorder captures standard output
+        and standard error separately. On a terminal it appears in the order it was written: before `exit=1`.
+    - kind: ask
+      id: check-caller
+      prompt: "A nightly job runs `./summarise.sh logs/app.log logs/missing.log`, and its next step must run only if every file was summarised. What should the job check?"
+      choices:
+        - text: "That the exit status is 0"
+          why: "The script exits 0 only when no file was skipped. Here it exits 1, so the job can stop without reading any message."
+        - text: "That a line for `logs/app.log` was printed"
+          why: "That line appears here even though a file was skipped, so it cannot tell success from partial failure."
+        - text: "That the screen shows no text"
+          why: "The skip message goes to standard error and a scheduled job has no screen; the status is the dependable signal."
+      answer: 0
+    - kind: teach
+      id: strict
+      body: |
+        Near the top, `set -euo pipefail` asks bash to be strict: stop at the first failing command (`-e`), treat
+        an unset variable as an error (`-u`), and fail a pipeline when any part of it fails (`pipefail`).
+
+        The exception seen above matters: a failure that is *tested* is a question, not an error. The `||
+        usage` and the `if [[ … ]]` above do not stop the script, because their failing test is the condition;
+        `errors=$(grep -c … || true)` is the same idea for `grep`, which exits 1 when it counts 0. Only an
+        untested failing command stops the script. Strict mode catches many mistakes early, but it has more
+        exceptions, which "Go deeper" lists; do not rely on it instead of explicit checks like the ones above.
+    - kind: teach
+      id: sigpipe
+      body: |
+        One detail of this script: the three most frequent errors are kept with `sed -n '1,3p'` (print
+        lines 1 to 3), not `head -3`. With `pipefail`, `head` closing the pipe early can make `sort` fail on a
+        large log, with exit status 141 and no message. `sed` reads everything, so it cannot.
+    - kind: show
+      id: big-log
+      body: "A log of 50,000 distinct errors, generated for the recording (the `awk` part is supplied setup), summarised together with the small one:"
+      run: "awk 'BEGIN { for (i = 1; i <= 50000; i++) print \"2026-10-14T09:00:00 ERROR failure \" i }' > logs/big.log; ./summarise.sh logs/big.log logs/old.log; echo \"exit=$?\""
+      notice: "50,000 errors counted, the top three shown (all distinct, so each appears once, and which three are shown does not matter here), then the second file, and exit status 0. The same script with `| head -3` can stop here instead, with status 141 and no message."
+    - kind: order
+      id: order-script
+      prompt: "Put the parts of a careful script in the order they appear in the file."
+      items:
+        - "`#!/usr/bin/env bash`: the interpreter"
+        - "`set -euo pipefail`: strict mode"
+        - "Check the arguments, print usage and exit 2 if they are wrong"
+        - "Do the work, noting any failure"
+        - "`exit \"$status\"`: report success or failure"
+      why: "The kernel needs the shebang first; strict mode, a safety net and not a substitute for explicit checks, then applies to everything below it; inputs are checked before anything is done; the exit status reports the outcome to whoever called the script."
+    - kind: reflect
+      id: explain-exit
+      prompt: "Explain to a colleague why a script should exit with a non-zero status when part of its work failed."
+      model: |
+        The exit status lets a caller, such as cron, another script or a monitoring check, tell success from failure
+        without parsing messages. If the script prints an error but exits 0, a caller that relies on the status
+        treats the run as a success. The caller must still be set up to act on it: cron only schedules the run, so
+        arrange logging or monitoring to make failures visible. Exiting non-zero (here 1 when a file was skipped,
+        2 for wrong usage) gives callers something to react to; the error message remains the human-readable part.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can make a script runnable and check its syntax, handle its arguments with `"$@"`, read its tests and
+        loops, and make it report honestly through its exit status.
+
+        Scripts come back inside containers, where a script is often the main process, and its exit status is
+        what the container platform reports when the container ends.
+
+        Next: installing and updating software with packages, and moving files around in archives.
+  sections:
+    - id: functions-and-heredocs
+      title: Functions and here-documents
+      depth: true
+      body: "A **function** groups commands under a name and takes positional parameters of its own:\n\n```\nlog() { printf\
+        \ '%s %s\\n' \"$(date +%T)\" \"$*\" >&2; }\n\ncount_errors() {\n  local file=$1\n  grep -c ' ERROR ' \"$file\"\n}\n\
+        ```\n\n- Declare variables with `local`; otherwise they are global.\n- A function gives back **two separate things**:\
+        \ output (captured with `$(count_errors app.log)`) for\n  data, and an exit status (`return 0` to `255`, or its last\
+        \ command's) for success or failure.\n- Send messages for humans to stderr (`>&2`), so they never mix with data a\
+        \ caller captures.\n\nA **here-document** feeds the lines up to a delimiter to a command's standard input, the clean\
+        \ way to\nwrite a configuration file from a script:\n\n```\ncat > /etc/app/app.conf <<EOF\nservice=$name\nlisten=0.0.0.0:$port\n\
+        EOF\n```\n\n| Form | Effect |\n|---|---|\n| `<<EOF` | variables and `$( )` inside are expanded |\n| `<<'EOF'` | nothing\
+        \ is expanded: use it when the text itself contains `$`, such as a script written by a script |\n| `<<-EOF` | leading\
+        \ **tab** characters (not spaces) are removed, so the block can be indented |\n| `<<< \"$var\"` | a here-string: one\
+        \ value as standard input |\n\nThe closing delimiter must be alone on its line, with no trailing spaces.\n"
+    - id: strict-mode
+      title: set -euo pipefail, and where it does not protect you
+      depth: true
+      body: "By default a script continues after a failed command. Three options change that, often written\ntogether at the\
+        \ top:\n\n| Option | Effect |\n|---|---|\n| `set -e` (errexit) | exit as soon as a command fails |\n| `set -u` (nounset)\
+        \ | treat an unset variable as an error (`$@` and `$*` are exempt) |\n| `set -o pipefail` | a pipeline fails if any\
+        \ of its commands fails, not only the last |\n\nThey catch the silent failures from the opening example. They are\
+        \ a safety net, not a guarantee, and\nthe Bash manual lists the exceptions:\n\n- **Conditions do not stop the script.**\
+        \ A failing command tested by `if`, `while`, `until`, `!`, or on\n  the left of `&&` or `||` is not an error: you\
+        \ asked a question.\n- **The exemption reaches into functions.** If a function is called as a condition (`if deploy;\
+        \ then`),\n  `set -e` is ignored for every command inside it. A failure in the middle of `deploy` does not stop\n\
+        \  it, and its last command decides the result.\n- **`local x=$(cmd)` hides failures.** The status is that of `local`,\
+        \ which succeeded. Declare first,\n  assign on the next line: `local x; x=$(cmd)`.\n- **Expected non-zero statuses\
+        \ become fatal.** `count=$(grep -c ERROR file)` stops the script when\n  there is no match: `grep -c` prints `0` and\
+        \ exits `1`, and a plain assignment takes the status of\n  its command substitution. `((n++))` when `n` is `0` also\
+        \ returns `1`. Write `|| true` where a\n  non-zero status is a normal answer.\n- **Pipelines and SIGPIPE.** In `producer | head -3`, `head` can exit while `producer` is still writing; the\n  producer then dies from SIGPIPE (status 141), and with `pipefail` the script stops. Use a filter that reads\n  everything, such as `sed -n '1,3p'`, or save the output first.\n- **`set -u` and optional arguments.**\
+        \ `$1` with no arguments now stops the script; write `${1:-}`.\n\nPair strict mode with explicit checks for what you\
+        \ expect (arguments, files, commands) and with a\n`trap` for clean-up that runs however the script ends:\n\n```\n\
+        tmp=$(mktemp -d)\ntrap 'rm -rf -- \"$tmp\"' EXIT\n```\n"
+    - id: scripts-in-containers
+      title: 'Later in the course: scripts in containers'
+      depth: true
+      body: |
+        Scripts also start programs inside containers, run health checks and run scheduled jobs. How they stop on
+        SIGTERM and which exit status they report matter there too; that is covered later, once containers have
+        been introduced, in [Running a service with Podman](/lesson/ct.podman-run) (a program that ignores SIGTERM)
+        and [Building your own image](/lesson/ct.build-images) (which program becomes the container's first process).
+    - id: common-mistakes
+      title: Common mistakes
+      depth: true
+      body: "- **Parsing `ls` output.** Names with spaces or newlines break it; use globs, or `find … -print0` with\n  `xargs\
+        \ -0` or `while IFS= read -r -d ''`.\n- **`cd somewhere` without a check.** `cd \"$dir\" || exit 1`, or rely on `set\
+        \ -e`, before any destructive\n  command.\n- **Assuming the caller's directory.** Scripts run from cron, systemd or\
+        \ a container start somewhere\n  else; use absolute paths, or `cd \"$(dirname \"$0\")\"` for paths relative to the\
+        \ script.\n- **Using `$*` in a wrapper.** Arguments with spaces are split; use `\"$@\"`.\n- **Messages on stdout in\
+        \ a function whose output is captured.** They end up in the variable; send\n  them to stderr.\n- **Treating `set -euo\
+        \ pipefail` as error handling.** It stops the script; it does not report what\n  failed or clean up. Add explicit\
+        \ checks and a `trap … EXIT`.\n"
+  review:
+    - q: "What does the first line `#!/usr/bin/env bash` do?"
+      a: "It names the interpreter that runs the script (bash, found through env)."
+    - q: "What is the difference between `\"$@\"` and `$*`?"
+      a: "`\"$@\"` keeps each argument as one word; unquoted `$*` splits arguments at spaces."
+    - q: "How do you check a script's syntax without running it?"
+      a: "`bash -n script.sh`."
+    - q: "Why should a script exit non-zero when part of its work failed?"
+      a: "The exit status lets callers (cron, other scripts, monitoring) tell success from failure without parsing messages; a caller must still be set up to act on it."
+  commands:
+    - cmd: "./summarise.sh logs/app.log; echo \"exit=$?\""
+      meaning: "not executable yet: Permission denied, 126"
+    - cmd: "head -3 summarise.sh; chmod u+x summarise.sh && ls -l summarise.sh && bash -n summarise.sh && echo \"syntax OK\""
+      meaning: "shebang, execute permission, syntax check"
+    - cmd: "./summarise.sh logs/app.log logs/old.log; echo \"exit=$?\""
+      meaning: "two logs summarised"
+    - cmd: "cat args.sh; bash args.sh \"My Report.txt\" draft"
+      meaning: "a loop; \"$@\" keeps arguments whole, $* splits them"
+    - cmd: "[[ -f logs/app.log ]]; echo \"app.log: $?\"; [[ -f logs/missing.log ]]; echo \"missing.log: $?\""
+      meaning: "a test succeeds (0) or fails (1)"
+    - cmd: "cat check.sh; bash check.sh logs/app.log logs/missing.log"
+      meaning: "an if block and continue"
+    - cmd: "./summarise.sh; echo \"exit=$?\""
+      meaning: "no argument: usage, status 2"
+    - cmd: "./summarise.sh logs/app.log logs/missing.log; echo \"exit=$?\""
+      meaning: "a missing file is reported and the status is 1"
+    - cmd: "awk 'BEGIN { for (i = 1; i <= 50000; i++) print \"2026-10-14T09:00:00 ERROR failure \" i }' > logs/big.log; ./summarise.sh logs/big.log logs/old.log; echo \"exit=$?\""
+      meaning: "a large log is summarised without error"
+  files:
+    "logs/app.log": |
+      2026-10-14T09:00:01 INFO server started on port 8080
+      2026-10-14T09:00:05 INFO connected to database
+      2026-10-14T09:12:40 ERROR timeout calling payments
+      2026-10-14T09:12:41 WARN retrying request
+      2026-10-14T09:12:47 ERROR timeout calling payments
+      2026-10-14T09:30:02 ERROR invalid token from client
+      2026-10-14T09:45:00 INFO health check ok
+    "logs/old.log": |
+      2026-10-13T23:59:59 INFO rotated
+    "summarise.sh": |
+      #!/usr/bin/env bash
+      # summarise.sh: line and error counts, and the most frequent errors, for each log file given.
+      set -euo pipefail
+
+      usage() {
+        echo "usage: ${0##*/} LOGFILE..." >&2
+        exit 2
+      }
+
+      summarise() {
+        local file=$1
+        local lines errors
+        lines=$(wc -l < "$file")
+        errors=$(grep -c ' ERROR ' "$file" || true)   # grep -c exits 1 when it counts 0
+        printf '%s: lines=%d errors=%d\n' "$file" "$lines" "$errors"
+        if (( errors > 0 )); then
+          grep ' ERROR ' "$file" | cut -d' ' -f3- | sort | uniq -c | sort -rn | sed -n '1,3p'
+        fi
+      }
+
+      [[ $# -ge 1 ]] || usage
+
+      status=0
+      for file in "$@"; do
+        if [[ ! -f $file || ! -r $file ]]; then
+          echo "skipping $file: not a readable file" >&2
+          status=1
+          continue
+        fi
+        summarise "$file"
+      done
+      exit "$status"
+    "check.sh": |
+      #!/usr/bin/env bash
+      for file in "$@"; do
+        if [[ ! -f $file || ! -r $file ]]; then
+          echo "skipping $file: not a readable file"
+          continue
+        fi
+        echo "ok: $file"
+      done
+    "args.sh": |
+      #!/usr/bin/env bash
+      echo "$# arguments; first: ${1:-<none>}; third: ${3:-<none>}"
+      echo 'for a in "$@":'
+      for a in "$@"; do echo "  [$a]"; done
+      echo 'for a in $*:'
+      for a in $*; do echo "  [$a]"; done
+  references:
+    - {title: "GNU Bash manual: Shell scripts", url: "https://www.gnu.org/software/bash/manual/html_node/Shell-Scripts.html"}
+    - {title: "GNU Bash manual: Special parameters ($@, $#)", url: "https://www.gnu.org/software/bash/manual/html_node/Special-Parameters.html"}
+    - {title: "GNU Bash manual: Conditional constructs ([[ ]], if, case)", url: "https://www.gnu.org/software/bash/manual/html_node/Conditional-Constructs.html"}
+    - {title: "GNU Bash manual: The set builtin (-e, -u, pipefail)", url: "https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html"}
+    - {title: "ShellCheck", url: "https://www.shellcheck.net/"}
+
+- id: lx.packages-archives
+  title: "Software packages and archives"
+  subtitle: "What is installed and where it came from, and packing files with tar"
+  module: lx3-admin
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "rpm 4.16, dnf 4 and GNU tar 1.34 on RHEL 9. The rpm and tar commands were recorded on a RHEL 9 workstation as an ordinary user, in a practice directory; dnf, which needs root to change anything, is shown as examples, not recordings."
+  concepts: [linux.packages, linux.files]
+  prerequisites: [lx.shell-scripts, lx.users-permissions]
+  objective: |
+    Ask the RPM database what is installed, which package a file belongs to and which files a package installed;
+    know what dnf does; and create, list and extract tar archives, including the permissions problem when
+    extracting.
+  flow:
+    - kind: ask
+      id: recall-args
+      recalls: lx.shell-scripts
+      prompt: "A look back. In a script, what does `\"$@\"` expand to?"
+      choices:
+        - text: "Every argument, each kept as one word"
+          why: "So a file name containing spaces stays one argument."
+        - text: "Only the first argument given to it"
+          why: "That is `$1`. `\"$@\"` is all of them."
+        - text: "The number of arguments it received"
+          why: "That is `$#`."
+      answer: 0
+    - kind: teach
+      id: packages
+      title: "Software comes in packages"
+      body: |
+        On RHEL, almost every program, library and configuration file under `/usr` and `/etc` was installed from a
+        **package**: an `.rpm` file that holds the files plus information about them (name, version, what else they
+        need). Every installed package is recorded in the **RPM database**, so you can always ask what is installed,
+        in which version, and which package a file belongs to. `rpm -q` (query) does that, and any user may run it.
+    - kind: show
+      id: rpm-q
+      run: "rpm -qa | wc -l; rpm -q tar bash; rpm -q --qf '%{NAME} | %{VERSION} | %{RELEASE} | %{ARCH}\\n' tar"
+      notice: |
+        Over 1,600 packages installed (`-qa` lists them all, `wc -l` counted). A package's full name has four parts:
+        name, version, release (the build of that version for this distribution) and architecture. The last command
+        printed them separately.
+    - kind: teach
+      id: qf-intro
+      body: |
+        So far the question started from a package name. The opposite direction starts from a file: `rpm -qf FILE`
+        (`-f` for file) names the package that owns it. Here it is for the shell itself:
+    - kind: show
+      id: qf-demo
+      run: "rpm -qf /usr/bin/bash"
+      notice: "One line, the package that installed `/usr/bin/bash`: its name, version, release and architecture."
+    - kind: try
+      id: try-qf
+      body: "A colleague wonders whether `/usr/bin/tar` was installed from a package or copied by hand. Ask the RPM database."
+      accept: ["rpm -qf /usr/bin/tar", "rpm -q -f /usr/bin/tar", "rpm --query --file /usr/bin/tar", "rpm -fq /usr/bin/tar", "rpm -qf /bin/tar", "rpm -q --file /usr/bin/tar"]
+      hints:
+        - match: "^rpm -q tar"
+          say: "That asks whether the package `tar` is installed. To start from a file and find its package, add `-f` (file)."
+        - match: "^rpm -ql"
+          say: "`-l` lists the files of a package. You want the opposite direction: the package of a file, with `-f`."
+        - match: "^(which|type) "
+          say: "That finds where a command is. The question is which package installed that file: `rpm -qf`."
+      hint: "`rpm -qf`, then the file's full path."
+      run: "rpm -qf /usr/bin/tar /etc/ssh/ssh_config /usr/bin/crontab \"$PWD/site/index.html\"; echo \"exit=$?\""
+      then: |
+        The recording asked about four files. Three belong to packages; the last one, `site/index.html`, is one of
+        the files supplied with this lesson and saved in the practice directory (see "Before you start: source
+        files"; the `site` directory comes back with tar below). It is "not owned by any package", and the exit
+        status is 1. RPM records no owner for that path: it might be created locally, generated by software, or
+        managed another way, so you would investigate where it came from. Here we know its origin.
+    - kind: show
+      id: rpm-ql
+      body: "The other direction: which files did a package install? `-l` lists them, `-c` only its configuration files, `-d` its documentation:"
+      run: "rpm -ql tar | head -4; rpm -ql tar | wc -l; rpm -qc openssh-clients; rpm -qd tar | head -2"
+      notice: "The first four of tar's 56 files, the two configuration files of the SSH client, and the start of tar's documentation."
+    - kind: teach
+      id: dnf
+      title: "Installing and removing: dnf"
+      body: |
+        `rpm` reads the database; to install, update or remove software you use **dnf**, which downloads packages
+        from **repositories** (servers listed in `/etc/yum.repos.d/`) and also installs whatever they depend on.
+        `rpm` only checks the package files you give it; dnf resolves the declared dependencies and fetches them.
+        Changing the system needs root, so these are examples to read, not recordings:
+
+        ```
+        sudo dnf install tree        # install a package and its dependencies
+        sudo dnf update              # update every installed package
+        sudo dnf remove tree         # remove it again
+        dnf search compression       # find packages by name or description
+        dnf provides '*/bin/zstd'    # which package would give me this file?
+        dnf history                  # what was installed or removed, and when
+        ```
+
+        On a RHEL system, the main repositories need a subscription. (Container images, which the next part of the
+        course introduces, are often built from Red Hat's Universal Base Image, UBI, which enables a freely
+        available subset of those repositories instead.)
+    - kind: ask
+      id: which-tool
+      prompt: "A colleague runs `rpm -i ./app.rpm`. It refuses to install and reports a missing dependency that the configured repositories provide. Which command can fetch it?"
+      choices:
+        - text: "`dnf install ./app.rpm`"
+          why: "dnf resolves the package's declared dependencies from the repositories and installs them together with it; `rpm -i` only checks the files it is given."
+        - text: "Running `rpm -i` as root"
+          why: "The refusal is about a missing dependency, not a permission. `rpm` does not fetch what is missing."
+        - text: "Copying the library into /usr/lib by hand"
+          why: "That would work around the database, so `rpm` would still consider the dependency missing, and updates would not maintain the copy."
+      answer: 0
+    - kind: teach
+      id: tar
+      title: "Archives with tar"
+      body: |
+        To move or back up many files as one, Linux uses **tar** (tape archive). The options read like a short
+        sentence: `-c` create, `-t` list, `-x` extract, `-f FILE` the archive's name, `-v` verbose (print names).
+
+        The examples archive the small `site` directory supplied with the lesson: a page, a configuration file and
+        a start script.
+    - kind: show
+      id: tar-c
+      run: "seq -f 'line %g of the access log' 1 50000 > site/access.log && chmod 750 site/bin/start.sh && chmod 640 site/conf/app.conf && tar -cvf site.tar site"
+      notice: "The recording first made a large log file and set some permissions (supplied setup), then created `site.tar` from the directory `site`; `-v` printed each name it added."
+    - kind: show
+      id: tar-t
+      body: "`-t` lists an archive without extracting it, and `-v` adds the details:"
+      run: "tar -tvf site.tar"
+      notice: "One line per entry: permissions, owner and group, size in bytes, date and time, and the stored path. Every path starts with `site/`, because the archive was made from the directory `site`."
+    - kind: ask
+      id: where-extracted
+      guess: true
+      prompt: "You run `mkdir extracted && tar -xf site.tar -C extracted` (`-C DIR` means: go to DIR first). Where does `index.html` end up?"
+      choices:
+        - text: "`extracted/site/index.html`"
+          why: "The stored path is `site/index.html`, and it is created below the directory given with `-C`. The next step shows the tree."
+        - text: "`extracted/index.html`"
+          why: "tar keeps the stored path, including the `site/` part. The next step shows the tree."
+        - text: "`site/index.html`, in the current directory"
+          why: "`-C extracted` moved the extraction into the new directory. The next step shows where the files went."
+      answer: 0
+    - kind: show
+      id: tar-x
+      run: "mkdir extracted && tar -xf site.tar -C extracted && find extracted | sort"
+      notice: "The whole stored tree was recreated below `extracted/`, starting with `extracted/site`."
+    - kind: teach
+      id: compress-intro
+      body: |
+        Compression is one more letter, and optional: `-z` gzip, `-J` xz, `-j` bzip2. The file name usually says
+        which one was used (`.tar.gz`, `.tar.xz`).
+    - kind: show
+      id: compress
+      body: "The same directory, archived with each kind of compression:"
+      run: "tar -czf site.tar.gz site && tar -cjf site.tar.bz2 site && tar -cJf site.tar.xz site && ls -l site.tar*"
+      notice: "1.4 MB uncompressed; gzip about ten times smaller, xz smaller still, at the cost of more CPU time. A repetitive log compresses extremely well; already-compressed files (images, videos) hardly at all."
+    - kind: try
+      id: try-list
+      body: "Now list the contents of `site.tar.xz`, with details, without extracting it."
+      accept: ["tar -tvf site.tar.xz", "tar -tvJf site.tar.xz", "tar -tJvf site.tar.xz", "tar tvf site.tar.xz", "tar --list --verbose --file site.tar.xz", "tar -tvf ./site.tar.xz", "tar -t -v -f site.tar.xz", "tar -vtf site.tar.xz", "tar -tvJf ./site.tar.xz", "tar --list --verbose --file=site.tar.xz", "tar -tvf site.tar.xz | head"]
+      hints:
+        - match: "-x"
+          say: "`-x` extracts. To list without extracting, use `-t`."
+        - match: "-c"
+          say: "`-c` creates a new archive and would overwrite this one. Listing is `-t`."
+        - match: "tar -tv site"
+          say: "tar needs `-f` before the archive's name: `-f site.tar.xz`."
+      hint: "`tar -tvf` and the archive's name. tar detects the compression by itself when reading."
+      run: "tar -tvf site.tar.xz"
+      then: "Every entry with its permissions, owner, size and date, exactly as stored. When reading, tar recognises the compression by itself, so no `-J` is needed."
+    - kind: teach
+      id: extract-perms
+      body: |
+        Extracting brings back the files, but as an ordinary user not necessarily their permissions: tar applies your
+        **umask** (the permissions your new files lose by default), unless you ask it to keep the stored ones with
+        `-p`. You have seen extraction work; now the permissions. The recording extracts the same archive twice with a
+        strict umask, `077`, once without and once with `-p`, each into its own new directory:
+    - kind: show
+      id: perms
+      run: "mkdir restore-umask restore-p && umask 077 && tar -xf site.tar.gz -C restore-umask && tar -xpf site.tar.gz -C restore-p && ls -l restore-umask/site/bin/start.sh restore-umask/site/conf/app.conf restore-p/site/bin/start.sh restore-p/site/conf/app.conf"
+      highlight: ["restore-umask"]
+      notice: "Without `-p`, the extracted files have no group permissions (`rwx------`, `rw-------`): the script has no group execute permission, so other group members cannot run it. With `-p`, the stored permissions came back. If you typed this yourself, `umask 077` stays in effect in that shell: run `umask 022` (or open a new shell) afterwards."
+    - kind: ask
+      id: absolute
+      prompt: "You create an archive with `tar -czf os.tar.gz /etc/os-release`, then extract it in your home directory. Where does the file go?"
+      choices:
+        - text: "`~/etc/os-release`: tar removed the leading /"
+          why: "With these options, GNU tar removes the leading `/` and stores `etc/os-release`. Extract into a new, empty directory and inspect the result first: relative names do not guarantee harmless extraction."
+        - text: "`/etc/os-release`, overwriting it"
+          why: "By default, tar removes the leading `/` when creating the archive, precisely to prevent that."
+        - text: "Nowhere: absolute paths cannot be archived"
+          why: "They can; by default tar stores them as relative paths and warns you."
+      answer: 0
+    - kind: show
+      id: absolute-show
+      run: "tar -czf os.tar.gz /etc/os-release && tar -tzf os.tar.gz"
+      notice: "tar warns ``Removing leading `/' from member names``, and the listing shows the name it stored: `etc/os-release`, with no `/` in front. Extracted in your home directory, it becomes `~/etc/os-release`."
+    - kind: reflect
+      id: explain-rpm
+      prompt: "You inherit a server with a mysterious file, `/usr/local/bin/report`. Explain how you would find out whether a package installed it, and what that tells you."
+      model: |
+        `rpm -qf /usr/local/bin/report` asks the RPM database which package owns it. If one does, `rpm -qi` on that
+        package says what it is and where it came from, and `rpm -V` checks whether its files were changed. If no
+        package owns it, RPM does not manage it. It might have been created locally, generated by software or
+        installed another way, so investigate its source and how it is updated, and find out who added it and why.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can query what is installed and who owns a file, know what dnf adds to rpm, and create, inspect and
+        extract tar archives without losing permissions.
+
+        Archives come back with containers: an image can be saved as one archive file, moved to a machine without
+        a registry, and loaded there.
+
+        Next: managing users and groups, giving one precise privilege with sudo, and running jobs on a schedule.
+  sections:
+    - id: more-packages
+      title: "Verifying packages, and gzip on its own"
+      depth: true
+      body: |
+        - `rpm -V PACKAGE` compares the installed files with what the package installed: no output means nothing was
+          changed; a line such as `S.5....T.  c /etc/...` lists what differs (size, checksum, time) for a modified file.
+        - `rpm -q --changelog PACKAGE` lists the package's changes, including the security fixes (CVE numbers)
+          applied by the distribution, even when the version number did not change.
+        - `gzip file` compresses a single file in place (`file.gz`); `-k` keeps the original; `zcat` reads it without
+          decompressing to disk.
+        - Container images install packages with `dnf` (or `microdnf` on minimal images) in a `RUN` step; cleaning the
+          package cache in the same step keeps the layer small.
+  review:
+    - q: "Which command tells you which package a file belongs to?"
+      a: "`rpm -qf /path/to/file`."
+    - q: "What does dnf add to rpm?"
+      a: "Repositories and dependencies: it downloads packages and everything they need, and installs or removes them."
+    - q: "How do you list a tar archive's contents without extracting it?"
+      a: "`tar -tvf archive.tar.gz`."
+    - q: "Why use `tar -xp`?"
+      a: "To restore the stored permissions instead of applying your umask."
+  commands:
+    - cmd: "rpm -qa | wc -l; rpm -q tar bash; rpm -q --qf '%{NAME} | %{VERSION} | %{RELEASE} | %{ARCH}\\n' tar"
+      meaning: "what is installed, and a package's name in four parts"
+    - cmd: "rpm -qf /usr/bin/bash"
+      meaning: "the package that owns one file"
+    - cmd: "rpm -qf /usr/bin/tar /etc/ssh/ssh_config /usr/bin/crontab \"$PWD/site/index.html\"; echo \"exit=$?\""
+      meaning: "which package owns each file"
+    - cmd: "rpm -ql tar | head -4; rpm -ql tar | wc -l; rpm -qc openssh-clients; rpm -qd tar | head -2"
+      meaning: "the files a package installed"
+    - cmd: "seq -f 'line %g of the access log' 1 50000 > site/access.log && chmod 750 site/bin/start.sh && chmod 640 site/conf/app.conf && tar -cvf site.tar site"
+      meaning: "create an archive"
+    - cmd: "tar -tvf site.tar"
+      meaning: "list an uncompressed archive"
+    - cmd: "mkdir extracted && tar -xf site.tar -C extracted && find extracted | sort"
+      meaning: "extract into an empty directory"
+    - cmd: "tar -czf site.tar.gz site && tar -cjf site.tar.bz2 site && tar -cJf site.tar.xz site && ls -l site.tar*"
+      meaning: "three kinds of compression"
+    - cmd: "tar -tvf site.tar.xz"
+      meaning: "list an archive"
+    - cmd: "mkdir restore-umask restore-p && umask 077 && tar -xf site.tar.gz -C restore-umask && tar -xpf site.tar.gz -C restore-p && ls -l restore-umask/site/bin/start.sh restore-umask/site/conf/app.conf restore-p/site/bin/start.sh restore-p/site/conf/app.conf"
+      meaning: "extracting with and without -p"
+    - cmd: "tar -czf os.tar.gz /etc/os-release && tar -tzf os.tar.gz"
+      meaning: "tar removes the leading /"
+  files:
+    site/index.html: |
+      <h1>hello</h1>
+    site/conf/app.conf: |
+      port=8080
+    site/bin/start.sh: |
+      #!/bin/sh
+      exec httpd -f -p 8080 -h /srv/site
+  references:
+    - {title: "RPM: rpm(8)", url: "https://rpm.org/documentation.html"}
+    - {title: "RHEL 9: Managing software with the DNF tool", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_software_with_the_dnf_tool/index"}
+    - {title: "GNU tar manual", url: "https://www.gnu.org/software/tar/manual/tar.html"}
+    - {title: "Linux man-pages: umask(2)", url: "https://man7.org/linux/man-pages/man2/umask.2.html"}
+
+- id: lx.users-scheduling
+  title: "Users, sudo and scheduled jobs"
+  subtitle: "Accounts and groups, one precise privilege with sudo, and work that runs on a schedule"
+  module: lx3-admin
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "shadow-utils, sudo 1.9, cronie and systemd 252 on CentOS Stream 9 (the upstream of RHEL 9). Read-only commands and user-level timers were recorded on a disposable virtual machine as an ordinary user (a member of wheel); commands that change accounts or the system need root and are shown as examples, not recordings."
+  concepts: [linux.permissions, linux.scheduling, linux.systemd]
+  prerequisites: [lx.packages-archives, lx.systemd-journal]
+  objective: |
+    Read accounts and groups from the system's databases, know how accounts and group memberships are created and
+    changed, grant one precise privilege with a validated sudoers rule, and schedule work with cron or a systemd
+    timer while avoiding cron's environment trap.
+  flow:
+    - kind: ask
+      id: recall-rpm
+      recalls: lx.packages-archives
+      prompt: "A look back. Which command tells you which package installed `/usr/bin/crontab`?"
+      choices:
+        - text: "`rpm -qf /usr/bin/crontab`"
+          why: "`-q` queries the RPM database and `-f` starts from a file."
+        - text: "`rpm -ql /usr/bin/crontab`"
+          why: "`-l` lists the files of a package; it expects a package name, not a file."
+        - text: "`dnf install /usr/bin/crontab`"
+          why: "That would try to install whatever provides the file. To ask who owns it, query the database."
+      answer: 0
+    - kind: teach
+      id: accounts
+      title: "Where accounts live"
+      body: |
+        Users and groups are records in two small text files, `/etc/passwd` and `/etc/group` (the password hashes
+        themselves are kept apart, in `/etc/shadow`, readable only by root). `getent` reads them the way programs do,
+        including accounts that come from a directory service rather than the local files:
+    - kind: show
+      id: getent
+      run: "getent passwd root; getent group wheel"
+      highlight: ["wheel"]
+      notice: |
+        A passwd line has seven fields separated by `:`: name, `x` (the password is elsewhere), UID, primary GID,
+        a comment, the home directory and the login shell. The group line lists the members of `wheel`, the group
+        whose members may use sudo on RHEL.
+    - kind: teach
+      id: changing
+      body: |
+        Before changing anything, learn to read one account's groups. `id` prints a user's UID, primary group and
+        **supplementary** groups, the extra groups that give access to more files and commands:
+    - kind: show
+      id: id-demo
+      run: "id"
+      notice: "`uid=` is the user's number, `gid=` the primary group, and `groups=` the full list, supplementary groups included. Every group in that list counts for permissions. (Ignore the `context=` part for now: the `cloud_init_t` label belongs to the recording machine's provisioning service, which ran the recorder; yours, in a login session, will usually be `unconfined_t`.)"
+    - kind: ask
+      id: which-group
+      prompt: "On another RHEL machine with the default sudo rules, a colleague's `id` prints this line. Can `sam` use sudo?"
+      evidence: |
+        uid=1001(sam) gid=1001(sam) groups=1001(sam),1005(developers)
+      choices:
+        - text: "Yes: every user may use sudo with their own password"
+          why: "sudo asks for your own password, but that only proves who you are. Its rules decide what you may do, and by default on RHEL they allow the members of `wheel`."
+        - text: "Yes: `developers` is a supplementary group"
+          why: "Supplementary groups count for permissions, but the only group named in RHEL's default sudo rules is `wheel`."
+        - text: "No: `wheel` is not in the `groups=` list"
+          why: "On RHEL, sudo is granted by default to members of `wheel`, and sam's groups are only `sam` and `developers`."
+      answer: 2
+    - kind: teach
+      id: creating
+      body: |
+        Creating and changing accounts needs root, so the next commands are examples to read, not recordings. Here
+        is one scenario, step by step:
+
+        ```
+        sudo useradd -m -s /bin/bash alice      # create alice
+        sudo passwd alice                       # set her password
+        sudo groupadd developers                # create a group
+        sudo usermod -aG developers alice       # add alice to it
+        id alice                                # check the result
+        ```
+
+        `-m` creates her home directory, and `-s /bin/bash` sets her login shell. `usermod -G LIST` sets her
+        supplementary groups to exactly LIST, replacing the old list; with `-a` (append), `-G` adds to the list
+        instead. So `-aG developers` keeps her other groups, and `id alice` would then show `developers` among
+        her `groups=`.
+
+        A change of group membership applies to new logins: a session that is already open keeps its old groups.
+    - kind: ask
+      id: usermod-g
+      prompt: "alice's supplementary groups are `wheel` and `developers`, and the group `backup` exists. An admin runs `sudo usermod -G backup alice`. After she logs in again, what are her supplementary groups?"
+      choices:
+        - text: "Only `backup`"
+          why: "Without `-a`, `-G` replaces the whole list with exactly what is given. This is the classic way to remove someone's sudo rights by accident."
+        - text: "`wheel`, `developers` and `backup`"
+          why: "That is what `-aG` (append) would do. Plain `-G` sets the list to exactly what is given."
+        - text: "`wheel` and `developers`"
+          why: "The account record changes at once, so her next login uses the new list. Only sessions already open keep the old groups."
+      answer: 0
+    - kind: ask
+      id: session-groups
+      prompt: "alice already has a terminal open when the admin runs `sudo usermod -aG developers alice`. Does that terminal have the group `developers`?"
+      choices:
+        - text: "No, not until she logs in again"
+          why: "A session gets its groups when it starts, so only a new login sees the change."
+        - text: "Yes, from the moment of the change"
+          why: "The account record changes at once, but processes already running keep the groups they started with."
+        - text: "Yes, but only after a reboot"
+          why: "A reboot is not needed; a fresh login is enough for new sessions, and open ones keep their groups."
+      answer: 0
+    - kind: teach
+      id: removing
+      body: |
+        `sudo userdel -r alice` removes the account and, because of `-r`, her home directory and mail spool. Files
+        she owns elsewhere stay, owned by her bare number, and a new user who later gets the same UID inherits them.
+        Look for them first, for example with `find / -xdev -uid UID`, and decide what to do with them.
+    - kind: teach
+      id: sudo
+      title: "One precise privilege: sudo"
+      body: |
+        Most administration needs root, but giving people the root password is all or nothing. **sudo** lets chosen
+        users run chosen commands as root, logged and with their own password. The rules live in `/etc/sudoers` and,
+        better, in small files under `/etc/sudoers.d/`. A rule reads: *who* may run, on which machines, *as whom*,
+        *which command*: `alice ALL=(root) /usr/bin/systemctl restart httpd`, where `ALL` means any machine and
+        `(root)` is the user the command runs as.
+
+        A mistake in sudoers can lock everyone out of sudo, so rules are checked with `visudo`. Here are two
+        candidate rule files supplied with the lesson, `rule-ok` and `rule-bad` (see "Before you start: source files"), each
+        checked on its own with `visudo -cf FILE`:
+    - kind: show
+      id: visudo
+      run: "cat rule-ok; visudo -cf rule-ok; cat rule-bad; visudo -cf rule-bad"
+      highlight: ["parsed OK", "syntax error"]
+      notice: |
+        The first rule lets `alice` restart httpd as root, and nothing else: its syntax is valid (`parsed OK`).
+        The second has a stray comma at the end, and `visudo` points at it. `parsed OK` is limited: it says this
+        one file is well formed, not that the whole policy is valid, that the file's owner and mode are right, or
+        that alice has no other grants. A safe installation edits a drop-in with `sudo visudo -f
+        /etc/sudoers.d/alice` (which checks before saving), validates the complete policy with `sudo visudo -c`,
+        and confirms the file is owned by root with mode 0440. `sudo -l -U alice` then lists what she may run.
+    - kind: ask
+      id: least
+      prompt: "A developer must restart `httpd` as root on a test server, and do nothing else. Which sudoers rule does exactly that?"
+      choices:
+        - text: "`dev ALL=(root) /usr/bin/systemctl restart httpd`"
+          why: "Who: dev; as whom: root; which command: exactly this one, with its arguments, logged under the developer's own name."
+        - text: "`dev ALL=(root) /usr/bin/systemctl`"
+          why: "The user and run-as are right, but with no arguments listed, any `systemctl` subcommand is allowed as root: stopping or disabling any service."
+        - text: "`dev ALL=(alice) /usr/bin/systemctl restart httpd`"
+          why: "The command is right, but `(alice)` means it runs as the user alice, not as root, so it cannot restart a system service."
+      answer: 0
+    - kind: teach
+      id: cron
+      title: "Work on a schedule: cron"
+      body: |
+        **cron** runs commands at set times. Each user has a **crontab** (`crontab -e` edits it, `crontab -l` lists
+        it); each line is five time fields, then the command: minute, hour, day of month, month, day of week.
+
+        ```
+        30 2 * * *     /home/alice/bin/report.sh
+        ```
+
+        A `*` means "every value of this field", so this line runs every day (every day of month, every month,
+        every weekday) at 02:30. A range limits a field: `1-5` in the last field means Monday to Friday (Sunday is
+        0 or 7), so `30 2 * * 1-5` runs at 02:30 on weekdays only.
+    - kind: ask
+      id: read-schedule
+      prompt: "A crontab line starts with `15 4 * * 1`. When does it run?"
+      choices:
+        - text: "Every Monday at 04:15"
+          why: "The fields are minute 15, hour 4, any day of month, any month, and day of week 1, which is Monday."
+        - text: "Every day at 04:15"
+          why: "The last field is `1`, not `*`, so only one weekday matches."
+        - text: "On the 1st of each month at 04:15"
+          why: "The `1` is in the last field, the day of the week. The day of the month is the third field, which is `*` here."
+      answer: 0
+    - kind: teach
+      id: cron-env
+      body: |
+        Two traps affect cron jobs. Cron runs with a very small environment: a short `PATH`, none of your shell's
+        settings, and the current directory set to your home, so commands that work at your prompt are not found.
+        And cron does not write job output to your terminal: it normally mails it to the crontab's owner if mail
+        delivery is configured, so redirect it to a known log when you need to read it:
+
+        ```
+        30 2 * * 1-5   /home/alice/bin/report.sh >> /home/alice/report.log 2>&1
+        ```
+    - kind: ask
+      id: cron-trap
+      prompt: "A script works when you run it, but fails every night from cron with `mytool: command not found`. Most likely cause?"
+      choices:
+        - text: "cron's PATH does not include mytool's directory"
+          why: "cron starts with a minimal environment. Use the full path to `mytool`, or set `PATH=` at the top of the crontab or script."
+        - text: "cron does not run scripts, only commands"
+          why: "cron runs any command, including scripts; the error comes from inside the script."
+        - text: "The script is not executable"
+          why: "Then the error would be \"Permission denied\" for the script itself, not \"command not found\" for a tool inside it."
+      answer: 0
+    - kind: teach
+      id: timers
+      title: "The systemd way: timers"
+      body: |
+        On RHEL, systemd **timers** are an alternative to cron. A timer unit starts a service unit on a calendar
+        expression, the service's output goes to the journal, and a missed run can be caught up after a reboot. The
+        calendar syntax can be tested before it is used, here for 02:30 on weekdays in Paris time:
+    - kind: show
+      id: calendar
+      run: "systemd-analyze calendar --iterations=2 'Mon..Fri *-*-* 02:30:00 Europe/Paris'"
+      notice: |
+        The expression includes `Europe/Paris`, so 02:30 is read in Paris time. The machine prints the result in its
+        own time zone, here UTC: 00:30 UTC, because on these October dates Paris is two hours ahead of UTC. (A machine
+        in another zone also adds an `(in UTC)` line.) The daylight-saving change can move that difference, so a zone
+        in a schedule is worth writing down on purpose. The two times are Monday, then Tuesday.
+    - kind: show
+      id: timer-file
+      body: "A timer for a nightly report, next to the service it starts: two unit files supplied with the lesson, `academy-report.timer` and `academy-report.service` (see \"Before you start: source files\"), checked with `systemd-analyze verify`:"
+      run: "cat academy-report.timer && systemd-analyze verify --user ./academy-report.service ./academy-report.timer && echo \"units OK\""
+      notice: |
+        `OnCalendar` is the schedule, the very expression tested above. `Persistent=true` runs a missed occurrence
+        when the timer becomes active again. `RandomizedDelaySec` then delays each run by a random amount up to 10
+        minutes, so that many machines do not start together: 02:30 in Paris is the nominal time, and the real start
+        lies in the 10 minutes after it. `timers.target` in `[Install]` is what `systemctl enable` hooks it into.
+    - kind: teach
+      id: install-timer
+      body: |
+        Writing the two files is not enough: a timer must be installed, enabled and started. For your own user
+        instance, these are the steps (an example to read, because it would change this machine's configuration):
+
+        ```
+        mkdir -p ~/.config/systemd/user
+        cp academy-report.service academy-report.timer ~/.config/systemd/user/
+        systemctl --user daemon-reload                     # re-read the unit files
+        systemctl --user enable --now academy-report.timer
+        systemctl --user list-timers academy-report.timer  # when does it fire next?
+        ```
+
+        User units live in `~/.config/systemd/user/`. A user's systemd instance runs while the user is logged in;
+        for a user timer to run at boot without a login, an administrator enables **lingering** with `loginctl
+        enable-linger USER`. A persistent timer catches up a missed run when it becomes active, subject to its random
+        delay.
+
+        The next recordings use a temporary timer, so nothing is installed. First, a timer scheduled with the same
+        calendar expression, and the `list-timers` check of when it fires next:
+    - kind: ask
+      id: which-reload
+      prompt: "You copied the two unit files into `~/.config/systemd/user/`. Which step makes systemd read them before you enable the timer?"
+      choices:
+        - text: "`systemctl --user daemon-reload`"
+          why: "It re-reads the unit files, so the new timer is known before `enable --now` starts it."
+        - text: "`systemctl --user list-timers`"
+          why: "It only lists timers systemd already knows, so it comes after enabling."
+        - text: "`loginctl enable-linger`"
+          why: "Lingering keeps a user's manager running without a login; it does not read unit files."
+      answer: 0
+    - kind: show
+      id: scheduled
+      run: "systemd-run --user --unit=academy-report-demo --on-calendar='Mon..Fri *-*-* 02:30:00 Europe/Paris' /usr/bin/echo 'the report would run here' 2>&1; systemctl --user --no-pager list-timers academy-report-demo.timer"
+      notice: |
+        systemd names the timer and the service it will start. `list-timers` shows `NEXT` (when it fires, the
+        same moment as above), `LEFT` (time remaining), `LAST` (never run yet) and the `UNIT` and `ACTIVATES`
+        columns (the timer, and the service it starts). This temporary timer stays active, and would fire at the
+        next weekday 02:30 Paris time, until it is stopped; it then disappears. If you created it yourself, stop it with
+        `systemctl --user stop academy-report-demo.timer` when you have finished (the recording did so in a
+        clean-up step that the lesson does not show).
+    - kind: show
+      id: tick
+      body: "A timer that fires two seconds after it is created and runs one command. `--same-dir` keeps the practice directory as its working directory, and `AccuracySec=1s` only lets this two-second demo start on time, because systemd normally allows a timer to be up to a minute late:"
+      run: "systemd-run --user --unit=academy-lx3-tick --on-active=2s --timer-property=AccuracySec=1s --same-dir /bin/sh -c 'echo \"tick from a transient timer\" > tick.txt' 2>&1"
+      notice: "systemd created a temporary timer and the service it will start, and names both. The timer fires two seconds after its creation."
+    - kind: show
+      id: tick-result
+      body: "Then the inspection, after waiting a few seconds (the `sleep` is only the recording waiting):"
+      run: "sleep 4; cat tick.txt; journalctl --user-unit academy-lx3-tick --since -1min --no-pager -o cat"
+      notice: "After the wait, `tick.txt` holds what the command wrote, and the journal recorded the run: the `Started …` line is the service starting. Compared with cron, the run is in the journal (and a service's output would be too, had it not been redirected to `tick.txt`)."
+    - kind: reflect
+      id: explain-cron-vs-timer
+      prompt: "Explain to a colleague why a nightly job written for cron often fails the first time, and what a systemd timer changes."
+      model: |
+        cron runs the command with a minimal environment: a short PATH, none of your shell's settings and your home
+        as the current directory, so tools are not found. It does not write output to your terminal; cronie
+        normally mails it if mail delivery is configured, so redirect it to a known log to read it. Using full
+        paths and redirecting output fixes both. A systemd timer starts a service unit: its environment is
+        explicit in the unit, its output goes to the journal, and missed runs can be caught up with Persistent=true.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read accounts and groups, know how they are created and changed (and the `-aG` trap), write and check
+        a least-privilege sudo rule, and schedule work with cron or a systemd timer.
+
+        That completes the Linux part of the course. Next, containers: what they are, built from the processes,
+        users, files, networking and permissions you now know. The first container lesson,
+        [A container is a process](/lesson/a.container-is-a-process), starts from processes and signals.
+        Scheduled work comes back later too, as CronJobs: the same five time fields, for containers run on a
+        cluster.
+  sections:
+    - id: passwords-and-ageing
+      title: Passwords and password ageing
+      depth: true
+      body: '`/etc/shadow` (readable by root only) holds each user''s password hash and ageing fields, counted in
+
+        days since 1 January 1970:
+
+
+        ```
+
+        webop:!!:20741:0:99999:7:::
+
+        name :hash:last change:min:max:warn:inactive:expire:
+
+        ```
+
+
+        `chage` changes those fields for an existing user, and `chage -l` reads them:
+
+
+        | Option | Sets |
+
+        |---|---|
+
+        | `-M 90` | maximum days a password is valid |
+
+        | `-m 1` | minimum days between changes |
+
+        | `-W 14` | days of warning before it expires |
+
+        | `-I 7` | days after expiry before the account is locked as inactive |
+
+        | `-E 2026-12-31` | the date the **account** expires (`-E -1` removes the expiry) |
+
+        | `-d 0` | the last change to day 0: the user must choose a new password at next login |
+
+
+        `PASS_MAX_DAYS` and friends in `/etc/login.defs` only apply to accounts created afterwards; existing
+
+        accounts keep their values until you run `chage`. `passwd -e user` is a shortcut for "must change at
+
+        next login".
+
+        '
+    - id: at
+      title: 'at: run something once, later'
+      depth: true
+      body: 'For a single future run, `at` reads commands from standard input and queues them:
+
+
+        ```
+
+        echo "systemctl restart httpd" | at 02:00 tomorrow
+
+        at now + 30 minutes < job.sh
+
+        atq          # list queued jobs
+
+        atrm 3       # remove job 3
+
+        ```
+
+
+        Unlike cron, `at` saves your current environment and directory with the job, so `at -c <job>` shows
+
+        a script that starts with your `PATH`. The jobs are run by **atd**: if it is not running, `at` warns
+
+        `No atd running?` and queues the job anyway, but nothing runs it. On a server,
+
+        `systemctl enable --now atd` first. `/etc/at.allow` and `/etc/at.deny` control who may use it.
+
+        '
+    - id: on-the-cluster
+      title: 'Later in the course: scheduled jobs and service identities'
+      depth: true
+      body: |
+        Scheduled jobs and the identities that services run under come back later in the course, on platforms that
+        run many machines as one. See [Jobs and CronJobs](/lesson/o2.jobs-cronjobs) and
+        [ServiceAccounts and workload identity](/lesson/o2.service-accounts) once you reach them.
+    - id: common-mistakes
+      title: Common mistakes
+      depth: true
+      body: "- **Sharing one administrative account.** Logs then say \"admin\" did it. Individual accounts plus sudo\n  give\
+        \ an audit trail.\n- **`NOPASSWD: ALL` for convenience.** Any compromise of that account is root. Grant specific commands.\n\
+        - **Wildcards in sudo arguments** (`/usr/bin/systemctl restart *`). They match more than you think,\n  including spaces\
+        \ and extra arguments; list the exact commands.\n- **Deleting a user before their files are dealt with.** The UID\
+        \ becomes a bare number on every file,\n  and a new user who later gets that UID inherits them.\n- **Editing `/var/spool/cron/<user>`\
+        \ directly.** there is no syntax check (`crontab -e` refuses a broken\n  file, `crontab -T` tests one), and the owner\
+        \ and mode must stay right; use `crontab`.\n- **Scheduling a job at 02:30 local time** in a zone with daylight saving.\
+        \ cronie compensates (a\n  skipped run starts immediately, a repeated hour does not run it twice), but a systemd timer\
+        \ skips\n  a time that does not exist that day: on the spring change, its 02:30 run does not happen at all.\n\
+        \  Prefer UTC for important jobs.\n"
+  review:
+    - q: "What is the difference between `usermod -G` and `usermod -aG`?"
+      a: "`-G` replaces the supplementary groups; `-aG` adds to them."
+    - q: "How do you check a sudoers rule before installing it?"
+      a: "`visudo -cf FILE` checks that file's syntax only; edit a drop-in with `sudo visudo -f /etc/sudoers.d/NAME` and validate the whole policy with `sudo visudo -c`."
+    - q: "Why does a command that works at the prompt fail from cron?"
+      a: "cron runs with a minimal environment: a short PATH and none of your shell's settings. Its output is not shown on your terminal (cronie mails it if mail is configured), so redirect it to a log."
+    - q: "What does Persistent=true do in a systemd timer?"
+      a: "It runs an occurrence that was missed while the machine was off, as soon as it is back."
+  commands:
+    - cmd: "getent passwd root; getent group wheel"
+      meaning: "an account and a group, as programs see them"
+    - cmd: "id"
+      meaning: "a user's UID, primary group and supplementary groups"
+    - cmd: "cat rule-ok; visudo -cf rule-ok; cat rule-bad; visudo -cf rule-bad"
+      expect: fail
+      meaning: "a valid sudoers rule, and one with a syntax error"
+    - cmd: "systemd-analyze calendar --iterations=2 'Mon..Fri *-*-* 02:30:00 Europe/Paris'"
+      meaning: "when the timer's calendar expression fires"
+    - cmd: "cat academy-report.timer && systemd-analyze verify --user ./academy-report.service ./academy-report.timer && echo \"units OK\""
+      meaning: "a timer and its service, verified"
+    - cmd: "systemd-run --user --unit=academy-report-demo --on-calendar='Mon..Fri *-*-* 02:30:00 Europe/Paris' /usr/bin/echo 'the report would run here' 2>&1; systemctl --user --no-pager list-timers academy-report-demo.timer"
+      meaning: "a temporary timer with the report's schedule, and its next run"
+    - cmd: "systemd-run --user --unit=academy-lx3-tick --on-active=2s --timer-property=AccuracySec=1s --same-dir /bin/sh -c 'echo \"tick from a transient timer\" > tick.txt' 2>&1"
+      meaning: "a transient timer that fires two seconds later"
+    - cmd: "sleep 4; cat tick.txt; journalctl --user-unit academy-lx3-tick --since -1min --no-pager -o cat"
+      meaning: "its result and its journal"
+    - cmd: "systemctl --user stop academy-lx3-tick.timer academy-report-demo.timer 2> /dev/null; systemctl --user is-active academy-lx3-tick.timer academy-lx3-tick.service academy-report-demo.timer || true"
+      meaning: "clean up (not shown in the lesson)"
+  files:
+    "academy-report.service": |
+      [Unit]
+      Description=Summarise yesterday's application log
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/echo "the report would run here"
+    "academy-report.timer": |
+      [Unit]
+      Description=Run academy-report on weekday nights
+
+      [Timer]
+      OnCalendar=Mon..Fri *-*-* 02:30:00 Europe/Paris
+      RandomizedDelaySec=10min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+    rule-ok: |
+      alice ALL=(root) /usr/bin/systemctl restart httpd
+    rule-bad: |
+      alice ALL=(root) /usr/bin/systemctl restart httpd,
+  references:
+    - {title: "Linux man-pages: passwd(5)", url: "https://man7.org/linux/man-pages/man5/passwd.5.html"}
+    - {title: "Linux man-pages: usermod(8)", url: "https://man7.org/linux/man-pages/man8/usermod.8.html"}
+    - {title: "sudo: sudoers(5)", url: "https://www.sudo.ws/docs/man/sudoers.man/"}
+    - {title: "sudo: visudo(8)", url: "https://www.sudo.ws/docs/man/visudo.man/"}
+    - {title: "Linux man-pages: crontab(5)", url: "https://man7.org/linux/man-pages/man5/crontab.5.html"}
+    - {title: "systemd: systemd.timer(5)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html"}
+    - {title: "systemd: systemd.time(7) (calendar events)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html"}

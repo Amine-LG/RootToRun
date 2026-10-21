@@ -1,0 +1,501 @@
+# Cluster health as an administrator: read-only checks recorded on OpenShift Local as kubeadmin (record_on: cluster-admin,
+# no experiment: nothing is changed outside the developer's temporary project).
+- id: n.cluster-admin-health
+  title: "Check a cluster's health"
+  subtitle: "Release, operators, nodes, events, logs and support data, as the administrator"
+  module: b0-cluster-admin
+  mode: REAL_LAB
+  minutes: 35
+  level: 2
+  supports: "OpenShift 4.21 with oc 4.21. Every command was run on OpenShift Local 4.21 by its cluster administrator (kubeadmin), and two by the ordinary user developer in a temporary project; apart from the developer's deliberately broken pod in that project, nothing was created or changed. OpenShift Local leaves cluster monitoring out, so the metrics API and alerting are absent and the recording shows that honestly."
+  concepts: [ocp.clusteroperators, obs.signals, k8s.architecture]
+  prerequisites: [c.openshift-extends, o3.support-data, o1.cli]
+  record_on: cluster-admin
+  objective: |
+    Run the checks an administrator runs before and after any platform change: the release and its conditions, the
+    cluster operators, the nodes and their capacity and pressure, warning events and failing pods across all projects,
+    platform and node logs, and a support snapshot of one operator, and say what each check can and cannot prove.
+  flow:
+    - kind: ask
+      id: recall-conditions
+      recalls: c.openshift-extends
+      prompt: "A ClusterOperator shows `Available=True`, `Progressing=True`, `Degraded=False` a minute after a configuration change. What does that say?"
+      choices:
+        - text: "The component works and is rolling out the change"
+          why: "Progressing alone, right after a change, is the expected transition. Watch it settle; investigate only if it stops moving."
+        - text: "The change failed and must be reverted"
+          why: "Failure would show as Degraded, or as progress that never ends. One Progressing reading is not a failure."
+        - text: "The component is down until Progressing is False"
+          why: "Available is the condition that says whether it works, and it is True."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "Healthy before the change, healthy after it"
+      body: |
+        Until now you worked as an ordinary user inside your own project. Platform administration changes seats: you
+        act as the cluster's administrator, who may change what every team depends on. Practise these lessons only on
+        a disposable cluster; the recordings use OpenShift Local and its `kubeadmin` account.
+
+        Tomorrow you change the cluster's identity configuration. The change ticket asks for evidence that the cluster
+        was healthy before the change, and the same evidence afterwards. "The console looks fine" is not evidence.
+
+        This lesson is the administrator's health round, in the order people really run it: the release, the cluster
+        operators, the nodes, then events, failing pods and logs across every project. Everything was run on a lab
+        cluster (OpenShift Local 4.21) by its administrator, and nothing changes the cluster. To give the round something
+        to find, the ordinary user `developer` first starts a pod with an image that does not exist, in their own
+        project.
+    - kind: show
+      id: who
+      run: "oc whoami"
+      notice: "`kubeadmin`, the cluster administrator. Most of these checks read cluster-scoped objects that ordinary users may not list."
+    - kind: teach
+      id: admin-access
+      title: "Whose access, and where to practise"
+      body: |
+        `cluster-admin` is the role that may do anything: every action in every project, and on the cluster-scoped
+        objects that configure the platform itself. `kubeadmin` holds it. The installer creates it as the first login,
+        and the documentation describes it as the cluster's root user. On a real cluster, administrators configure an
+        identity provider, give named people the role, then remove `kubeadmin`; the identity lessons that follow show
+        those steps. On OpenShift Local, `crc console --credentials` prints the `kubeadmin` login.
+
+        Two rules hold for this whole track. Practise changes only on a cluster of your own that you can delete, such
+        as OpenShift Local, never on a shared or production cluster: an identity, network or update mistake there
+        stops every team. And use the least access that does the job: reading the platform's state needs a reader
+        role, not `cluster-admin`. Every change these lessons show was made on a disposable OpenShift Local cluster,
+        with a rollback written beforehand, run afterwards and verified.
+    - kind: show
+      id: developer-nodes
+      body: "The ordinary user developer, for contrast:"
+      run: "oc get nodes"
+      notice: "Forbidden: nodes are cluster-scoped, and `developer` has no cluster-wide read access. The health round needs an administrator, or a user bound to a reader role such as `cluster-reader`."
+    - kind: ask
+      id: least-privilege-round
+      prompt: "A colleague will read the release, operators, nodes and events of a production cluster every morning. Which access fits best?"
+      choices:
+        - text: "Their own login, bound to `cluster-reader`"
+          why: "A named login keeps the audit trail personal, and a reader role can see the platform's state without being able to change it."
+        - text: "The `kubeadmin` login, shared by the team"
+          why: "A shared login hides who did what, and it can change anything. On a production cluster `kubeadmin` should already be removed."
+        - text: "The `view` role in every project"
+          why: "`view` is granted per project. Nodes, ClusterOperators and ClusterVersion are cluster-scoped, so they stay forbidden, as they were for developer."
+      answer: 0
+    - kind: show
+      id: broken-pod
+      body: "Meanwhile, in the developer's project, a pod whose image name is wrong:"
+      run: "oc run lab-broken --image=registry.access.redhat.com/ubi9/no-such-image:1.0 --restart=Never && timeout 120 bash -c 'until oc get pod lab-broken -o jsonpath={.status.containerStatuses[0].state.waiting.reason} | grep -q Image; do sleep 3; done' && oc get pod lab-broken"
+      notice: "The pod exists, but its container is waiting: the node cannot pull the image. The administrator's round should find this without being told where to look."
+    - kind: teach
+      id: release-first
+      title: "1. The release"
+      body: |
+        Start at the top. `ClusterVersion` says which release runs and whether the Cluster Version Operator (CVO) is
+        applying it cleanly. Its conditions are the summary of everything below.
+    - kind: show
+      id: clusterversion
+      run: "oc get clusterversion"
+      notice: "VERSION is the newest release whose update completed. AVAILABLE and PROGRESSING are two of the CVO's conditions; SINCE is when PROGRESSING last changed (200 days: nothing has been applied since this cluster was built); STATUS is the CVO's progress message."
+    - kind: show
+      id: cv-conditions
+      body: "The table shows two conditions. The object has more; `jsonpath` prints one line per condition:"
+      run: "oc get clusterversion version -o jsonpath='{range .status.conditions[*]}{.type}{\"=\"}{.status}{\"  \"}{.reason}{\"\\n\"}{end}'"
+      notice: |
+        `Available=True`, `Progressing=False` and `Failing=False`: the release is applied and nothing is failing.
+        `Upgradeable=False` with `ClusterVersionOverridesSet` is OpenShift Local's permanent state (its resource-saving
+        overrides). Upgradeable=False normally blocks only minor updates, but while overrides are set the CVO refuses
+        patch updates too: OpenShift Local moves to a new release with a new OpenShift Local version, not in place.
+    - kind: ask
+      id: version-during-update
+      prompt: "Half-way through an update from 4.21.8 to 4.21.9, what do the VERSION and PROGRESSING columns of `oc get clusterversion` show?"
+      choices:
+        - text: "`4.21.8` and `True`"
+          why: "VERSION names the newest release whose update completed. Until 4.21.9 is fully applied, STATUS says the CVO is working towards it and PROGRESSING stays True."
+        - text: "`4.21.9` and `True`"
+          why: "VERSION does not switch when an update starts. It shows the last completed release, so a half-done update still shows the old one."
+        - text: "`4.21.9` and `False`"
+          why: "PROGRESSING is True for as long as the CVO is applying a release. The new version with False is what a finished update looks like."
+      answer: 0
+    - kind: teach
+      id: operators
+      title: "2. The cluster operators"
+      body: |
+        Each platform component reports through its ClusterOperator. Reading two dozen lines by eye is how problems are
+        missed, so administrators filter for the lines that are not `Available=True, Progressing=False, Degraded=False`.
+    - kind: show
+      id: co-all
+      run: "oc get clusteroperators"
+      notice: "Every operator, its version and its three main conditions. SINCE is the time AVAILABLE last changed, not the other two: an operator that became Degraded a minute ago can still show `200d`, so read the columns, not the age."
+    - kind: show
+      id: co-unhealthy
+      body: |
+        `awk` prints only the lines whose AVAILABLE (column 3) is not `True`, or whose PROGRESSING (4) or DEGRADED (5)
+        is not `False`. An empty result is the good answer:
+      run: "oc get clusteroperators --no-headers | awk '$3 != \"True\" || $4 != \"False\" || $5 != \"False\"'"
+      notice: "Nothing printed: every one of the 24 operators reported the healthy combination at that moment. On a bad day, these lines are the list to open first."
+    - kind: try
+      id: try-describe-co
+      body: "Read the full report of the `dns` cluster operator: its conditions with their messages, its related objects and its versions."
+      accept: ["oc describe clusteroperator dns", "oc describe co dns", "oc describe clusteroperator/dns", "oc describe co/dns", "oc describe clusteroperators dns", "oc describe clusteroperators/dns", "oc describe clusteroperator.config.openshift.io dns"]
+      hints:
+        - match: "^oc get"
+          say: "`oc get` gives the one-line summary. The messages and related objects come with `describe`."
+        - match: " -n "
+          say: "ClusterOperators are cluster-scoped: no project is needed."
+        - match: "openshift-dns"
+          say: "That is the namespace where DNS runs. The report itself is the ClusterOperator named `dns`."
+      hint: "`oc describe`, the kind `clusteroperator` (or `co`), and the name `dns`."
+      run: "oc describe clusteroperator dns"
+      then: |
+        Each condition has a reason and a message (`DNS "default" is available.`). The related objects name the
+        `dnses` object `default` in `operator.openshift.io` and the namespaces `openshift-dns-operator` and
+        `openshift-dns`: the places to look when this report is unhealthy. The versions list the images it runs.
+    - kind: show
+      id: co-messages
+      body: "A message is often more precise than the status. The kube-apiserver operator explains its own state:"
+      run: "oc get clusteroperator kube-apiserver -o jsonpath='{range .status.conditions[*]}{.type}{\"=\"}{.status}{\"  \"}{.message}{\"\\n\"}{end}'"
+      notice: "`1 node is at revision 15`: the messages name the configuration revision the node runs. During a rollout, the same lines say which node is still on an older revision."
+    - kind: teach
+      id: nodes
+      title: "3. The nodes"
+      body: |
+        Nodes come next: whether each is Ready, which version of the kubelet and the operating system it runs, and
+        whether the kubelet reports memory, disk or process pressure. Pressure is the kubelet's warning that it may soon
+        evict pods to protect the node.
+    - kind: show
+      id: nodes-wide
+      run: "oc get nodes -o wide"
+      notice: "One node, `crc`, with all three roles. `-o wide` adds the internal address, the operating system image, the kernel and the container runtime."
+    - kind: show
+      id: node-conditions
+      body: "`oc describe node` is long. The part from `Conditions:` to `System Info:` holds the pressure conditions, the addresses, and the capacity:"
+      run: "oc describe node crc | sed -n '/^Conditions:/,/^System Info:/p'"
+      notice: |
+        `MemoryPressure`, `DiskPressure` and `PIDPressure` are `False` and `Ready` is `True`. Read the transition times
+        too: DiskPressure last changed at 17:38 that day, less than half an hour before the recording, so the node had
+        been short of disk shortly before. `Capacity` is the machine; `Allocatable` is what is left for pods after the
+        reservations for the system.
+    - kind: show
+      id: node-allocated
+      run: "oc describe node crc | sed -n '/^Allocated resources:/,/^Events:/p'"
+      notice: |
+        The sum of the requests of every pod on the node, against allocatable: CPU 60%, memory 94%. Memory requests
+        this close to 100% mean the next pod with a sizeable memory request may stay Pending with `Insufficient
+        memory`, even though the node is not under pressure: requests are a reservation, not usage.
+    - kind: ask
+      id: requests-versus-pressure
+      prompt: "A node shows memory requests at 94% of allocatable and `MemoryPressure=False`. A new pod requesting 1Gi stays Pending. Why?"
+      choices:
+        - text: "1Gi of requests does not fit in what is left"
+          why: "Scheduling compares requests with allocatable. Actual usage and pressure do not enter that decision."
+        - text: "The kubelet is evicting pods for memory pressure"
+          why: "MemoryPressure is False: no eviction is happening. The pod never reached the kubelet."
+        - text: "The node is NotReady and accepts no pods"
+          why: "Nothing here says so; a NotReady node shows in its Ready condition."
+      answer: 0
+    - kind: teach
+      id: usage
+      title: "Usage needs the metrics API"
+      body: |
+        `oc adm top` shows real CPU and memory use. It reads the metrics API, which the cluster's monitoring stack
+        serves. OpenShift Local leaves monitoring out to save memory, so expect an error here.
+    - kind: show
+      id: top
+      run: "oc adm top nodes"
+      notice: "`Metrics API not available`. This is not a broken cluster: nothing serves that API here."
+    - kind: show
+      id: metrics-apiservice
+      body: "The API server confirms it: the metrics API is never registered."
+      run: "oc get apiservice v1beta1.metrics.k8s.io"
+      notice: "NotFound. On an installed cluster this APIService exists and points to the monitoring stack."
+    - kind: ask
+      id: top-fails-with-monitoring
+      prompt: "On a cluster that runs monitoring, `oc adm top nodes` starts failing although every node is Ready. Which check comes first?"
+      choices:
+        - text: "Read the metrics APIService's AVAILABLE column"
+          why: "The APIService is how the API server reaches the metrics provider. Its AVAILABLE column, with a reason when False, says whether that provider answers."
+        - text: "Restart the kubelet on every node"
+          why: "`oc adm top` asks the metrics API, not each kubelet. Restarting nodes is disruptive and tests the wrong link."
+        - text: "Ask for `cluster-admin` and retry"
+          why: "A missing permission is reported as Forbidden, naming your user. A failing metrics API is a service problem, not a permission problem."
+      answer: 0
+    - kind: show
+      id: overrides
+      body: "Why monitoring is missing: the release overrides OpenShift Local sets, read from ClusterVersion:"
+      run: "oc get clusterversion version -o jsonpath='{range .spec.overrides[*]}{.kind}{\"/\"}{.name}{\"  unmanaged=\"}{.unmanaged}{\"\\n\"}{end}'"
+      notice: "The monitoring operator's Deployment and its ClusterOperator are unmanaged: the CVO no longer creates or reconciles them, and OpenShift Local has removed them, so no Prometheus, no Alertmanager and no metrics API."
+    - kind: show
+      id: kubelet-summary
+      body: |
+        The kubelet itself still measures its node. Its summary API, read through the API server's node proxy (an
+        administrator's permission), gives the numbers `oc adm top` would have shown; `jq` keeps four of them:
+      run: "oc get --raw /api/v1/nodes/crc/proxy/stats/summary | jq '.node | {cpuMillicores: (.cpu.usageNanoCores / 1000000 | floor), memoryWorkingSetMiB: (.memory.workingSetBytes / 1048576 | floor), memoryAvailableMiB: (.memory.availableBytes / 1048576 | floor), diskAvailableGiB: (.fs.availableBytes / 1073741824 * 10 | floor / 10)}'"
+      notice: "Real usage at that moment: about 0.9 CPU, 7193 MiB of memory in use and 3246 MiB available, 9.1 GiB of disk free. The pods reserve 9433 Mi of memory but use less: reservation and use are different numbers."
+    - kind: teach
+      id: alerts
+      title: "Alerts are rules over the same conditions"
+      body: |
+        On a full cluster, Prometheus evaluates **alerting rules** and Alertmanager sends the alerts that fire. The
+        rules ship with the platform as `PrometheusRule` objects, and they exist here too, although nothing evaluates
+        them.
+    - kind: show
+      id: monitoring-pods
+      run: "oc get pods -n openshift-monitoring"
+      notice: "No pods: the namespace exists, the stack does not run."
+    - kind: show
+      id: alert-rules
+      body: "The alerts the CVO's rules define, with their severity:"
+      run: "oc get prometheusrule cluster-version-operator -n openshift-cluster-version -o jsonpath='{range .spec.groups[*].rules[*]}{.alert}{\"\\t\"}{.labels.severity}{\"\\n\"}{end}'"
+      notice: |
+        `ClusterOperatorDown` and `ClusterOperatorDegraded` are computed from the same ClusterOperator conditions you
+        read above. Where alerting runs, the console's Alerting page lists the ones firing; here, reading the conditions
+        is the check.
+    - kind: ask
+      id: no-alert
+      prompt: "On a cluster where monitoring runs, no alert is firing. Does that prove every ClusterOperator is healthy?"
+      choices:
+        - text: "No; alerts lag and cover only their rules"
+          why: "Alerting rules have a duration and cover what someone wrote a rule for. Read the conditions themselves for the current state."
+        - text: "Yes; ClusterOperatorDegraded would fire otherwise"
+          why: "Only after the condition has lasted for the rule's duration, and only while Prometheus is healthy and scraping."
+        - text: "Yes; the console shows nothing in red at all"
+          why: "The console shows what it is told. Silence is not evidence."
+      answer: 0
+    - kind: teach
+      id: events-pods
+      title: "4. Events and failing pods, everywhere"
+      body: |
+        Events are short-lived records written by controllers and the kubelet. A cluster-wide search for warnings,
+        newest last, shows what has gone wrong recently anywhere. The API server deletes them after a time to live,
+        so they describe the recent past, not history.
+    - kind: show
+      id: event-ttl
+      body: "How long they live here, read from the API server's configuration:"
+      run: "oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\\.yaml}' | jq '.apiServerArguments[\"event-ttl\"]'"
+      notice: "`3h`: an event older than three hours is gone. Upstream Kubernetes defaults to one hour."
+    - kind: show
+      id: warnings
+      run: "oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp | tail -12"
+      highlight: ["lab-broken"]
+      notice: |
+        The newest warnings across every project, oldest of the twelve first. Readiness probe failures of the
+        `openshift-apiserver` pods 139 to 142 minutes earlier, a `ConnectivityOutageDetected` from the network check,
+        an `EvictionThresholdMet` on node `crc` 28 minutes earlier (the kubelet reclaiming disk), and at the end the
+        developer's pod: `Failed to pull image`, `ErrImagePull`, `ImagePullBackOff`.
+
+    - kind: show
+      id: pods-phase
+      body: "Pods whose phase is neither Running nor Succeeded, selected by the API server:"
+      run: "oc get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded"
+      highlight: ["lab-broken"]
+      notice: "Only the broken pod. Its phase is Pending, because a container that cannot get its image never starts; the STATUS column shows the container's reason, `ErrImagePull`."
+    - kind: show
+      id: pods-status
+      body: |
+        The phase misses a container that crashes and restarts: such a pod's phase stays `Running`. The STATUS column
+        shows the container's reason instead, so the common filter is on the text:
+      run: "oc get pods -A | grep -v -E 'Running|Completed'"
+      highlight: ["lab-broken"]
+      notice: "The header line, then the one pod whose STATUS is neither Running nor Completed. This filter also catches `CrashLoopBackOff`, which the phase filter misses."
+    - kind: show
+      id: restarts
+      body: "Restart counts reveal pods that keep failing and recovering. One line per pod, highest count first:"
+      run: "oc get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{\"\\t\"}{.metadata.namespace}/{.metadata.name}{\"\\n\"}{end}' | sort -rn | head -5"
+      notice: "Platform operators lead, the config operator with 51 restarts. Restarts accumulate over the life of a pod; a high count on a pod that is Running now is a lead, not proof of a current problem. Compare with the pod's age and its last restart."
+    - kind: try
+      id: try-warnings
+      body: "List the Warning events of the `openshift-authentication` project only, oldest first and newest last."
+      accept: ["oc get events -n openshift-authentication --field-selector type=Warning --sort-by=.lastTimestamp", "oc get events -n openshift-authentication --field-selector=type=Warning --sort-by=.lastTimestamp", "oc get events --field-selector type=Warning -n openshift-authentication --sort-by=.lastTimestamp", "oc get events -n openshift-authentication --sort-by=.lastTimestamp --field-selector type=Warning", "oc get events -n openshift-authentication --sort-by=.lastTimestamp --field-selector=type=Warning", "oc -n openshift-authentication get events --field-selector type=Warning --sort-by=.lastTimestamp", "oc get events --namespace openshift-authentication --field-selector type=Warning --sort-by=.lastTimestamp", "oc get events --namespace=openshift-authentication --field-selector=type=Warning --sort-by=.lastTimestamp", "oc get events -n openshift-authentication --field-selector type=Warning --sort-by='.lastTimestamp'", "oc get events -n openshift-authentication --field-selector=type=Warning --sort-by='.lastTimestamp'"]
+      hints:
+        - match: " -A"
+          say: "`-A` searches every project. The task is one project: `-n openshift-authentication`."
+        - match: "type=warning"
+          say: "Field values are case-sensitive: the type is `Warning`."
+        - match: "^oc get events -n openshift-authentication( --field-selector[ =]type=Warning)?$"
+          say: "Add `--sort-by=.lastTimestamp` so that the newest event comes last."
+        - match: "^oc events"
+          say: "That newer command exists and sorts by time itself; this task uses `oc get events` with a field selector and `--sort-by`."
+      hint: "`oc get events`, the project, `--field-selector type=Warning`, and `--sort-by=.lastTimestamp`."
+    - kind: teach
+      id: logs
+      title: "5. Logs: platform pods and the node"
+      body: |
+        When an operator's report points at a component, its pods' logs are the next evidence. Platform pods are read
+        like any other pod, from their namespace. Below the pods, the node's own services (the kubelet, CRI-O) write to
+        the node's journal, which an administrator reads with `oc adm node-logs`, without logging in to the node.
+    - kind: show
+      id: operator-log
+      run: "oc logs -n openshift-dns-operator deployment/dns-operator -c dns-operator --tail=5"
+      notice: "The end of a stack trace the operator logged earlier, then `reconciling request: /default` at 11:41, the time its conditions last changed in the report above. `deployment/…` picks one of its pods; `-c` names the container, because the pod has two."
+    - kind: show
+      id: kubelet-log
+      run: "oc adm node-logs crc -u kubelet --tail=8"
+      notice: "The kubelet's journal on node `crc`, as it happened: it failed to pull `no-such-image`, backed off, and tried again. The node's side of the events above. `-u` selects a systemd unit; `crio` is the other common one."
+    - kind: try
+      id: try-crio-log
+      body: "Read the last 20 lines of the CRI-O unit's journal on node `crc`."
+      accept: ["oc adm node-logs crc -u crio --tail=20", "oc adm node-logs crc -u crio --tail 20", "oc adm node-logs crc --unit=crio --tail=20", "oc adm node-logs crc --unit crio --tail=20", "oc adm node-logs crc --unit=crio --tail 20", "oc adm node-logs crc -u crio.service --tail=20", "oc adm node-logs -u crio crc --tail=20", "oc adm node-logs --tail=20 -u crio crc", "oc adm node-logs crc --tail=20 -u crio"]
+      hints:
+        - match: "^oc logs"
+          say: "`oc logs` reads pods. The node's journal is read with `oc adm node-logs`."
+        - match: "^oc debug"
+          say: "A debug pod works too, but it starts a privileged pod on the node. `oc adm node-logs` reads the journal through the API without that."
+        - match: "-u kubelet"
+          say: "That is the kubelet's unit. The container runtime's unit is `crio`."
+        - match: "^oc adm node-logs crc -u crio$"
+          say: "Without `--tail`, you get the whole journal of the unit. Limit it to the last 20 lines."
+      hint: "`oc adm node-logs`, the node, `-u crio`, and `--tail=20`."
+    - kind: teach
+      id: snapshot
+      title: "6. A snapshot for later, or for support"
+      body: |
+        [Collect support data](/lesson/o3.support-data) used `oc adm inspect` on a project's objects. An administrator
+        can point it at a ClusterOperator: it follows the operator's related objects and saves them, with the logs of
+        the pods in its namespaces, into a local directory. It reads the cluster and writes only on your machine.
+    - kind: show
+      id: inspect
+      run: "oc adm inspect clusteroperator/dns --dest-dir=inspect-dns"
+      notice: "It gathered the two namespaces the report names and wrote everything to `inspect-dns`. The two warnings are the API server noting deprecated kinds that the collector also reads."
+    - kind: show
+      id: inspect-tree
+      run: "find inspect-dns -maxdepth 3 -type d | sort"
+      notice: "Cluster-scoped objects (the ClusterOperator, the `dnses` object) on one side, and per namespace a directory per API group, with the pods' logs under `pods`."
+    - kind: show
+      id: inspect-size
+      run: "du -sh inspect-dns"
+      notice: "2.3 MB: small enough to attach to a ticket. As in [Collect support data](/lesson/o3.support-data), Secret values are replaced by their length, but logs, ConfigMaps and environment values are copied as they are: search it for credentials before sending it anywhere."
+    - kind: order
+      id: order-round
+      prompt: "Put the administrator's health round in the order this lesson ran it."
+      items:
+        - "Read ClusterVersion and its conditions"
+        - "Filter the ClusterOperators for anything not Available, not settled, or degraded"
+        - "Check the nodes: Ready, pressure, allocatable and requests"
+        - "Search Warning events and failing pods in every project"
+        - "Read the logs the evidence points to: platform pods, then the node's journal"
+      why: "From the widest summary to the narrowest evidence: the release summarises the operators, the operators depend on nodes, and events and logs explain a specific failure once you know where to look."
+    - kind: reflect
+      id: explain-evidence
+      prompt: "Write the three lines of health evidence you would paste into a change ticket before an identity change, and say what each proves."
+      model: |
+        `oc get clusterversion` shows the release is available and not progressing; the filtered `oc get
+        clusteroperators` shows no operator unavailable, progressing or degraded, in particular authentication; `oc get
+        nodes` shows every node Ready. Together they prove the platform was settled before the change, so anything that
+        appears afterwards was caused by it or happened during it. They do not prove an application works: that needs
+        the application's own check.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can run a health round as an administrator: release and conditions, cluster operators filtered for trouble,
+        node readiness, pressure and requests, warnings and failing pods across all projects, platform and node logs,
+        and a support snapshot of one operator. You also know what OpenShift Local cannot show (metrics and alerts)
+        and what to read instead. The next lessons change the cluster; run this round before and after each change.
+  sections:
+    - id: round-reference
+      title: "The health round"
+      depth: true
+      body: |
+        | Check | Command | Healthy result |
+        |---|---|---|
+        | Release | `oc get clusterversion` | Available True, Progressing False, no Failing |
+        | Operators | `oc get co --no-headers \| awk '$3!="True" \|\| $4!="False" \|\| $5!="False"'` | nothing printed |
+        | Nodes | `oc get nodes` | every node Ready |
+        | Pressure | `oc describe node <name>` | MemoryPressure, DiskPressure, PIDPressure False |
+        | Recent problems | `oc get events -A --field-selector type=Warning` | nothing new and unexplained |
+        | Failing pods | `oc get pods -A \| grep -v -E 'Running\|Completed'` | header only, or explained pods |
+        | Usage | `oc adm top nodes` (needs the metrics API) | within agreed headroom |
+
+        Certificate signing requests waiting for approval (`oc get csr`) and MachineConfigPools that are not Updated
+        (`oc get mcp`) belong to the round on clusters that add nodes or roll out node configuration.
+    - id: limits-of-checks
+      title: "What each check cannot prove"
+      depth: true
+      body: |
+        - **ClusterOperators** report the platform's components, not your applications.
+        - **Events** expire (three hours on this cluster); an empty list proves nothing about the night before.
+        - **`--field-selector=status.phase!=Running`** misses crash-looping containers, whose pod phase is Running.
+        - **Restart counts** are cumulative since the pod started.
+        - **Node pressure False** says the kubelet is not about to evict; it says nothing about requests and scheduling.
+        - **No alert firing** depends on the rules that exist, their durations, and a working monitoring stack.
+    - id: who-may-change-what
+      title: "Who may change what, by default"
+      depth: true
+      body: |
+        The rule behind every lesson of this track: an object that applies to the whole cluster, or that limits a
+        project from outside, is changed by a cluster administrator; an object inside a project is changed by that
+        project's `admin`, and only up to the rights that admin already holds.
+
+        | What | Scope | Changed by default by | Taught in |
+        |---|---|---|---|
+        | Identity providers (the `OAuth` object), users, identities, groups | cluster | cluster-admin | [Add an HTPasswd identity provider](/lesson/n.htpasswd-idp), [Users, groups and access for teams](/lesson/o2.groups) |
+        | ClusterRoles and ClusterRoleBindings | cluster | cluster-admin | [RBAC and effective permissions](/lesson/f.rbac) |
+        | Roles and RoleBindings in a project | project | the project's `admin`, never beyond its own rights | [RBAC and effective permissions](/lesson/f.rbac) |
+        | Security Context Constraints, and who may use them | cluster | cluster-admin | [Security Context Constraints](/lesson/f.scc) |
+        | NetworkPolicies | project | the project's `admin` or `edit` | [NetworkPolicies and OVN-Kubernetes](/lesson/d.networkpolicy-ovn) |
+        | AdminNetworkPolicies | cluster | cluster-admin | [NetworkPolicies and OVN-Kubernetes](/lesson/d.networkpolicy-ovn) |
+        | IngressControllers, the platform's DNS and certificates | cluster | cluster-admin | [Shard ingress with a second router](/lesson/n.ingress-sharding), [Ingress, DNS and certificates](/lesson/n.ingress-dns-certs) |
+        | ResourceQuotas and LimitRanges | project | cluster-admin; the project's `admin` may only read them | [Quotas and LimitRanges](/lesson/o2.quotas-limits) |
+        | The project request template, self-provisioning, ClusterResourceQuotas | cluster | cluster-admin | [Project templates and self-provisioning](/lesson/n.project-templates) |
+        | Operators installed through OLM | cluster-wide rights | cluster-admin, unless an administrator delegates it | [Operator Lifecycle Manager](/lesson/c.olm) |
+        | Cluster updates, MachineConfigs | cluster | cluster-admin | [Plan a cluster update](/lesson/n.cluster-updates) |
+
+        Quotas and LimitRanges live in the project, yet its `admin` cannot change them on purpose: a guardrail that
+        the people it limits could remove would not be a guardrail.
+  review:
+    - q: "Which three commands give the first view of a cluster's health?"
+      a: "oc get clusterversion, oc get clusteroperators (filtered for anything not Available, Progressing or Degraded as expected), and oc get nodes."
+    - q: "Why does `oc adm top nodes` fail on OpenShift Local, and what still works?"
+      a: "The metrics API is served by the monitoring stack, which OpenShift Local leaves out; the kubelet's summary API (oc get --raw /api/v1/nodes/<node>/proxy/stats/summary) still reports usage."
+    - q: "How do you find warnings from every project, newest last?"
+      a: "oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp"
+    - q: "Why can a field selector on the pod phase miss a failing pod?"
+      a: "A crash-looping container keeps its pod in phase Running; the STATUS column (CrashLoopBackOff) shows it, so filter the text as well."
+    - q: "How do you read the kubelet's log without logging in to the node?"
+      a: "oc adm node-logs <node> -u kubelet, as an administrator."
+    - q: "What does oc adm inspect clusteroperator/<name> collect?"
+      a: "The ClusterOperator, its related objects and the namespaces they name, including the pods' logs, into a local directory; it changes nothing on the cluster."
+  limits: |
+    OpenShift Local has one node and runs without cluster monitoring: there is no metrics API, no Prometheus and no
+    Alertmanager, so `oc adm top` fails and no alert can fire. The lesson shows the error, the alerting rules that exist
+    without being evaluated, and the kubelet's summary as the closest real usage figures. `oc adm must-gather` is
+    taught in [Collect support data](/lesson/o3.support-data). The outputs are the cluster's state at recording time.
+  enterprise: |
+    Platform teams automate this round: the same commands run before and after every change window, and their
+    output is attached to the change record. Alerting (ClusterOperatorDown, ClusterOperatorDegraded, node pressure,
+    KubePodCrashLooping) watches between rounds, and a must-gather is taken before opening a support case.
+  commands:
+    - {cmd: "oc whoami", as: admin, meaning: "who this terminal is logged in as"}
+    - {cmd: "oc get nodes", expect: fail, meaning: "the developer may not list nodes"}
+    - {cmd: "oc run lab-broken --image=registry.access.redhat.com/ubi9/no-such-image:1.0 --restart=Never && timeout 120 bash -c 'until oc get pod lab-broken -o jsonpath={.status.containerStatuses[0].state.waiting.reason} | grep -q Image; do sleep 3; done' && oc get pod lab-broken", timeout: 180, meaning: "the developer starts a pod whose image does not exist, and waits until the pull has failed"}
+    - {cmd: "oc get clusterversion", as: admin, meaning: "the release and the CVO's summary"}
+    - {cmd: "oc get clusterversion version -o jsonpath='{range .status.conditions[*]}{.type}{\"=\"}{.status}{\"  \"}{.reason}{\"\\n\"}{end}'", as: admin, meaning: "every ClusterVersion condition, one per line"}
+    - {cmd: "oc get clusteroperators", as: admin, meaning: "every cluster operator and its conditions"}
+    - {cmd: "oc get clusteroperators --no-headers | awk '$3 != \"True\" || $4 != \"False\" || $5 != \"False\"'", as: admin, meaning: "only the operators not in the healthy combination"}
+    - {cmd: "oc describe clusteroperator dns", as: admin, meaning: "one operator's full report"}
+    - {cmd: "oc get clusteroperator kube-apiserver -o jsonpath='{range .status.conditions[*]}{.type}{\"=\"}{.status}{\"  \"}{.message}{\"\\n\"}{end}'", as: admin, meaning: "the kube-apiserver operator's conditions with their messages"}
+    - {cmd: "oc get nodes -o wide", as: admin, meaning: "nodes, readiness, versions, addresses"}
+    - {cmd: "oc describe node crc | sed -n '/^Conditions:/,/^System Info:/p'", as: admin, meaning: "pressure conditions, addresses, capacity and allocatable"}
+    - {cmd: "oc describe node crc | sed -n '/^Allocated resources:/,/^Events:/p'", as: admin, meaning: "requests and limits of all pods against allocatable"}
+    - {cmd: "oc adm top nodes", as: admin, expect: fail, meaning: "fails: no metrics API on this cluster"}
+    - {cmd: "oc get apiservice v1beta1.metrics.k8s.io", as: admin, expect: fail, meaning: "the metrics API is not registered"}
+    - {cmd: "oc get clusterversion version -o jsonpath='{range .spec.overrides[*]}{.kind}{\"/\"}{.name}{\"  unmanaged=\"}{.unmanaged}{\"\\n\"}{end}'", as: admin, meaning: "the components OpenShift Local tells the CVO not to manage"}
+    - {cmd: "oc get --raw /api/v1/nodes/crc/proxy/stats/summary | jq '.node | {cpuMillicores: (.cpu.usageNanoCores / 1000000 | floor), memoryWorkingSetMiB: (.memory.workingSetBytes / 1048576 | floor), memoryAvailableMiB: (.memory.availableBytes / 1048576 | floor), diskAvailableGiB: (.fs.availableBytes / 1073741824 * 10 | floor / 10)}'", as: admin, meaning: "the kubelet's own usage figures for the node"}
+    - {cmd: "oc get pods -n openshift-monitoring", as: admin, meaning: "no monitoring pods"}
+    - {cmd: "oc get prometheusrule cluster-version-operator -n openshift-cluster-version -o jsonpath='{range .spec.groups[*].rules[*]}{.alert}{\"\\t\"}{.labels.severity}{\"\\n\"}{end}'", as: admin, meaning: "the alerts defined over ClusterVersion and ClusterOperator conditions"}
+    - {cmd: "oc get configmap config -n openshift-kube-apiserver -o jsonpath='{.data.config\\.yaml}' | jq '.apiServerArguments[\"event-ttl\"]'", as: admin, meaning: "the events' time to live, from the API server's configuration"}
+    - {cmd: "oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp | tail -12", as: admin, meaning: "the newest warnings in every project"}
+    - {cmd: "oc get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded", as: admin, meaning: "pods that are not running or finished"}
+    - {cmd: "oc get pods -A | grep -v -E 'Running|Completed'", as: admin, meaning: "pods whose STATUS column shows a problem"}
+    - {cmd: "oc get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{\"\\t\"}{.metadata.namespace}/{.metadata.name}{\"\\n\"}{end}' | sort -rn | head -5", as: admin, meaning: "the five pods with the most restarts"}
+    - {cmd: "oc logs -n openshift-dns-operator deployment/dns-operator -c dns-operator --tail=5", as: admin, meaning: "the DNS operator's last log lines"}
+    - {cmd: "oc adm node-logs crc -u kubelet --tail=8", as: admin, meaning: "the kubelet's journal on the node"}
+    - {cmd: "oc adm inspect clusteroperator/dns --dest-dir=inspect-dns", as: admin, timeout: 300, meaning: "save the DNS operator's report, related objects and logs locally"}
+    - {cmd: "find inspect-dns -maxdepth 3 -type d | sort", as: admin, meaning: "what the snapshot contains"}
+    - {cmd: "du -sh inspect-dns", as: admin, meaning: "its size"}
+  references:
+    - {title: "OpenShift 4.21: Verifying node health", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting#verifying-node-health"}
+    - {title: "OpenShift 4.21: Gathering data about your cluster (oc adm inspect, must-gather, node logs)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/gathering-cluster-data"}
+    - {title: "OpenShift 4.21: Viewing cluster operator status and troubleshooting operator issues", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting#troubleshooting-operator-issues"}
+    - {title: "OpenShift 4.21: Working with nodes (viewing node status, usage and logs)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/nodes/working-with-nodes"}
+    - {title: "Monitoring stack for Red Hat OpenShift 4.21: Managing alerts as an administrator", url: "https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.21/html/managing_alerts/managing-alerts-as-an-administrator"}
+    - {title: "Kubernetes: Node-pressure eviction", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"}
+    - {title: "Kubernetes: Field selectors", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/field-selectors/"}

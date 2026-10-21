@@ -1,0 +1,573 @@
+{
+ "lab": "lesson.n.privileged-workloads",
+ "kind": "lesson",
+ "lab_hash": "7da72e51266f2803",
+ "recorded_at": "2026-10-20T15:04:19+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-privileged-workloads",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc create serviceaccount node-agent",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/node-agent created\n",
+   "stderr": "",
+   "combined": "serviceaccount/node-agent created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f node-agent.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "daemonset.apps/node-agent created\n",
+   "stderr": "Warning: would violate PodSecurity \"restricted:latest\": host namespaces (hostPID=true), privileged (container \"agent\" must not set securityContext.privileged=true), allowPrivilegeEscalation != false (container \"agent\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"agent\" must set securityContext.capabilities.drop=[\"ALL\"]), restricted volume types (volume \"host-etc\" uses restricted volume type \"hostPath\"), runAsNonRoot != true (pod or container \"agent\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"agent\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")\n",
+   "combined": "Warning: would violate PodSecurity \"restricted:latest\": host namespaces (hostPID=true), privileged (container \"agent\" must not set securityContext.privileged=true), allowPrivilegeEscalation != false (container \"agent\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"agent\" must set securityContext.capabilities.drop=[\"ALL\"]), restricted volume types (volume \"host-etc\" uses restricted volume type \"hostPath\"), runAsNonRoot != true (pod or container \"agent\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"agent\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")\ndaemonset.apps/node-agent created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status ds/node-agent --timeout=20s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "Waiting for daemon set \"node-agent\" rollout to finish: 0 out of 1 new pods have been updated...\n",
+   "stderr": "error: timed out waiting for the condition\n",
+   "combined": "Waiting for daemon set \"node-agent\" rollout to finish: 0 out of 1 new pods have been updated...\nerror: timed out waiting for the condition\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ds node-agent",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME         DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE\nnode-agent   1         0         0       0            0           <none>          21s\n",
+   "stderr": "",
+   "combined": "NAME         DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE\nnode-agent   1         0         0       0            0           <none>          21s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe ds node-agent",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:           node-agent\nNamespace:      academy-lesson-n-privileged-workloads\nSelector:       app=node-agent\nNode-Selector:  <none>\nLabels:         app=node-agent\nAnnotations:    deprecated.daemonset.template.generation: 1\nDesired Number of Nodes Scheduled: 1\nCurrent Number of Nodes Scheduled: 0\nNumber of Nodes Scheduled with Up-to-date Pods: 0\nNumber of Nodes Scheduled with Available Pods: 0\nNumber of Nodes Misscheduled: 0\nPods Status:  0 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:           app=node-agent\n  Service Account:  node-agent\n  Containers:\n   agent:\n    Image:      registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:        10m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /host/etc from host-etc (ro)\n  Volumes:\n   host-etc:\n    Type:          HostPath (bare host directory volume)\n    Path:          /etc\n    HostPathType:  Directory\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nEvents:\n  Type     Reason        Age                From                  Message\n  ----     ------        ----               ----                  -------\n  Warning  FailedCreate  1s (x13 over 21s)  daemonset-controller  Error creating: pods \"node-agent-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, spec.volumes[0]: Invalid value: \"hostPath\": hostPath volumes are not allowed to be used, provider restricted-v2: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v2: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v3: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "stderr": "",
+   "combined": "Name:           node-agent\nNamespace:      academy-lesson-n-privileged-workloads\nSelector:       app=node-agent\nNode-Selector:  <none>\nLabels:         app=node-agent\nAnnotations:    deprecated.daemonset.template.generation: 1\nDesired Number of Nodes Scheduled: 1\nCurrent Number of Nodes Scheduled: 0\nNumber of Nodes Scheduled with Up-to-date Pods: 0\nNumber of Nodes Scheduled with Available Pods: 0\nNumber of Nodes Misscheduled: 0\nPods Status:  0 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:           app=node-agent\n  Service Account:  node-agent\n  Containers:\n   agent:\n    Image:      registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:        10m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /host/etc from host-etc (ro)\n  Volumes:\n   host-etc:\n    Type:          HostPath (bare host directory volume)\n    Path:          /etc\n    HostPathType:  Directory\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nEvents:\n  Type     Reason        Age                From                  Message\n  ----     ------        ----               ----                  -------\n  Warning  FailedCreate  1s (x13 over 21s)  daemonset-controller  Error creating: pods \"node-agent-\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, spec.volumes[0]: Invalid value: \"hostPath\": hostPath volumes are not allowed to be used, provider restricted-v2: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v2: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v3: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f node-agent.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE               ALLOWED BY   \nDaemonSet/node-agent   <none>       \n",
+   "stderr": "",
+   "combined": "RESOURCE               ALLOWED BY   \nDaemonSet/node-agent   <none>       \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): rolebindings.rbac.authorization.k8s.io \"system:openshift:scc:privileged\" is forbidden: user \"developer\" (groups=[\"system:authenticated:oauth\" \"system:authenticated\"]) is attempting to grant RBAC permissions not currently held:\n{APIGroups:[\"security.openshift.io\"], Resources:[\"securitycontextconstraints\"], ResourceNames:[\"privileged\"], Verbs:[\"use\"]}\n",
+   "combined": "Error from server (Forbidden): rolebindings.rbac.authorization.k8s.io \"system:openshift:scc:privileged\" is forbidden: user \"developer\" (groups=[\"system:authenticated:oauth\" \"system:authenticated\"]) is attempting to grant RBAC permissions not currently held:\n{APIGroups:[\"security.openshift.io\"], Resources:[\"securitycontextconstraints\"], ResourceNames:[\"privileged\"], Verbs:[\"use\"]}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe scc privileged",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:\t\t\t\t\t\tprivileged\nPriority:\t\t\t\t\t<none>\nAccess:\t\t\t\t\t\t\n  Users:\t\t\t\t\tsystem:admin,system:serviceaccount:openshift-infra:build-controller\n  Groups:\t\t\t\t\tsystem:cluster-admins,system:nodes,system:masters\nSettings:\t\t\t\t\t\n  Allow Privileged:\t\t\t\ttrue\n  Allow Privilege Escalation:\t\t\ttrue\n  Default Add Capabilities:\t\t\t<none>\n  Required Drop Capabilities:\t\t\t<none>\n  Allowed Capabilities:\t\t\t\t*\n  Allowed Seccomp Profiles:\t\t\t*\n  Allowed Volume Types:\t\t\t\t*\n  Allowed Flexvolumes:\t\t\t\t<all>\n  Allowed Unsafe Sysctls:\t\t\t*\n  Forbidden Sysctls:\t\t\t\t<none>\n  Allow Host Network:\t\t\t\ttrue\n  Allow Host Ports:\t\t\t\ttrue\n  Allow Host PID:\t\t\t\ttrue\n  Allow Host IPC:\t\t\t\ttrue\n  Read Only Root Filesystem:\t\t\tfalse\n  Run As User Strategy: RunAsAny\t\t\n    UID:\t\t\t\t\t<none>\n    UID Range Min:\t\t\t\t<none>\n    UID Range Max:\t\t\t\t<none>\n  SELinux Context Strategy: RunAsAny\t\t\n    User:\t\t\t\t\t<none>\n    Role:\t\t\t\t\t<none>\n    Type:\t\t\t\t\t<none>\n    Level:\t\t\t\t\t<none>\n  FSGroup Strategy: RunAsAny\t\t\t\n    Ranges:\t\t\t\t\t<none>\n  Supplemental Groups Strategy: RunAsAny\t\n    Ranges:\t\t\t\t\t<none>\n",
+   "stderr": "",
+   "combined": "Name:\t\t\t\t\t\tprivileged\nPriority:\t\t\t\t\t<none>\nAccess:\t\t\t\t\t\t\n  Users:\t\t\t\t\tsystem:admin,system:serviceaccount:openshift-infra:build-controller\n  Groups:\t\t\t\t\tsystem:cluster-admins,system:nodes,system:masters\nSettings:\t\t\t\t\t\n  Allow Privileged:\t\t\t\ttrue\n  Allow Privilege Escalation:\t\t\ttrue\n  Default Add Capabilities:\t\t\t<none>\n  Required Drop Capabilities:\t\t\t<none>\n  Allowed Capabilities:\t\t\t\t*\n  Allowed Seccomp Profiles:\t\t\t*\n  Allowed Volume Types:\t\t\t\t*\n  Allowed Flexvolumes:\t\t\t\t<all>\n  Allowed Unsafe Sysctls:\t\t\t*\n  Forbidden Sysctls:\t\t\t\t<none>\n  Allow Host Network:\t\t\t\ttrue\n  Allow Host Ports:\t\t\t\ttrue\n  Allow Host PID:\t\t\t\ttrue\n  Allow Host IPC:\t\t\t\ttrue\n  Read Only Root Filesystem:\t\t\tfalse\n  Run As User Strategy: RunAsAny\t\t\n    UID:\t\t\t\t\t<none>\n    UID Range Min:\t\t\t\t<none>\n    UID Range Max:\t\t\t\t<none>\n  SELinux Context Strategy: RunAsAny\t\t\n    User:\t\t\t\t\t<none>\n    Role:\t\t\t\t\t<none>\n    Type:\t\t\t\t\t<none>\n    Level:\t\t\t\t\t<none>\n  FSGroup Strategy: RunAsAny\t\t\t\n    Ranges:\t\t\t\t\t<none>\n  Supplemental Groups Strategy: RunAsAny\t\n    Ranges:\t\t\t\t\t<none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user privileged -z node-agent --dry-run=client -o yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: system:openshift:scc:privileged\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: system:openshift:scc:privileged\nsubjects:\n- kind: ServiceAccount\n  name: node-agent\n  namespace: default\n",
+   "stderr": "",
+   "combined": "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: system:openshift:scc:privileged\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: system:openshift:scc:privileged\nsubjects:\n- kind: ServiceAccount\n  name: node-agent\n  namespace: default\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user privileged -z node-agent -n academy-lesson-n-privileged-workloads",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged added: \"node-agent\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged added: \"node-agent\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get rolebinding system:openshift:scc:privileged -n academy-lesson-n-privileged-workloads -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                              ROLE                                          AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:privileged   ClusterRole/system:openshift:scc:privileged   0s                     academy-lesson-n-privileged-workloads/node-agent\n",
+   "stderr": "",
+   "combined": "NAME                              ROLE                                          AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:privileged   ClusterRole/system:openshift:scc:privileged   0s                     academy-lesson-n-privileged-workloads/node-agent\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout restart ds/node-agent",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "daemonset.apps/node-agent restarted\n",
+   "stderr": "",
+   "combined": "daemonset.apps/node-agent restarted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status ds/node-agent --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for daemon set \"node-agent\" rollout to finish: 0 of 1 updated pods are available...\ndaemon set \"node-agent\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for daemon set \"node-agent\" rollout to finish: 0 of 1 updated pods are available...\ndaemon set \"node-agent\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=node-agent -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc,VALIDATED-FOR:.metadata.annotations.security\\.openshift\\.io/validated-scc-subject-type'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME               SA           SCC          VALIDATED-FOR\nnode-agent-g85hx   node-agent   privileged   serviceaccount\n",
+   "stderr": "",
+   "combined": "NAME               SA           SCC          VALIDATED-FOR\nnode-agent-g85hx   node-agent   privileged   serviceaccount\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec ds/node-agent -- cat /proc/1/comm",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "systemd\n",
+   "stderr": "",
+   "combined": "systemd\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec ds/node-agent -- sh -c 'ls -d /proc/[0-9]* | wc -l'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "451\n",
+   "stderr": "",
+   "combined": "451\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec ds/node-agent -- head -n 1 /host/etc/passwd",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "root:x:0:0:Super User:/root:/bin/bash\n",
+   "stderr": "",
+   "combined": "root:x:0:0:Super User:/root:/bin/bash\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec ds/node-agent -- grep ' /host/etc ' /proc/self/mounts",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "/dev/vda4 /host/etc xfs ro,seclabel,relatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota 0 0\n",
+   "stderr": "",
+   "combined": "/dev/vda4 /host/etc xfs ro,seclabel,relatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota 0 0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f probe-pod.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): error when creating \"probe-pod.yaml\": pods \"agent-probe\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, spec.volumes[0]: Invalid value: \"hostPath\": hostPath volumes are not allowed to be used, provider restricted-v2: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v2: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v3: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "combined": "Error from server (Forbidden): error when creating \"probe-pod.yaml\": pods \"agent-probe\" is forbidden: unable to validate against any security context constraint: [provider \"anyuid\": Forbidden: not usable by user or serviceaccount, provider restricted-v2: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, spec.volumes[0]: Invalid value: \"hostPath\": hostPath volumes are not allowed to be used, provider restricted-v2: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v2: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used, provider restricted-v3: .spec.securityContext.hostUsers: Invalid value: null: Host Users must be set to false, provider restricted-v3: .containers[0].privileged: Invalid value: true: Privileged containers are not allowed, provider restricted-v3: .containers[0].hostPID: Invalid value: true: Host PID is not allowed to be used, provider \"restricted\": Forbidden: not usable by user or serviceaccount, provider \"nested-container\": Forbidden: not usable by user or serviceaccount, provider \"nonroot-v2\": Forbidden: not usable by user or serviceaccount, provider \"nonroot\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid\": Forbidden: not usable by user or serviceaccount, provider \"hostmount-anyuid-v2\": Forbidden: not usable by user or serviceaccount, provider \"machine-api-termination-handler\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork-v2\": Forbidden: not usable by user or serviceaccount, provider \"hostnetwork\": Forbidden: not usable by user or serviceaccount, provider \"hostaccess\": Forbidden: not usable by user or serviceaccount, provider \"hostpath-provisioner\": Forbidden: not usable by user or serviceaccount, provider \"privileged\": Forbidden: not usable by user or serviceaccount]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy scc-subject-review -f node-agent.yaml; sleep 30; echo \"== 30 s later\"; oc adm policy scc-subject-review -f node-agent.yaml; echo \"== for the ServiceAccount itself (-z)\"; oc adm policy scc-subject-review -z node-agent -f node-agent.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "RESOURCE               ALLOWED BY   \nDaemonSet/node-agent   <none>       \n== 30 s later\nRESOURCE               ALLOWED BY   \nDaemonSet/node-agent   privileged   \n== for the ServiceAccount itself (-z)\nRESOURCE               ALLOWED BY   \nDaemonSet/node-agent   privileged   \n",
+   "stderr": "",
+   "combined": "RESOURCE               ALLOWED BY   \nDaemonSet/node-agent   <none>       \n== 30 s later\nRESOURCE               ALLOWED BY   \nDaemonSet/node-agent   privileged   \n== for the ServiceAccount itself (-z)\nRESOURCE               ALLOWED BY   \nDaemonSet/node-agent   privileged   \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy remove-scc-from-user privileged -z node-agent -n academy-lesson-n-privileged-workloads",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged removed: \"node-agent\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged removed: \"node-agent\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete ds node-agent",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "daemonset.apps \"node-agent\" deleted from academy-lesson-n-privileged-workloads namespace\n",
+   "stderr": "",
+   "combined": "daemonset.apps \"node-agent\" deleted from academy-lesson-n-privileged-workloads namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f hostpid-scc.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "securitycontextconstraints.security.openshift.io/academy-x-hostpid created\n",
+   "stderr": "",
+   "combined": "securitycontextconstraints.security.openshift.io/academy-x-hostpid created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get scc academy-x-hostpid restricted-v2 privileged -o custom-columns=NAME:.metadata.name,PRIVILEGED:.allowPrivilegedContainer,HOSTPID:.allowHostPID,HOSTPATH:.allowHostDirVolumePlugin,RUNASUSER:.runAsUser.type,SELINUX:.seLinuxContext.type,CAPS:.allowedCapabilities",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                PRIVILEGED   HOSTPID   HOSTPATH   RUNASUSER        SELINUX     CAPS\nacademy-x-hostpid   false        true      false      MustRunAsRange   MustRunAs   [NET_BIND_SERVICE]\nrestricted-v2       false        false     false      MustRunAsRange   MustRunAs   [NET_BIND_SERVICE]\nprivileged          true         true      true       RunAsAny         RunAsAny    [*]\n",
+   "stderr": "",
+   "combined": "NAME                PRIVILEGED   HOSTPID   HOSTPATH   RUNASUSER        SELINUX     CAPS\nacademy-x-hostpid   false        true      false      MustRunAsRange   MustRunAs   [NET_BIND_SERVICE]\nrestricted-v2       false        false     false      MustRunAsRange   MustRunAs   [NET_BIND_SERVICE]\nprivileged          true         true      true       RunAsAny         RunAsAny    [*]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create serviceaccount process-reader",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "serviceaccount/process-reader created\n",
+   "stderr": "",
+   "combined": "serviceaccount/process-reader created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterrole system:openshift:scc:academy-x-hostpid",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (NotFound): clusterroles.rbac.authorization.k8s.io \"system:openshift:scc:academy-x-hostpid\" not found\n",
+   "combined": "Error from server (NotFound): clusterroles.rbac.authorization.k8s.io \"system:openshift:scc:academy-x-hostpid\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads --dry-run=server",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid added: \"process-reader\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid added: \"process-reader\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterrole system:openshift:scc:academy-x-hostpid && oc get rolebinding system:openshift:scc:academy-x-hostpid -n academy-lesson-n-privileged-workloads -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                     CREATED AT\nsystem:openshift:scc:academy-x-hostpid   2026-10-20T15:03:54Z\nNAME                                     ROLE                                                 AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:academy-x-hostpid   ClusterRole/system:openshift:scc:academy-x-hostpid   1s                     academy-lesson-n-privileged-workloads/process-reader\n",
+   "stderr": "",
+   "combined": "NAME                                     CREATED AT\nsystem:openshift:scc:academy-x-hostpid   2026-10-20T15:03:54Z\nNAME                                     ROLE                                                 AGE   USERS   GROUPS   SERVICEACCOUNTS\nsystem:openshift:scc:academy-x-hostpid   ClusterRole/system:openshift:scc:academy-x-hostpid   1s                     academy-lesson-n-privileged-workloads/process-reader\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-scc-to-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid added: \"process-reader\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid added: \"process-reader\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f process-reader.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/process-reader created\n",
+   "stderr": "",
+   "combined": "deployment.apps/process-reader created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/process-reader --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"process-reader\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"process-reader\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"process-reader\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"process-reader\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=process-reader -o 'custom-columns=NAME:.metadata.name,SA:.spec.serviceAccountName,SCC:.metadata.annotations.openshift\\.io/scc'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                             SA               SCC\nprocess-reader-c5d8b956d-c8gjk   process-reader   academy-x-hostpid\n",
+   "stderr": "",
+   "combined": "NAME                             SA               SCC\nprocess-reader-c5d8b956d-c8gjk   process-reader   academy-x-hostpid\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/process-reader -- sh -c 'ls -d /proc/[0-9]* | wc -l'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "455\n",
+   "stderr": "",
+   "combined": "455\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/process-reader -- sh -c 'id; grep CapEff /proc/self/status'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1000840000(1000840000) gid=0(root) groups=0(root),1000840000\nCapEff:\t0000000000000000\n",
+   "stderr": "",
+   "combined": "uid=1000840000(1000840000) gid=0(root) groups=0(root),1000840000\nCapEff:\t0000000000000000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/process-reader -- cat /proc/1/comm",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "any",
+   "run": null,
+   "code": 0,
+   "stdout": "systemd\n",
+   "stderr": "",
+   "combined": "systemd\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy remove-scc-from-user academy-x-hostpid -z process-reader -n academy-lesson-n-privileged-workloads",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid removed: \"process-reader\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/system:openshift:scc:academy-x-hostpid removed: \"process-reader\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete scc academy-x-hostpid && oc delete clusterrole system:openshift:scc:academy-x-hostpid",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "securitycontextconstraints.security.openshift.io \"academy-x-hostpid\" deleted\nclusterrole.rbac.authorization.k8s.io \"system:openshift:scc:academy-x-hostpid\" deleted\n",
+   "stderr": "",
+   "combined": "securitycontextconstraints.security.openshift.io \"academy-x-hostpid\" deleted\nclusterrole.rbac.authorization.k8s.io \"system:openshift:scc:academy-x-hostpid\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 99,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-SCC-02",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete rolebinding system:openshift:scc:privileged system:openshift:scc:academy-x-hostpid -n academy-lesson-n-privileged-workloads --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-n-privileged-workloads --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete scc academy-x-hostpid --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "found=$(oc get scc academy-x-hostpid --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "found=$(oc get clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "found=$(oc get namespace academy-lesson-n-privileged-workloads --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get scc -o json | jq -S '[.items[] | {name:.metadata.name,body:del(.metadata,.status)}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrole system:openshift:scc:academy-x-hostpid --ignore-not-found -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebindings -o json | jq -S '[.items[] | {name:.metadata.name,roleRef,subjects}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrole system:openshift:scc:privileged -o jsonpath='{.rules}'",
+    "same": true
+   }
+  ]
+ }
+}

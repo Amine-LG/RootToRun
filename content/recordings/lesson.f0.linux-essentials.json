@@ -1,0 +1,113 @@
+{
+ "lab": "lesson.f0.linux-essentials",
+ "kind": "lesson",
+ "lab_hash": "4c83511c780bbf97",
+ "recorded_at": "2026-10-15T17:18:01+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "sh -c 'exit 3'; echo \"exit status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "exit status: 3\n",
+   "stderr": "",
+   "combined": "exit status: 3\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ls /no-such-dir; echo $?",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "2\n",
+   "stderr": "ls: cannot access '/no-such-dir': No such file or directory\n",
+   "combined": "ls: cannot access '/no-such-dir': No such file or directory\n2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 300 & kill $!; wait $!; echo \"after SIGTERM: $?\"; sleep 300 & kill -9 $!; wait $!; echo \"after SIGKILL: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "after SIGTERM: 143\nafter SIGKILL: 137\n",
+   "stderr": "bash: line 1: 2272356 Killed                  sleep 300\n",
+   "combined": "after SIGTERM: 143\nbash: line 1: 2272356 Killed                  sleep 300\nafter SIGKILL: 137\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "touch report.txt; ls -l report.txt; ls -n report.txt; id -u; id -g",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "-rw-r--r--. 1 learner learner 0 Oct 15 17:17 report.txt\n-rw-r--r--. 1 1000 1000 0 Oct 15 17:17 report.txt\n1000\n1000\n",
+   "stderr": "",
+   "combined": "-rw-r--r--. 1 learner learner 0 Oct 15 17:17 report.txt\n-rw-r--r--. 1 1000 1000 0 Oct 15 17:17 report.txt\n1000\n1000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "false | true; echo \"without pipefail: $?\"; set -o pipefail; false | true; echo \"with pipefail: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "without pipefail: 0\nwith pipefail: 1\n",
+   "stderr": "",
+   "combined": "without pipefail: 0\nwith pipefail: 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "curl -sS http://no-such-host.invalid/; echo \"curl exit status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "curl exit status: 6\n",
+   "stderr": "curl: (6) Could not resolve host: no-such-host.invalid\n",
+   "combined": "curl: (6) Could not resolve host: no-such-host.invalid\ncurl exit status: 6\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "curl -sS http://127.0.0.1:9/; echo \"curl exit status: $?\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "curl exit status: 7\n",
+   "stderr": "curl: (7) Failed to connect to 127.0.0.1 port 9: Connection refused\n",
+   "combined": "curl: (7) Failed to connect to 127.0.0.1 port 9: Connection refused\ncurl exit status: 7\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "bash firewalled.sh",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "curl exit status: 28\n",
+   "stderr": "curl: (28) Connection timed out after 3004 milliseconds\n",
+   "combined": "curl: (28) Connection timed out after 3004 milliseconds\ncurl exit status: 28\n",
+   "ok": true
+  }
+ ],
+ "seconds": 13,
+ "ok": true,
+ "problems": []
+}

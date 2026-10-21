@@ -1,0 +1,283 @@
+{
+ "lab": "lab.rbac",
+ "kind": "lab",
+ "lab_hash": "0f8ee6f501aca95e",
+ "recorded_at": "2026-10-13T21:07:05+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc create rolebinding reporter-pod-reader --role=pod-reader --serviceaccount=academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "skipped": "runs in the lab steps"
+  },
+  {
+   "step": "commands",
+   "cmd": "oc adm policy who-can patch deployments -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourceaccessreviewresponse.authorization.openshift.io/<unknown> \n\nNamespace: academy-rbac\nVerb:      patch\nResource:  deployments.apps\n\nUsers:  developer\n        kubeadmin\n        system:admin\n        system:serviceaccount:kube-system:generic-garbage-collector\n        system:serviceaccount:openshift-apiserver-operator:openshift-apiserver-operator\n        system:serviceaccount:openshift-apiserver:openshift-apiserver-sa\n        system:serviceaccount:openshift-authentication-operator:authentication-operator\n        system:serviceaccount:openshift-authentication:oauth-openshift\n        system:serviceaccount:openshift-cluster-version:default\n        system:serviceaccount:openshift-config-operator:openshift-config-operator\n        system:serviceaccount:openshift-controller-manager-operator:openshift-controller-manager-operator\n        system:serviceaccount:openshift-etcd-operator:etcd-operator\n        system:serviceaccount:openshift-etcd:installer-sa\n        system:serviceaccount:openshift-infra:template-instance-controller\n        system:serviceaccount:openshift-infra:template-instance-finalizer-controller\n        system:serviceaccount:openshift-ingress-operator:ingress-operator\n        system:serviceaccount:openshift-kube-apiserver-operator:kube-apiserver-operator\n        system:serviceaccount:openshift-kube-apiserver:installer-sa\n        system:serviceaccount:openshift-kube-apiserver:localhost-recovery-client\n        system:serviceaccount:openshift-kube-controller-manager-operator:kube-controller-manager-operator\n        system:serviceaccount:openshift-kube-controller-manager:installer-sa\n        system:serviceaccount:openshift-kube-controller-manager:localhost-recovery-client\n        system:serviceaccount:openshift-kube-scheduler-operator:openshift-kube-scheduler-operator\n        system:serviceaccount:openshift-kube-scheduler:installer-sa\n        system:serviceaccount:openshift-kube-scheduler:localhost-recovery-client\n        system:serviceaccount:openshift-kube-storage-version-migrator-operator:kube-storage-version-migrator-operator\n        system:serviceaccount:openshift-kube-storage-version-migrator:kube-storage-version-migrator-sa\n        system:serviceaccount:openshift-machine-config-operator:machine-config-operator\n        system:serviceaccount:openshift-network-operator:cluster-network-operator\n        system:serviceaccount:openshift-oauth-apiserver:oauth-apiserver-sa\n        system:serviceaccount:openshift-operator-lifecycle-manager:olm-operator-serviceaccount\n        system:serviceaccount:openshift-service-ca-operator:service-ca-operator\nGroups: system:cluster-admins\n        system:masters\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "baseline",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "baseline",
+   "cmd": "oc auth can-i --list --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Resources                                                            Non-Resource URLs                           Resource Names    Verbs\nbuildconfigs/webhooks                                                []                                          []                [create get]\nbuildconfigs.build.openshift.io/webhooks                             []                                          []                [create get]\nbuilds/docker                                                        []                                          []                [create]\nbuilds/jenkinspipeline                                               []                                          []                [create]\nbuilds/optimizeddocker                                               []                                          []                [create]\nbuilds/source                                                        []                                          []                [create]\nselfsubjectrulesreviews                                              []                                          []                [create]\nselfsubjectreviews.authentication.k8s.io                             []                                          []                [create]\nselfsubjectaccessreviews.authorization.k8s.io                        []                                          []                [create]\nselfsubjectrulesreviews.authorization.k8s.io                         []                                          []                [create]\nselfsubjectrulesreviews.authorization.openshift.io                   []                                          []                [create]\nbuilds.build.openshift.io/docker                                     []                                          []                [create]\nbuilds.build.openshift.io/jenkinspipeline                            []                                          []                [create]\nbuilds.build.openshift.io/optimizeddocker                            []                                          []                [create]\nbuilds.build.openshift.io/source                                     []                                          []                [create]\noauthaccesstokens                                                    []                                          []                [delete]\noauthauthorizetokens                                                 []                                          []                [delete]\noauthaccesstokens.oauth.openshift.io                                 []                                          []                [delete]\noauthauthorizetokens.oauth.openshift.io                              []                                          []                [delete]\nconsoleclidownloads.console.openshift.io                             []                                          []                [get list watch]\nconsoleexternalloglinks.console.openshift.io                         []                                          []                [get list watch]\nconsolelinks.console.openshift.io                                    []                                          []                [get list watch]\nconsolenotifications.console.openshift.io                            []                                          []                [get list watch]\nconsoleplugins.console.openshift.io                                  []                                          []                [get list watch]\nconsolequickstarts.console.openshift.io                              []                                          []                [get list watch]\nconsolesamples.console.openshift.io                                  []                                          []                [get list watch]\nconsoleyamlsamples.console.openshift.io                              []                                          []                [get list watch]\nhelmchartrepositories.helm.openshift.io                              []                                          []                [get list watch]\nclusterroles.rbac.authorization.k8s.io                               []                                          []                [get list watch]\nclusterroles                                                         []                                          []                [get list]\nclusterroles.authorization.openshift.io                              []                                          []                [get list]\nstorageclasses.storage.k8s.io                                        []                                          []                [get list]\n                                                                     [/.well-known/*]                            []                [get]\n                                                                     [/.well-known/oauth-authorization-server]   []                [get]\n                                                                     [/.well-known/oauth-authorization-server]   []                [get]\n                                                                     [/.well-known/openid-configuration/]        []                [get]\n                                                                     [/.well-known/openid-configuration]         []                [get]\n                                                                     [/.well-known]                              []                [get]\n                                                                     [/.well-known]                              []                [get]\n                                                                     [/.well-known]                              []                [get]\n                                                                     [/]                                         []                [get]\n                                                                     [/]                                         []                [get]\n                                                                     [/api/*]                                    []                [get]\n                                                                     [/api/*]                                    []                [get]\n                                                                     [/api/*]                                    []                [get]\n                                                                     [/api]                                      []                [get]\n                                                                     [/api]                                      []                [get]\n                                                                     [/api]                                      []                [get]\n                                                                     [/apis/*]                                   []                [get]\n                                                                     [/apis/*]                                   []                [get]\n                                                                     [/apis/*]                                   []                [get]\n                                                                     [/apis]                                     []                [get]\n                                                                     [/apis]                                     []                [get]\n                                                                     [/apis]                                     []                [get]\n                                                                     [/healthz/]                                 []                [get]\n                                                                     [/healthz]                                  []                [get]\n                                                                     [/healthz]                                  []                [get]\n                                                                     [/healthz]                                  []                [get]\n                                                                     [/livez]                                    []                [get]\n                                                                     [/livez]                                    []                [get]\n                                                                     [/oapi/*]                                   []                [get]\n                                                                     [/oapi/*]                                   []                [get]\n                                                                     [/oapi]                                     []                [get]\n                                                                     [/oapi]                                     []                [get]\n                                                                     [/openapi/*]                                []                [get]\n                                                                     [/openapi/v2]                               []                [get]\n                                                                     [/openapi/v2]                               []                [get]\n                                                                     [/openapi]                                  []                [get]\n                                                                     [/openid/v1/jwks/]                          []                [get]\n                                                                     [/openid/v1/jwks]                           []                [get]\n                                                                     [/osapi/]                                   []                [get]\n                                                                     [/osapi/]                                   []                [get]\n                                                                     [/osapi]                                    []                [get]\n                                                                     [/osapi]                                    []                [get]\n                                                                     [/readyz]                                   []                [get]\n                                                                     [/readyz]                                   []                [get]\n                                                                     [/swagger-2.0.0.pb-v1]                      []                [get]\n                                                                     [/swagger-2.0.0.pb-v1]                      []                [get]\n                                                                     [/swagger.json]                             []                [get]\n                                                                     [/swagger.json]                             []                [get]\n                                                                     [/swaggerapi/*]                             []                [get]\n                                                                     [/swaggerapi/*]                             []                [get]\n                                                                     [/swaggerapi]                               []                [get]\n                                                                     [/swaggerapi]                               []                [get]\n                                                                     [/version/*]                                []                [get]\n                                                                     [/version/*]                                []                [get]\n                                                                     [/version/]                                 []                [get]\n                                                                     [/version/]                                 []                [get]\n                                                                     [/version]                                  []                [get]\n                                                                     [/version]                                  []                [get]\n                                                                     [/version]                                  []                [get]\n                                                                     [/version]                                  []                [get]\nimagestreams/layers                                                  []                                          []                [get]\nusers                                                                []                                          [~]               [get]\nimagestreams.image.openshift.io/layers                               []                                          []                [get]\nusers.user.openshift.io                                              []                                          [~]               [get]\nuserextras.authentication.k8s.io/scopes.authorization.openshift.io   []                                          []                [impersonate]\nprojects                                                             []                                          []                [list watch]\nprojects.project.openshift.io                                        []                                          []                [list watch]\nprojectrequests                                                      []                                          []                [list]\nprojectrequests.project.openshift.io                                 []                                          []                [list]\nsecuritycontextconstraints.security.openshift.io                     []                                          [restricted-v2]   [use]\nsecuritycontextconstraints.security.openshift.io                     []                                          [restricted-v3]   [use]\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reporter",
+   "cmd": "oc create role pod-reader --verb=get,list,watch --resource=pods -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "role.rbac.authorization.k8s.io/pod-reader created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reporter",
+   "cmd": "oc create rolebinding reporter-pod-reader --role=pod-reader --serviceaccount=academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io/reporter-pod-reader created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reporter",
+   "cmd": "oc auth can-i list pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "reporter",
+   "cmd": "oc auth can-i delete pods --as=system:serviceaccount:academy-rbac:reporter -n academy-rbac",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deployer",
+   "cmd": "oc create role deployer --verb=get,list,patch --resource=deployments.apps -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "role.rbac.authorization.k8s.io/deployer created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deployer",
+   "cmd": "oc create rolebinding ci-deployer-deployer --role=deployer --serviceaccount=academy-rbac:ci-deployer -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "rolebinding.rbac.authorization.k8s.io/ci-deployer-deployer created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deployer",
+   "cmd": "oc auth can-i patch deployments.apps --as=system:serviceaccount:academy-rbac:ci-deployer -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "deployer",
+   "cmd": "oc auth can-i delete deployments.apps --as=system:serviceaccount:academy-rbac:ci-deployer -n academy-rbac",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "whocan",
+   "cmd": "oc adm policy who-can patch deployments.apps -n academy-rbac",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourceaccessreviewresponse.authorization.openshift.io/<unknown> \n\nNamespace: academy-rbac\nVerb:      patch\nResource:  deployments.apps\n\nUsers:  developer\n        kubeadmin\n        system:admin\n        system:serviceaccount:academy-rbac:ci-deployer\n        system:serviceaccount:kube-system:generic-garbage-collector\n        system:serviceaccount:openshift-apiserver-operator:openshift-apiserver-operator\n        system:serviceaccount:openshift-apiserver:openshift-apiserver-sa\n        system:serviceaccount:openshift-authentication-operator:authentication-operator\n        system:serviceaccount:openshift-authentication:oauth-openshift\n        system:serviceaccount:openshift-cluster-version:default\n        system:serviceaccount:openshift-config-operator:openshift-config-operator\n        system:serviceaccount:openshift-controller-manager-operator:openshift-controller-manager-operator\n        system:serviceaccount:openshift-etcd-operator:etcd-operator\n        system:serviceaccount:openshift-etcd:installer-sa\n        system:serviceaccount:openshift-infra:template-instance-controller\n        system:serviceaccount:openshift-infra:template-instance-finalizer-controller\n        system:serviceaccount:openshift-ingress-operator:ingress-operator\n        system:serviceaccount:openshift-kube-apiserver-operator:kube-apiserver-operator\n        system:serviceaccount:openshift-kube-apiserver:installer-sa\n        system:serviceaccount:openshift-kube-apiserver:localhost-recovery-client\n        system:serviceaccount:openshift-kube-controller-manager-operator:kube-controller-manager-operator\n        system:serviceaccount:openshift-kube-controller-manager:installer-sa\n        system:serviceaccount:openshift-kube-controller-manager:localhost-recovery-client\n        system:serviceaccount:openshift-kube-scheduler-operator:openshift-kube-scheduler-operator\n        system:serviceaccount:openshift-kube-scheduler:installer-sa\n        system:serviceaccount:openshift-kube-scheduler:localhost-recovery-client\n        system:serviceaccount:openshift-kube-storage-version-migrator-operator:kube-storage-version-migrator-operator\n        system:serviceaccount:openshift-kube-storage-version-migrator:kube-storage-version-migrator-sa\n        system:serviceaccount:openshift-machine-config-operator:machine-config-operator\n        system:serviceaccount:openshift-network-operator:cluster-network-operator\n        system:serviceaccount:openshift-oauth-apiserver:oauth-apiserver-sa\n        system:serviceaccount:openshift-operator-lifecycle-manager:olm-operator-serviceaccount\n        system:serviceaccount:openshift-service-ca-operator:service-ca-operator\nGroups: system:cluster-admins\n        system:masters\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "rep-list",
+    "title": "reporter can list pods",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can reporter list pods? no"
+   },
+   {
+    "id": "rep-delete",
+    "title": "reporter cannot delete pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can reporter delete pods? no"
+   },
+   {
+    "id": "rep-secrets",
+    "title": "reporter cannot read Secrets",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can reporter get secrets? no"
+   },
+   {
+    "id": "dep-patch",
+    "title": "ci-deployer can patch deployments",
+    "expect": "yes",
+    "status": "fail",
+    "observed": "can ci-deployer patch deployments.apps? no"
+   },
+   {
+    "id": "dep-delete",
+    "title": "ci-deployer cannot delete deployments",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer delete deployments.apps? no"
+   },
+   {
+    "id": "dep-secrets",
+    "title": "ci-deployer cannot read Secrets",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer get secrets? no"
+   },
+   {
+    "id": "dep-pods",
+    "title": "ci-deployer cannot delete pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer delete pods? no"
+   }
+  ],
+  "at": 1791925635.465693
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "rep-list",
+    "title": "reporter can list pods",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can reporter list pods? yes"
+   },
+   {
+    "id": "rep-delete",
+    "title": "reporter cannot delete pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can reporter delete pods? no"
+   },
+   {
+    "id": "rep-secrets",
+    "title": "reporter cannot read Secrets",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can reporter get secrets? no"
+   },
+   {
+    "id": "dep-patch",
+    "title": "ci-deployer can patch deployments",
+    "expect": "yes",
+    "status": "pass",
+    "observed": "can ci-deployer patch deployments.apps? yes"
+   },
+   {
+    "id": "dep-delete",
+    "title": "ci-deployer cannot delete deployments",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer delete deployments.apps? no"
+   },
+   {
+    "id": "dep-secrets",
+    "title": "ci-deployer cannot read Secrets",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer get secrets? no"
+   },
+   {
+    "id": "dep-pods",
+    "title": "ci-deployer cannot delete pods",
+    "expect": "no",
+    "status": "pass",
+    "observed": "can ci-deployer delete pods? no"
+   }
+  ],
+  "at": 1791925644.2160711
+ },
+ "seconds": 19,
+ "ok": true,
+ "problems": []
+}

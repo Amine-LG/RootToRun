@@ -1,0 +1,288 @@
+id: lab.networkpolicy
+title: "Isolate a project with NetworkPolicies"
+summary: "Default-deny ingress, allow one client by label, let the router in, then isolate egress and allow DNS: measured from inside and outside the cluster."
+module: b4-network-security
+mode: REAL_LAB
+minutes: 50
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with OVN-Kubernetes, single node. CRC's router runs on the host network of the same node as your pods, which changes what default-deny does to Route traffic (explained in the lab)."
+concepts: [net.policy, sec.segmentation, net.ovn]
+prerequisites: [d.networkpolicy-ovn]
+namespace: academy-netpol
+objective: |
+  Turn an open project into an isolated one, allow exactly the traffic you need, and verify each rule with a real
+  connection attempt.
+background: |
+  `web` serves a page behind a Service and a Route. Two test pods run curl: `client` (label `app=client`) and
+  `stranger` (label `app=stranger`). Remember: NetworkPolicies are allow lists. A pod selected by any ingress policy
+  only accepts what some policy allows, and policies add up (there is no "deny" rule to order). Dropped packets look
+  like **timeouts** (curl exit code 28), not refusals. NetworkPolicy is a Kubernetes API; OVN-Kubernetes enforces it
+  on OpenShift, and the `policy-group.network.openshift.io/*` namespace labels used at the end are OpenShift-specific.
+
+  **Where everything comes from.** The app creates the project `academy-netpol` and applies the objects shown below:
+  `web` runs Red Hat's UBI 9 Apache httpd image (`registry.access.redhat.com/ubi9/httpd-24`); `client` and `stranger`
+  run `sleep` in the small UBI 9 image `registry.access.redhat.com/ubi9/ubi-minimal` so that you can start curl from
+  them with `oc exec`. Both images come from Red Hat's public registry, which needs no login. Every NetworkPolicy is
+  yours, from the YAML in the steps. The reader identity lists the router pods in `openshift-ingress`. Clean up
+  deletes the project and its policies.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>academy netpol</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: client, labels: {app: client}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: client}}
+      template:
+        metadata: {labels: {app: client}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: stranger, labels: {app: stranger}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: stranger}}
+      template:
+        metadata: {labels: {app: stranger}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+steps:
+  - id: open
+    title: "Baseline: everything is allowed"
+    do: "From both test pods, call the Service; then check the Route."
+    commands:
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "client → web"}
+      - {cmd: "oc exec deploy/stranger -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "stranger → web"}
+      - {cmd: "oc get networkpolicy -n academy-netpol", meaning: "none yet"}
+    checks: [route-ok]
+    wait_for: [route-ok]
+  - id: deny
+    title: "Default deny for ingress"
+    do: "Apply a policy that selects every pod and allows no ingress, then test again."
+    commands:
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "deny-all-ingress"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: deny-all-ingress
+          spec:
+            podSelector: {}
+            policyTypes: [Ingress]
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "now blocked", expect: fail}
+    predict:
+      prompt: "What does curl report when a NetworkPolicy blocks it?"
+      choices: ["Connection refused, immediately", "A timeout after 3 seconds (exit code 28)", "HTTP 403"]
+      answer: 1
+      explain: "Packets are dropped silently by OVN, so the client waits until its timeout."
+      feedback:
+        - "A refusal needs something to answer with a TCP reset. NetworkPolicy enforcement drops the packets instead, so nothing answers."
+        - "Right: the SYN packets are dropped, curl waits for its `-m 3` limit and exits with 28 (operation timed out)."
+        - "HTTP 403 would need the request to reach a web server or proxy. NetworkPolicy works at layer 3/4 and never sees HTTP."
+    observe: "`command terminated with exit code 28` after about 3 seconds, with no page and no error from the server."
+    why: "`podSelector: {}` selects every pod in the project, and a policy with `policyTypes: [Ingress]` and no `ingress` rules allows nothing. Egress is untouched: the test pods can still open connections, their packets are dropped on arrival at web."
+    wait_for: [stranger-blocked]
+  - id: route-down
+    title: "Surprise: the Route still works here"
+    do: "Check the Route from outside, then look at where the router runs on this cluster."
+    commands:
+      - {cmd: "oc get pods -n openshift-ingress -o custom-columns=NAME:.metadata.name,HOSTNETWORK:.spec.hostNetwork,NODE:.spec.nodeName", as: reader, meaning: "the router-default pod runs on the host network of node crc"}
+      - {cmd: "oc get pods -l app=web -n academy-netpol -o wide", meaning: "web runs on the same node"}
+    predict:
+      prompt: "With deny-all-ingress in place, what does the Route return on this single-node cluster?"
+      choices: ["503: the router is blocked like any other client", "200: traffic from the pod's own node is always allowed", "A TLS error"]
+      answer: 1
+      explain: "Network policies cannot block traffic from the node a pod runs on (Kubernetes documents this, and OpenShift's network policy docs repeat it): that is how kubelet probes keep working under default-deny. CRC's router is a host-network pod on that same node, so its traffic arrives from the node and is never blocked here."
+      feedback:
+        - "That is what happens when the router's traffic comes from somewhere else (another node, or a router pod on the pod network). Here it comes from the pod's own node, which policies never block."
+        - "Right: the router is a host-network pod on the only node, so its connections come from the node itself, and traffic from a pod's own node is always allowed."
+        - "This Route is plain HTTP and NetworkPolicy never touches TLS. A blocked router would show up as a 503 or a timeout, not a TLS error."
+    observe: "The Route check answers HTTP 200. `router-default-...` shows HOSTNETWORK true on node crc, the same node as web. (`routes-controller` is a CRC helper that tells the host about route hostnames, not a router; its `<none>` means hostNetwork is not set.)"
+    why: "On a multi-node cluster, router pods usually run on other (worker or infra) nodes, and on many platforms they use the pod network rather than the host network. Their traffic is then subject to the policy and the Route breaks after default-deny until you allow it; with host-network routers it can even work for pods that happen to share a node with a router and fail for the others. A single-node lab hides this: the next step adds the rule you need on real clusters."
+    checks: [route-ok]
+  - id: allow-client
+    title: "Allow the client, and only the client"
+    do: "Allow ingress to `web` on port 8080 from pods labelled `app=client`."
+    commands:
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "allow-client-to-web"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: allow-client-to-web
+          spec:
+            podSelector: {matchLabels: {app: web}}
+            policyTypes: [Ingress]
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {app: client}}
+              ports:
+              - {protocol: TCP, port: 8080}
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "allowed"}
+      - {cmd: "oc exec deploy/stranger -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "still blocked", expect: fail}
+    wait_for: [client-ok, stranger-blocked]
+  - id: allow-router
+    title: "Add the router rule production needs"
+    do: |
+      Allow ingress from the router explicitly, so the project works on any topology. With OVN-Kubernetes, the
+      namespace label `policy-group.network.openshift.io/ingress` matches Ingress Controller traffic whatever the
+      router's publishing strategy; `policy-group.network.openshift.io/host-network` matches host-network pods in
+      general (for example other platform components). The platform sets these labels on its own namespaces; do not
+      put them on yours, or anything in those namespaces would be treated as the router.
+    commands:
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "allow-from-router"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: allow-from-router
+          spec:
+            podSelector: {matchLabels: {app: web}}
+            policyTypes: [Ingress]
+            ingress:
+            - from:
+              - namespaceSelector:
+                  matchLabels: {policy-group.network.openshift.io/ingress: ""}
+              - namespaceSelector:
+                  matchLabels: {policy-group.network.openshift.io/host-network: ""}
+      - {cmd: "oc get networkpolicy -n academy-netpol", meaning: "three policies, additive"}
+    observe: "Three policies. `deny-all-ingress` shows POD-SELECTOR `<none>`: an empty selector, which means every pod in the project. The Route still answers 200, but on this cluster it also did before the rule, so this step cannot prove the rule works; it only proves it breaks nothing."
+    why: "Policies are additive: web now accepts the client on 8080 and anything from the router, while stranger stays blocked because no policy allows it."
+    checks: [route-ok]
+    wait_for: [route-ok]
+  - id: egress
+    title: "Egress: deny by default, then allow DNS"
+    do: |
+      Isolate the client's outgoing traffic too. Once a policy with `Egress` selects a pod, it may only open
+      connections that some policy allows, and that includes name resolution: the cluster DNS pods run in
+      `openshift-dns` and listen on port 5353 behind the DNS Service's port 53.
+    commands:
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "client may open no connection at all"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: client-deny-egress}
+          spec:
+            podSelector: {matchLabels: {app: client}}
+            policyTypes: [Egress]
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "times out while resolving the name", expect: fail}
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "allow DNS: both ports, UDP and TCP, to the openshift-dns namespace only"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: client-allow-dns}
+          spec:
+            podSelector: {matchLabels: {app: client}}
+            policyTypes: [Egress]
+            egress:
+            - to:
+              - namespaceSelector:
+                  matchLabels: {kubernetes.io/metadata.name: openshift-dns}
+              ports:
+              - {protocol: UDP, port: 5353}
+              - {protocol: TCP, port: 5353}
+              - {protocol: UDP, port: 53}
+              - {protocol: TCP, port: 53}
+      - {cmd: "oc exec deploy/client -n academy-netpol -- getent hosts web", meaning: "the name resolves again"}
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "resolved, but the connection to web is still not allowed out", expect: fail}
+      - cmd: "oc apply -f - -n academy-netpol"
+        meaning: "allow the client to reach web on 8080"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: client-allow-web}
+          spec:
+            podSelector: {matchLabels: {app: client}}
+            policyTypes: [Egress]
+            egress:
+            - to:
+              - podSelector: {matchLabels: {app: web}}
+              ports:
+              - {protocol: TCP, port: 8080}
+      - {cmd: "oc exec deploy/client -n academy-netpol -- curl -s -m 3 http://web:8080/", meaning: "allowed out by client-allow-web, allowed in by allow-client"}
+    observe: "With egress denied, even `curl http://web:8080/` fails before any packet reaches web: the DNS query is dropped. Allowing DNS makes the name resolve while the connection still times out; only the third policy lets it through. The connection now needs two permissions: egress from the client and ingress to web."
+    why: "Egress rules are written for the client side, ingress rules for the server side, and a connection between two isolated pods needs both. DNS is the dependency people forget: allow it explicitly, to the DNS namespace, on the pods' real port (5353) as well as the Service port (53)."
+    predict:
+      prompt: "A pod is selected by an egress policy that allows nothing. `curl http://web:8080/` from it fails. At which point?"
+      choices: ["When connecting to web's IP", "Already when resolving the name web", "Only when web answers"]
+      answer: 1
+      explain: "Name resolution is a connection to the DNS pods, and egress isolation blocks it like any other connection."
+    checks: [client-egress-isolated, client-ok, dns-ok]
+    wait_for: [client-egress-isolated, client-ok, dns-ok]
+hints:
+  - "With OVN-Kubernetes a connection blocked by a NetworkPolicy times out (curl exit code 28); it is not refused."
+  - "A pod is isolated as soon as one ingress policy selects it; after that, only what some policy allows gets in."
+  - "Allow by label: `from: [{podSelector: {matchLabels: {app: client}}}]` plus the port."
+checks:
+  - {id: route-ok, title: "The Route answers 200", type: route_http, route: web, expect_status: 200, contains: "academy netpol", expect_text: "HTTP 200"}
+  - {id: client-ok, title: "client can reach web", type: exec, from: app=client, command: ["curl", "-s", "-m", "3", "http://web:8080/"], expect_output: "academy netpol", expect_text: "page content"}
+  - {id: stranger-blocked, title: "stranger is blocked", type: exec, from: app=stranger, command: ["curl", "-s", "-m", "3", "http://web:8080/"], expect_code: 28, expect_text: "curl exit 28 (timeout)"}
+  - {id: dns-ok, title: "client can resolve names (DNS egress allowed)", type: exec, from: app=client, command: ["getent", "hosts", "web"], expect_code: 0, expect_text: "web resolves"}
+  - {id: client-egress-isolated, title: "An egress policy selects client (its outgoing traffic is isolated)", type: netpol_ingress, direction: Egress, labels: {app: client}, isolated: true, expect_text: "isolated for egress"}
+  - {id: deny-exists, title: "A default-deny ingress policy exists", type: exists, kind: networkpolicy, name: deny-all-ingress, expect_text: "exists"}
+questions:
+  - q: "Why do blocked connections time out instead of being refused?"
+    a: "The network plugin drops packets; nothing sends a reset, so the client waits for its timeout."
+  - q: "Two policies select web: one allows app=client, the other allows the router. Is stranger allowed?"
+    a: "No. Policies are a union of allow rules: a connection is accepted if any policy selecting the pod allows it, and nothing allows stranger."
+  - q: "Why did the Route keep working after default-deny on CRC, and why must you still add a router rule?"
+    a: "Traffic from a pod's own node is always admitted by OVN-Kubernetes, and CRC's host-network router runs on that node. On multi-node clusters routers run elsewhere, their traffic is filtered, and the Route breaks without an explicit allow rule."
+enterprise: |
+  A project template that creates `deny-all-ingress`, `allow-same-namespace`, `allow-from-router` and
+  `allow-from-monitoring` for every new project is a common baseline in regulated organisations. Test it on each
+  platform type: router placement and publishing strategy change what a missing rule breaks, and a single-node lab
+  cannot show it.
+references:
+  - {title: "OpenShift 4.21: Network policy", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy"}
+  - {title: "Kubernetes: Network policies", url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"}
+variations:
+  - "Allow `stranger` into `web` on port 8443 only (the httpd image also serves HTTPS there) and test both ports from `stranger`. Check: HTTPS to the web pod's IP on 8443 answers, while `http://web:8080/` still times out (curl exit 28): a NetworkPolicy allows ports, not only pods."
+  - "On your own: write the baseline from the enterprise note (deny-all-ingress, allow-same-namespace, allow-from-router) for a new project of your own. Check: its pods reach each other, a pod from another project times out, and its Route still answers."

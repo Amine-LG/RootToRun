@@ -1,0 +1,15 @@
+Root to Run
+Copyright 2026 Amine-LG and contributors
+https://github.com/Amine-LG/RootToRun
+
+The application code is licensed under the Apache License, Version 2.0 (LICENSE). The original course content in
+content/ is licensed under Creative Commons Attribution-ShareAlike 4.0 International (content/LICENSE.md).
+
+Third-party components, fonts, examples adapted from other documentation, the output of third-party programs in
+the recordings and the screenshots of the OpenShift web console (including the Red Hat and OpenShift names, logos and
+artwork they show) keep their own licences and owners and are not relicensed by this project; see
+THIRD_PARTY_NOTICES.md and, in the built site, licenses.txt.
+
+Red Hat and OpenShift are trademarks of Red Hat, LLC, registered in the United States and other countries. Kubernetes
+is a registered trademark of The Linux Foundation. This project is independent and is not affiliated with, sponsored
+or endorsed by Red Hat, LLC or The Linux Foundation.

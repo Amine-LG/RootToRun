@@ -1,0 +1,151 @@
+id: lab.templates
+title: "Instantiate a template"
+subtitle: "Parameters, generated values, rendering without creating, and what re-processing changes"
+summary: "Load an OpenShift Template into a project, list and render its parameters, instantiate it with oc new-app, and see why a generated value changes every time you process the template again."
+module: a2-apps
+mode: REAL_LAB
+minutes: 25
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with oc 4.21.8. Lab files are provided by the app and referenced as lab/<path>."
+concepts: [deploy.packaging, k8s.deployment, sec.secrets]
+prerequisites: [n.templates, o1.deploy-apps]
+namespace: academy-tpl
+objective: |
+  Read a Template's parameters, render it to see exactly what it would create, instantiate it with chosen values,
+  and explain how generated parameters behave.
+background: |
+  The lab provides `lab/web-template.yaml`: an OpenShift Template with four parameters (a required name, a greeting,
+  a replica count and a generated access key) and five objects (a ConfigMap, a Secret, a Deployment, a Service and a
+  Route). A Template is a server-side object of the `template.openshift.io` API: `oc process` renders it,
+  `oc new-app --template` renders and creates the objects in one step.
+
+  **Where everything comes from.** The app writes `lab/web-template.yaml` (shown under the files below) before the
+  first step; to work on your own cluster without the app, save that text to a file of the same name. The template's
+  Deployment uses `registry.access.redhat.com/ubi9/httpd-24`, which needs no login. Clean up deletes the project
+  `academy-tpl` with the template and every object it created.
+files:
+  web-template.yaml: |
+    apiVersion: template.openshift.io/v1
+    kind: Template
+    metadata:
+      name: web
+      annotations:
+        description: "A static web page served by httpd, with a generated access key."
+    labels:
+      template: web
+    parameters:
+    - name: NAME
+      description: "Name of every object the template creates"
+      required: true
+    - name: GREETING
+      description: "Text of the page"
+      value: "hello"
+    - name: REPLICAS
+      description: "Number of pods"
+      value: "1"
+    - name: ACCESS_KEY
+      description: "A random key, generated if you do not supply one"
+      generate: expression
+      from: "[a-z0-9]{16}"
+    objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: "${NAME}-content"}
+      data: {index.html: "${GREETING}"}
+    - apiVersion: v1
+      kind: Secret
+      metadata: {name: "${NAME}-key"}
+      stringData: {key: "${ACCESS_KEY}"}
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: "${NAME}", labels: {app: "${NAME}"}}
+      spec:
+        replicas: ${{REPLICAS}}
+        selector: {matchLabels: {app: "${NAME}"}}
+        template:
+          metadata: {labels: {app: "${NAME}"}}
+          spec:
+            terminationGracePeriodSeconds: 2
+            containers:
+            - name: httpd
+              image: registry.access.redhat.com/ubi9/httpd-24:latest
+              ports: [{containerPort: 8080}]
+              readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 5}
+              resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+              volumeMounts: [{name: content, mountPath: /var/www/html}]
+            volumes: [{name: content, configMap: {name: "${NAME}-content"}}]
+    - apiVersion: v1
+      kind: Service
+      metadata: {name: "${NAME}"}
+      spec:
+        selector: {app: "${NAME}"}
+        ports: [{port: 8080, targetPort: 8080}]
+    - apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata: {name: "${NAME}"}
+      spec:
+        to: {kind: Service, name: "${NAME}"}
+        port: {targetPort: 8080}
+setup: []
+steps:
+  - id: load
+    title: "Load the template and read its parameters"
+    do: "Create the Template object in the project, then list its parameters."
+    commands:
+      - {cmd: "oc create -f lab/web-template.yaml -n academy-tpl", meaning: "the Template is stored in the project; nothing else is created yet"}
+      - {cmd: "oc get templates -n academy-tpl", meaning: "one template, web, with its description and object count"}
+      - {cmd: "oc process --parameters web -n academy-tpl", meaning: "each parameter, its description, whether a generator fills it, and its default"}
+      - {cmd: "oc get deployments -n academy-tpl", meaning: "No resources found: a template is only a recipe"}
+    observe: "Four parameters. `ACCESS_KEY` shows the generator `expression` and the pattern; `GREETING` and `REPLICAS` have defaults; `NAME` has none and is required. No Deployment exists yet."
+    why: "Templates live in a project (or in the shared `openshift` project, where the cluster's own templates are). Storing one creates nothing: processing it does the substitution, and only then are objects created."
+    checks: [template]
+  - id: render
+    title: "Render it without creating anything"
+    do: "Process the template with your values and print the result, then try without the required parameter."
+    commands:
+      - {cmd: "oc process web -p NAME=shop -p GREETING=hello-from-a-template -n academy-tpl -o yaml", meaning: "a List of five objects with every ${…} replaced; the Secret holds a freshly generated key"}
+      - {cmd: "oc process web -n academy-tpl", meaning: "refused: NAME is required and has no value", expect: fail}
+    observe: "The rendered Deployment has `replicas: 1` as a number (the `${{REPLICAS}}` form inserts it without quotes) and every object carries the label `template: web`. Without NAME, processing fails before anything could be created. In the recording the generated key appears as `<generated-1>`: the published recording replaces each generated value with `<generated-N>`, and a different N means a different value. On your cluster you see 16 random characters (`[a-z0-9]{16}`)."
+    why: "Rendering first is the template equivalent of `oc diff`: you see exactly what will be created. `${PARAM}` inserts a string; `${{PARAM}}` inserts the value as YAML, which is how numbers and booleans are passed."
+    predict:
+      prompt: "You process the same template twice with the same parameters. What happens to ACCESS_KEY, which has a generator and no value?"
+      choices: ["It is the same both times", "A new random value each time", "It is empty unless you pass it"]
+      answer: 1
+      explain: "A generator runs at every processing. Pass the value explicitly when it must stay stable."
+  - id: instantiate
+    title: "Instantiate it"
+    do: "Create the objects with `oc new-app`, choosing two replicas, and wait for the Deployment."
+    commands:
+      - {cmd: "oc new-app --template=web -p NAME=shop -p GREETING=hello-from-a-template -p REPLICAS=2 -n academy-tpl", meaning: "renders and creates the five objects; prints the parameter values, including the generated one"}
+      - {cmd: "oc rollout status deploy/shop -n academy-tpl --timeout=180s", meaning: "two Ready pods", timeout: 200}
+      - {cmd: "oc get deploy,svc,route,configmap,secret -l template=web -n academy-tpl", meaning: "everything the template created, found by its label"}
+    observe: "`oc new-app` lists the objects it created and the parameter values it used, the generated one marked `# generated` (`ACCESS_KEY=<generated-2>` in the published recording, which replaces generated values with placeholders). The label selector finds exactly the template's objects, which is how you inspect or delete one instance later."
+    why: "The `labels` block of a template is added to every object it creates. Choose labels that identify the instance, so `oc delete all,configmap,secret -l …` removes it cleanly."
+    checks: [ready, route]
+    wait_for: [ready]
+  - id: regenerate
+    title: "What re-processing would change"
+    do: "Compare the key stored in the Secret with the key a new rendering would produce."
+    commands:
+      - {cmd: "oc extract secret/shop-key --to=- -n academy-tpl", meaning: "the key generated when the instance was created"}
+      - {cmd: "oc process web -p NAME=shop -n academy-tpl -o jsonpath={.items[1].stringData.key}", meaning: "a different key: re-processing and applying again would replace the stored one"}
+    observe: "The two keys differ: the recording shows the stored key as `<generated-2>` and the re-processed one as `<generated-3>` (each generated value is replaced by `<generated-N>`, and a different N means a different value; on your cluster you see two different 16-character keys). Re-applying a re-processed template would silently rotate every generated value."
+    why: "Templates are rendered once, at creation. They are not a release manager: there is no history, no upgrade and no rollback of an instance. Keep generated values stable by passing them in, or move to Helm or Kustomize when you need to manage an application's lifecycle."
+hints: []
+checks:
+  - {id: template, title: "the template web is loaded in the project", type: exists, kind: template, name: web, expect_text: "exists"}
+  - {id: ready, title: "shop runs 2 Ready replicas", type: deployment_ready, name: shop, replicas: 2, expect_text: "2/2 ready"}
+  - {id: route, title: "Route shop serves the greeting", type: route_http, route: shop, path: /, expect_status: 200, contains: "hello-from-a-template", expect_text: "HTTP 200 hello-from-a-template"}
+questions:
+  - q: "What is the difference between `${REPLICAS}` and `${{REPLICAS}}` in a template?"
+    a: "`${REPLICAS}` substitutes a string; `${{REPLICAS}}` substitutes the value as YAML, so a number stays a number (needed for fields such as replicas)."
+  - q: "How do you find and remove every object one template instance created?"
+    a: "By the template's labels: `oc get` or `oc delete` with `-l` and that label, across the kinds it creates."
+  - q: "Why is a template a poor fit for upgrading an application over time?"
+    a: "It is rendered once; there is no record of an instance, no upgrade path and no rollback, and generated values change at every processing."
+references:
+  - {title: "OpenShift 4.21: Using templates", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/creating-applications#using-templates"}
+  - {title: "oc process (CLI reference)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/cli_tools/openshift-cli-oc"}
+variations:
+  - "Instantiate the template a second time with `NAME=blog` and your own greeting, then remove only the blog instance. Check: the shop Route still answers afterwards. Before you delete anything, look at the labels both instances share, and decide how to select only one of them."
+  - "Process the template twice with an explicit `ACCESS_KEY`. Check: both renderings contain the same key, unlike step 4."

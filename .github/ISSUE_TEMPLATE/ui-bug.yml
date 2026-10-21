@@ -1,0 +1,34 @@
+name: Website problem
+description: Something on the website does not work or is hard to use (a control, the display, navigation, saving progress).
+labels: [ui]
+body:
+  - type: markdown
+    attributes:
+      value: "For a mistake in what a lesson or activity teaches, use the **Content problem** form instead."
+  - type: input
+    id: page-url
+    attributes: {label: Page address, description: "The address on the site, without the domain."}
+    validations: {required: true}
+  - type: input
+    id: content-type
+    attributes: {label: Kind of page, description: "Filled in by a page's report link, for example Lesson or Interactive model."}
+  - type: input
+    id: content-id
+    attributes: {label: Content id, description: "Filled in by a page's report link, if the page shows one lesson or activity."}
+  - type: input
+    id: site-version
+    attributes: {label: Site version}
+  - type: input
+    id: browser
+    attributes: {label: Browser and device, description: For example Firefox 140 on a phone.}
+  - type: textarea
+    id: steps
+    attributes: {label: Steps to see the problem}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: What you expected}
+  - type: textarea
+    id: actual
+    attributes: {label: What happened}
+    validations: {required: true}

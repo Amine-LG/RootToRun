@@ -1,0 +1,77 @@
+{
+ "lab": "lesson.a.images-registries",
+ "kind": "lesson",
+ "lab_hash": "12c82e6498be0bb7",
+ "recorded_at": "2026-10-15T17:11:04+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "skopeo inspect --format '{{.Digest}} {{.Architecture}} {{len .Layers}}' docker://quay.io/prometheus/busybox:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "sha256:5a1d320f7575acb92934a25ea4830bcbf27cc53e68fbf42c56f89c509e7602d2 amd64 2\n",
+   "stderr": "",
+   "combined": "sha256:5a1d320f7575acb92934a25ea4830bcbf27cc53e68fbf42c56f89c509e7602d2 amd64 2\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "skopeo inspect --format '{{.Digest}} {{.Architecture}} {{len .Layers}}' docker://registry.access.redhat.com/ubi9/ubi-minimal:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661 amd64 1\n",
+   "stderr": "",
+   "combined": "sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661 amd64 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman pull registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag 2>&1 | tail -n 1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Error: unable to copy from source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: initializing source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown\n",
+   "stderr": "",
+   "combined": "Error: unable to copy from source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: initializing source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman pull quay.io/academy-no-such-org/nothing:1 2>&1 | tail -n 1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Error: unable to copy from source docker://quay.io/academy-no-such-org/nothing:1: initializing source docker://quay.io/academy-no-such-org/nothing:1: reading manifest 1 in quay.io/academy-no-such-org/nothing: unauthorized: access to the requested resource is not authorized\n",
+   "stderr": "",
+   "combined": "Error: unable to copy from source docker://quay.io/academy-no-such-org/nothing:1: initializing source docker://quay.io/academy-no-such-org/nothing:1: reading manifest 1 in quay.io/academy-no-such-org/nothing: unauthorized: access to the requested resource is not authorized\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman pull registry.invalid/team/app:1 2>&1 | tail -n 1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Error: unable to copy from source docker://registry.invalid/team/app:1: initializing source docker://registry.invalid/team/app:1: pinging container registry registry.invalid: Get \"https://registry.invalid/v2/\": dial tcp: lookup registry.invalid on 192.0.2.53:53: no such host\n",
+   "stderr": "",
+   "combined": "Error: unable to copy from source docker://registry.invalid/team/app:1: initializing source docker://registry.invalid/team/app:1: pinging container registry registry.invalid: Get \"https://registry.invalid/v2/\": dial tcp: lookup registry.invalid on 192.0.2.53:53: no such host\n",
+   "ok": true
+  }
+ ],
+ "seconds": 14,
+ "ok": true,
+ "problems": []
+}

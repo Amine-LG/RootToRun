@@ -1,0 +1,249 @@
+{
+ "lab": "lab.storage",
+ "kind": "lab",
+ "lab_hash": "2d130b7009bb98f3",
+ "recorded_at": "2026-10-20T17:16:11+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "commands",
+   "cmd": "oc get storageclass",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE\ncrc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer   false                  203d\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "commands",
+   "cmd": "oc get pvc -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-storage namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "pvc",
+   "cmd": "oc apply -f - -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persistentvolumeclaim/notes-data created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pvc",
+   "cmd": "oc get pvc -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME         STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nnotes-data   Pending                                      crc-csi-hostpath-provisioner   <unset>                 1s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "pvc",
+   "cmd": "oc describe pvc notes-data -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:          notes-data\nNamespace:     academy-storage\nStorageClass:  crc-csi-hostpath-provisioner\nStatus:        Pending\nVolume:        \nLabels:        <none>\nAnnotations:   <none>\nFinalizers:    [kubernetes.io/pvc-protection]\nCapacity:      \nAccess Modes:  \nVolumeMode:    Filesystem\nUsed By:       <none>\nEvents:\n  Type    Reason                Age   From                         Message\n  ----    ------                ----  ----                         -------\n  Normal  WaitForFirstConsumer  2s    persistentvolume-controller  waiting for first consumer to be created before binding\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "consumer",
+   "cmd": "oc apply -f - -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/notes created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "consumer",
+   "cmd": "oc rollout status deploy/notes -n academy-storage --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"notes\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"notes\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "consumer",
+   "cmd": "oc get pvc,pods -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\npersistentvolumeclaim/notes-data   Bound    pvc-1bafe7ee-be1e-495c-abe7-4757c8fdd3c7   54Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 10s\n\nNAME                         READY   STATUS    RESTARTS   AGE\npod/notes-649d4cf574-w5l4x   1/1     Running   0          7s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "write",
+   "cmd": "oc exec deploy/notes -n academy-storage -- sh -c 'echo \"persisted by $HOSTNAME\" > /data/note.txt'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "write",
+   "cmd": "oc delete pod -l app=notes -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod \"notes-649d4cf574-w5l4x\" deleted from academy-storage namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "write",
+   "cmd": "oc rollout status deploy/notes -n academy-storage --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment \"notes\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc exec deploy/notes -n academy-storage -- cat /data/note.txt",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persisted by notes-649d4cf574-w5l4x\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "read",
+   "cmd": "oc get pods -l app=notes -n academy-storage",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                     READY   STATUS    RESTARTS   AGE\nnotes-649d4cf574-bwzbh   1/1     Running   0          6s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "pvc-exists",
+    "title": "PVC notes-data exists",
+    "expect": "exists",
+    "status": "fail",
+    "observed": "Error from server (NotFound): persistentvolumeclaims \"notes-data\" not found"
+   },
+   {
+    "id": "pvc-bound",
+    "title": "PVC notes-data is Bound",
+    "expect": "Bound",
+    "status": "fail",
+    "observed": "Error from server (NotFound): persistentvolumeclaims \"notes-data\" not found"
+   },
+   {
+    "id": "pvc-class",
+    "title": "It used the default class",
+    "expect": "crc-csi-hostpath-provisioner",
+    "status": "fail",
+    "observed": "Error from server (NotFound): persistentvolumeclaims \"notes-data\" not found"
+   },
+   {
+    "id": "notes-ready",
+    "title": "notes is running",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"notes\" not found"
+   },
+   {
+    "id": "data",
+    "title": "The data survived: the current pod reads a file written by another pod",
+    "expect": "persisted by <old pod>, read by <new pod>",
+    "status": "error",
+    "observed": "no running pod for app=notes to test from"
+   }
+  ],
+  "at": 1792516697.1925862
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "pvc-exists",
+    "title": "PVC notes-data exists",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "pvc/notes-data exists"
+   },
+   {
+    "id": "pvc-bound",
+    "title": "PVC notes-data is Bound",
+    "expect": "Bound",
+    "status": "pass",
+    "observed": "status.phase = 'Bound'"
+   },
+   {
+    "id": "pvc-class",
+    "title": "It used the default class",
+    "expect": "crc-csi-hostpath-provisioner",
+    "status": "pass",
+    "observed": "spec.storageClassName = 'crc-csi-hostpath-provisioner'"
+   },
+   {
+    "id": "notes-ready",
+    "title": "notes is running",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "data",
+    "title": "The data survived: the current pod reads a file written by another pod",
+    "expect": "persisted by <old pod>, read by <new pod>",
+    "status": "pass",
+    "observed": "persisted by notes-649d4cf574-w5l4x\nread by notes-649d4cf574-bwzbh"
+   }
+  ],
+  "at": 1792516719.8323793
+ },
+ "seconds": 148,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-storage: gone",
+   "pv/pvc-1bafe7ee-be1e-495c-abe7-4757c8fdd3c7: reclaimed"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,22 @@
+# The image build needs: Containerfile, LICENSE, requirements.txt, frontend/, backend/, content/, deploy/nginx/ and
+# three scripts. Everything else stays out of the build context. Podman and Docker both read this file.
+.git
+.github
+.venv
+data
+docs
+tests
+deploy/kubernetes
+content/drafts
+frontend/node_modules
+frontend/dist
+**/__pycache__
+.pytest_cache
+*.log
+**/*.kubeconfig
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/id_rsa*
+**/id_ed25519*

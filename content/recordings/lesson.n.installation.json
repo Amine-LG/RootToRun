@@ -1,0 +1,117 @@
+{
+ "lab": "lesson.n.installation",
+ "kind": "lesson",
+ "lab_hash": "a07fdf8edab07c8c",
+ "recorded_at": "2026-10-16T18:47:59+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-installation",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get infrastructure cluster -o jsonpath='{.status.platform}{\" \"}{.status.controlPlaneTopology}{\" \"}{.status.infrastructureTopology}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "None SingleReplica SingleReplica\n",
+   "stderr": "",
+   "combined": "None SingleReplica SingleReplica\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get configmap cluster-config-v1 -n kube-system -o jsonpath='{.data.install-config}' | grep -E '^(baseDomain|bootstrapInPlace):|^  (name|replicas|installationDisk):'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "baseDomain: testing\nbootstrapInPlace:\n  installationDisk: /dev/vda\n  name: worker\n  replicas: 0\n  name: master\n  replicas: 1\n  name: crc\n",
+   "stderr": "",
+   "combined": "baseDomain: testing\nbootstrapInPlace:\n  installationDisk: /dev/vda\n  name: worker\n  replicas: 0\n  name: master\n  replicas: 1\n  name: crc\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get configmap cluster-config-v1 -n kube-system -o jsonpath='{.data.install-config}' | sed -n '/^networking:/,/^publish:/p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networking:\n  clusterNetwork:\n  - cidr: 10.217.0.0/22\n    hostPrefix: 23\n  machineNetwork:\n  - cidr: 192.168.126.0/24\n  networkType: OVNKubernetes\n  serviceNetwork:\n  - 10.217.4.0/23\nplatform:\n  none: {}\npublish: External\n",
+   "stderr": "",
+   "combined": "networking:\n  clusterNetwork:\n  - cidr: 10.217.0.0/22\n    hostPrefix: 23\n  machineNetwork:\n  - cidr: 192.168.126.0/24\n  networkType: OVNKubernetes\n  serviceNetwork:\n  - 10.217.4.0/23\nplatform:\n  none: {}\npublish: External\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get network.config cluster -o jsonpath='{.status.clusterNetwork}{\"\\n\"}{.status.serviceNetwork}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[{\"cidr\":\"10.217.0.0/22\",\"hostPrefix\":23}]\n[\"10.217.4.0/23\"]\n",
+   "stderr": "",
+   "combined": "[{\"cidr\":\"10.217.0.0/22\",\"hostPrefix\":23}]\n[\"10.217.4.0/23\"]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusterversion",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      VERSION   AVAILABLE   PROGRESSING   SINCE   STATUS\nversion   4.21.8    True        False         200d    Cluster version is 4.21.8\n",
+   "stderr": "",
+   "combined": "NAME      VERSION   AVAILABLE   PROGRESSING   SINCE   STATUS\nversion   4.21.8    True        False         200d    Cluster version is 4.21.8\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get clusteroperators",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE\nauthentication                             4.21.8    True        False         False      3h13m   \nconfig-operator                            4.21.8    True        False         False      200d    \nconsole                                    4.21.8    True        False         False      7h3m    \ncontrol-plane-machine-set                  4.21.8    True        False         False      200d    \ndns                                        4.21.8    True        False         False      7h6m    \netcd                                       4.21.8    True        False         False      16h     \nimage-registry                             4.21.8    True        False         False      4d5h    \ningress                                    4.21.8    True        False         False      200d    \nkube-apiserver                             4.21.8    True        False         False      200d    \nkube-controller-manager                    4.21.8    True        False         False      200d    \nkube-scheduler                             4.21.8    True        False         False      200d    \nkube-storage-version-migrator              4.21.8    True        False         False      4d5h    \nmachine-api                                4.21.8    True        False         False      200d    \nmachine-approver                           4.21.8    True        False         False      200d    \nmachine-config                             4.21.8    True        False         False      200d    \nmarketplace                                4.21.8    True        False         False      200d    \nnetwork                                    4.21.8    True        False         False      200d    \nopenshift-apiserver                        4.21.8    True        False         False      3h3m    \nopenshift-controller-manager               4.21.8    True        False         False      2d21h   \nopenshift-samples                          4.21.8    True        False         False      200d    \noperator-lifecycle-manager                 4.21.8    True        False         False      200d    \noperator-lifecycle-manager-catalog         4.21.8    True        False         False      200d    \noperator-lifecycle-manager-packageserver   4.21.8    True        False         False      7h5m    \nservice-ca                                 4.21.8    True        False         False      200d    \n",
+   "stderr": "",
+   "combined": "NAME                                       VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE\nauthentication                             4.21.8    True        False         False      3h13m   \nconfig-operator                            4.21.8    True        False         False      200d    \nconsole                                    4.21.8    True        False         False      7h3m    \ncontrol-plane-machine-set                  4.21.8    True        False         False      200d    \ndns                                        4.21.8    True        False         False      7h6m    \netcd                                       4.21.8    True        False         False      16h     \nimage-registry                             4.21.8    True        False         False      4d5h    \ningress                                    4.21.8    True        False         False      200d    \nkube-apiserver                             4.21.8    True        False         False      200d    \nkube-controller-manager                    4.21.8    True        False         False      200d    \nkube-scheduler                             4.21.8    True        False         False      200d    \nkube-storage-version-migrator              4.21.8    True        False         False      4d5h    \nmachine-api                                4.21.8    True        False         False      200d    \nmachine-approver                           4.21.8    True        False         False      200d    \nmachine-config                             4.21.8    True        False         False      200d    \nmarketplace                                4.21.8    True        False         False      200d    \nnetwork                                    4.21.8    True        False         False      200d    \nopenshift-apiserver                        4.21.8    True        False         False      3h3m    \nopenshift-controller-manager               4.21.8    True        False         False      2d21h   \nopenshift-samples                          4.21.8    True        False         False      200d    \noperator-lifecycle-manager                 4.21.8    True        False         False      200d    \noperator-lifecycle-manager-catalog         4.21.8    True        False         False      200d    \noperator-lifecycle-manager-packageserver   4.21.8    True        False         False      7h5m    \nservice-ca                                 4.21.8    True        False         False      200d    \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get nodes",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "ok": true
+  }
+ ],
+ "seconds": 11,
+ "ok": true,
+ "problems": []
+}

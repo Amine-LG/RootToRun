@@ -1,0 +1,171 @@
+id: ch.slow-start
+kind: challenge
+title: "Keep a slow starter alive"
+subtitle: "Startup, readiness and liveness probes, and a rollout that never drops capacity"
+summary: "A web shop that takes about 25 seconds to start has been restarting ever since it was given a liveness probe. Make it start, serve only when ready, recover from hangs, and update without losing capacity."
+module: r1-app-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Any cluster with Routes and the UBI images works."
+concepts: [k8s.probes, k8s.deployment, net.endpointslices, net.routes]
+prerequisites: [b.health-probes, g.rollouts-change]
+namespace: academy-ch-slow
+objective: |
+  Choose the probe for each job: a startup probe (or a long enough delay) to protect a slow start, a readiness probe
+  to keep traffic away from pods that cannot serve, a liveness probe to restart a hung process, and a rolling-update
+  strategy that keeps every replica available during an update.
+background: |
+  **Where everything comes from.** The project starts with the `shop` objects (a Deployment on Red Hat's UBI 9 Apache
+  httpd image whose command waits 25 seconds before starting httpd, its page in a ConfigMap, a Service and a Route).
+  The app creates the project `academy-ch-slow` as your learner identity when you start the challenge and applies the
+  starting objects; everything else is yours to create. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press Grade, as the app's
+  own identities; Clean up deletes the project.
+symptom: |
+  The `shop` Deployment was given a liveness probe after a night when httpd hung and nobody noticed. Since then its
+  containers restart again and again and the shop never serves a page, even though `oc get pods` can show the pods
+  Ready between restarts. The shop's start-up script warms a cache for about 25 seconds before httpd listens on port
+  8080. The Route `shop` answers 503.
+requirements:
+  - "The Deployment `shop` runs **2 Ready replicas** whose containers have **not restarted**. Ready has to come from a readiness probe: a container without one counts as Ready as soon as it runs, so the grader counts only pods that have one (the starting pods never count)."
+  - "Every `shop` container has a **readiness probe** that checks port **8080** over HTTP."
+  - "Every `shop` container **keeps a liveness probe** that checks httpd itself on 8080, so that a hung httpd can still be restarted. The grader accepts HTTP or TCP; a TCP check only proves the port accepts connections, so only an HTTP check notices a hang that leaves the socket open."
+  - "Updates never take a replica out of service before its replacement is Ready (`maxUnavailable: 0`)."
+  - "The Route `shop` answers `shop ok`."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: shop-content}
+    data: {index.html: "shop ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: shop, labels: {app: shop}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: shop}}
+      template:
+        metadata: {labels: {app: shop}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            command: ["/bin/sh", "-c", "echo 'warming the cache (about 25 seconds)'; sleep 25; echo 'starting httpd'; exec /usr/bin/run-httpd"]
+            ports: [{containerPort: 8080}]
+            livenessProbe: {httpGet: {path: /, port: 8080}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 2}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: shop-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: shop}
+    spec:
+      selector: {app: shop}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: shop}
+    spec:
+      to: {kind: Service, name: shop}
+      port: {targetPort: 8080}
+hints:
+  - "Look at a pod's events and its last state. Who stops the container: the kernel, the application, or the kubelet? What does the event say?"
+  - "Count the seconds: when does the liveness probe start, how many failures does it allow, and when does httpd start listening?"
+  - "A startup probe holds back the liveness and readiness probes until it succeeds once. Give it enough attempts to cover the slowest start."
+  - "Readiness and liveness answer different questions: should this pod get traffic now, and should this container be restarted?"
+fix:
+  - {cmd: "oc set probe deploy/shop --startup --get-url=http://:8080/ --period-seconds=5 --failure-threshold=12 -n academy-ch-slow", meaning: "up to 60 seconds to start before the liveness probe counts"}
+  - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow", meaning: "traffic only to pods that answer"}
+  - cmd: "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'"
+    meaning: "add a new pod before removing an old one"
+  - {cmd: "oc rollout status deploy/shop -n academy-ch-slow --timeout=240s", meaning: "two Ready pods, no restarts", timeout: 260}
+checks:
+  - {id: deploy, title: "shop wants 2 replicas, rolled out and not paused", type: deployment_ready, name: shop, replicas: 2, expect_text: "spec.replicas 2, ready 2/2"}
+  - {id: ready, title: "shop: 2 pods Ready by their readiness probe, no restarts", type: count, kind: pod, selector: app=shop, where: [{path: "metadata.ownerReferences[0].kind", op: eq, value: ReplicaSet}, {path: "metadata.ownerReferences[0].name", op: matches, value: "^shop-[a-z0-9]+$"}, {path: metadata.deletionTimestamp, op: absent}, {path: "spec.containers[0].readinessProbe", op: exists}, {path: "status.conditions[?type=Ready].status", op: eq, value: "True"}, {path: "status.containerStatuses[0].restartCount", op: eq, value: 0}], op: gte, value: 2, expect_text: "2 matching pod"}
+  - {id: readiness, title: "every shop container has an HTTP readiness probe on 8080", type: container, name: shop, all: true, probe: [httpGet], port: 8080, expect_text: "httpd: ok"}
+  - {id: liveness, title: "every shop container keeps a liveness probe that checks httpd on 8080", type: container, name: shop, all: true, liveness: [httpGet, tcpSocket], liveness_port: 8080, expect_text: "httpd: ok"}
+  - {id: no-unavailable, title: "updates keep every replica available (maxUnavailable 0)", type: field, kind: deployment, name: shop, path: spec.strategy.rollingUpdate.maxUnavailable, op: matches, value: "^0%?$", expect_text: "maxUnavailable = 0"}
+  - {id: route, title: "Route shop answers", type: route_http, route: shop, path: /, expect_status: 200, contains: "shop ok", expect_text: "HTTP 200 shop ok"}
+trials:
+  - id: liveness-removed
+    title: "The liveness probe removed altogether"
+    kind: wrong
+    expect: partial
+    expect_checks: {ready: fail, liveness: fail, readiness: fail, route: pass}
+    commands:
+      - {cmd: "oc set probe deploy/shop --liveness --remove -n academy-ch-slow"}
+  - id: readiness-only
+    title: "Only a readiness probe added, nothing else changed"
+    kind: partial
+    expect: partial
+    expect_checks: {ready: fail, readiness: pass, liveness: pass}
+    commands:
+      - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow"}
+  - id: long-delay
+    title: "A correct alternative to the reference solution, with different probe settings"
+    kind: alternative
+    expect: verified
+    commands:
+      - {cmd: "oc set probe deploy/shop --liveness --get-url=http://:8080/ --initial-delay-seconds=45 --period-seconds=10 --failure-threshold=3 -n academy-ch-slow"}
+      - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow"}
+      - cmd: "oc patch deploy/shop -n academy-ch-slow --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/strategy/rollingUpdate/maxUnavailable\",\"value\":0}]'"
+  - id: g4-true-liveness
+    title: "The liveness probe replaced by a command that always succeeds"
+    kind: wrong
+    expect: partial
+    expect_checks: {liveness: fail, readiness: pass, ready: pass, deploy: pass}
+    commands:
+      - {cmd: "oc set probe deploy/shop --liveness --remove -n academy-ch-slow"}
+      - cmd: "oc patch deploy/shop -n academy-ch-slow --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/livenessProbe\",\"value\":{\"exec\":{\"command\":[\"/bin/true\"]}}}]'"
+      - {cmd: "oc set probe deploy/shop --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-slow"}
+      - cmd: "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'"
+  - id: tcp-readiness
+    title: "Restarts stopped, but readiness only checks that a TCP port is open"
+    kind: partial
+    expect: partial
+    expect_checks: {ready: pass, readiness: fail, liveness: pass, no-unavailable: pass, deploy: pass}
+    commands:
+      - {cmd: "oc set probe deploy/shop --startup --get-url=http://:8080/ --period-seconds=5 --failure-threshold=12 -n academy-ch-slow"}
+      - {cmd: "oc set probe deploy/shop --readiness --open-tcp=8080 -n academy-ch-slow"}
+      - cmd: "oc patch deploy/shop -n academy-ch-slow --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'"
+root_cause: |
+  The liveness probe starts 5 seconds after the container and allows 2 failures, 5 seconds apart. On paper the
+  kubelet therefore restarts the container somewhere around 10 to 15 seconds in (probe phase and the termination
+  grace period decide the exact moment), well before httpd would listen at about 25 seconds. Expect events such as
+  `Liveness probe failed … connection refused`, then `Container httpd failed liveness probe, will be restarted`;
+  read the container's `lastState` to see how it ended. Every restart starts the warm-up again and the back-off
+  between restarts grows, so httpd never finishes starting.
+  There is no readiness probe, and a container without one counts as Ready as soon as it runs. The pods can
+  therefore show Ready during the warm-up, and the Service lists them as ready endpoints, but nothing answers on 8080:
+  the router answers 503. Adding a readiness probe alone would keep traffic away from them, but the liveness probe
+  would still kill each container before httpd starts.
+  Removing the liveness probe "fixes" the start but brings back the original problem (a hung httpd keeps its
+  place and its traffic). The right repair separates the questions:
+  - a **startup probe** (or a delay longer than the slowest start) protects the start;
+  - a **readiness probe** keeps traffic away until the page is served, during start-up and during rollouts;
+  - the **liveness probe** stays, for hangs after start-up.
+alternatives: |
+  A large `initialDelaySeconds` on the liveness probe also works, at a cost: every restart after a real hang waits
+  the full delay, and a start that becomes slower than the delay brings the loop back. A startup probe adapts: it
+  succeeds as soon as the application is up. The grader asks for an HTTP readiness probe because an open TCP port
+  only proves that something listens, not that it serves the page.
+sre: |
+  When you add or change probes, write down the timing budget: the slowest observed start, the probe period, the
+  failure threshold, and the resulting time before a restart. Test it by starting a pod and reading the events,
+  not by reading the YAML. For rollouts, `maxUnavailable: 0` with `maxSurge: 1` needs room for one extra pod; check
+  quotas and node capacity before you rely on it.
+questions:
+  - q: "Why did httpd never finish starting, even though the pods sometimes showed Ready?"
+    a: "The liveness probe began at 5 seconds and failed twice before httpd listened, so the kubelet restarted the container each time before the 25-second warm-up could finish. With no readiness probe, a running container counts as Ready, so Ready said nothing about whether httpd could serve."
+  - q: "With a startup probe in place, when do the liveness and readiness probes start running?"
+    a: "Only after the startup probe has succeeded once; until then they are disabled."
+  - q: "What does `maxUnavailable: 0` require from the cluster during an update?"
+    a: "Room for extra pods (maxSurge must be at least 1): a new pod has to become Ready before an old one is removed."
+references:
+  - {title: "Kubernetes: Liveness, readiness and startup probes", url: "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/"}
+  - {title: "Kubernetes: Configure liveness, readiness and startup probes", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"}
+  - {title: "Kubernetes: Deployments, rolling update strategy", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment"}

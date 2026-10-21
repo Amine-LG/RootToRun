@@ -1,0 +1,168 @@
+name: candidate
+# After a merge to main, once ci has passed for that commit: build the production image once (job "build"), run the
+# browser tests against that exact image in three parallel parts (job "test"; both read-only), then push that image to
+# a private candidate package and record its digest (job "publish", which runs no code from the repository).
+#
+# Nothing is deployed. This repository holds no deployment credentials: deployment is a separate step that only the
+# owner performs (verify, preview and promote in the private deployment repository, then a manual Argo CD sync). The
+# only write permission is the built-in token's packages:write, in the publish job. Inert until the repository
+# variable CANDIDATE_ENABLED is "true".
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions: {}
+concurrency:
+  group: candidate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # only a successful ci run of a push to main in this repository (never a pull request, never a fork)
+    if: >-
+      vars.CANDIDATE_ENABLED == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      image-id: ${{ steps.build.outputs.image-id }}
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha }}
+      CANDIDATE_IMAGE: ${{ vars.CANDIDATE_IMAGE }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      PUBLIC_REPO_URL: ${{ vars.PUBLIC_REPO_URL }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {ref: "${{ github.event.workflow_run.head_sha }}", persist-credentials: false, fetch-depth: 0}
+      - name: Check the commit and the settings
+        run: |
+          git merge-base --is-ancestor "$COMMIT" origin/main || { echo "$COMMIT is not on main" >&2; exit 1; }
+          owner=$(tr '[:upper:]' '[:lower:]' <<< "$OWNER")
+          [[ "$CANDIDATE_IMAGE" =~ ^ghcr\.io/${owner}/[a-z0-9][a-z0-9._-]*$ ]] || { echo "CANDIDATE_IMAGE must be ghcr.io/$owner/<name>" >&2; exit 1; }
+          [[ "$SITE_URL" =~ ^https://[a-z0-9.-]+$ ]] || { echo "SITE_URL must be https://<host>" >&2; exit 1; }
+          [[ -z "$PUBLIC_REPO_URL" || "$PUBLIC_REPO_URL" =~ ^https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "PUBLIC_REPO_URL must be empty or https://github.com/<owner>/<repo>" >&2; exit 1; }
+          python3 -c 'import json,sys; sys.exit("the product name is provisional" if json.load(open("frontend/product.json")).get("provisional") is True else 0)'
+      - name: Build the image once, from scratch (no build cache)
+        id: build
+        run: |
+          docker build --pull --no-cache -t candidate:test -f Containerfile \
+            --build-arg BUILD_COMMIT="$COMMIT" --build-arg SITE_URL="$SITE_URL" --build-arg REPO_URL="$PUBLIC_REPO_URL" \
+            --label org.opencontainers.image.revision="$COMMIT" \
+            --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" .
+          echo "image-id=$(docker image inspect candidate:test --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+      - name: Smoke test it and keep its site version
+        run: |
+          scripts/smoke_image.sh candidate:test 8080
+          curl -fsS http://127.0.0.1:8080/version.json > version.json
+          docker rm -f site-smoke > /dev/null
+          docker save candidate:test -o image.tar
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: {name: tested-image, path: "image.tar\nversion.json", retention-days: 1, if-no-files-found: error}
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [1, 2, 3]
+    name: test (${{ matrix.shard }}/3)
+    env:
+      TESTED_ID: ${{ needs.build.outputs.image-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {ref: "${{ github.event.workflow_run.head_sha }}", persist-credentials: false}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: {node-version: 22}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
+      # the browser tests' practice server serves the frontend build
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: {name: tested-image, path: "${{ runner.temp }}/tested"}
+      - name: Load the built image and start it as deployed
+        env:
+          TESTED: ${{ runner.temp }}/tested
+        run: |
+          loaded=$(docker load -q -i "$TESTED/image.tar" | sed -n 's/^Loaded image: //p')
+          [ "$(docker image inspect "$loaded" --format '{{.Id}}')" = "$TESTED_ID" ] || { echo "not the built image" >&2; exit 1; }
+          scripts/smoke_image.sh "$loaded" 8080
+      # no browser cache here: the published image is tested with a freshly installed browser
+      - run: .venv/bin/python -m playwright install --with-deps firefox
+      - name: Browser tests against that image (part ${{ matrix.shard }} of 3)
+        env:
+          E2E_BROWSER: firefox
+          ACADEMY_E2E_SITE: http://127.0.0.1:8080/
+          SHARD: ${{ matrix.shard }}/3
+        run: |
+          workers=$(( $(nproc) < 4 ? $(nproc) : 4 ))
+          .venv/bin/python -m pytest -q tests/e2e --shard "$SHARD" -n "$workers"
+
+  publish:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The only job with a write permission. It checks out nothing and runs no file of the repository: it loads the
+    # image the build job built and the test job tested, checks it is that image, pushes it and records the digest.
+    permissions:
+      packages: write
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha }}
+      CANDIDATE_IMAGE: ${{ vars.CANDIDATE_IMAGE }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      TESTED_ID: ${{ needs.build.outputs.image-id }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: {name: tested-image}
+      - name: Push the tested image and read its digest from the registry
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$TESTED_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no tested image id" >&2; exit 1; }
+          loaded=$(docker load -q -i image.tar | sed -n 's/^Loaded image: //p')
+          [ "$(docker image inspect "$loaded" --format '{{.Id}}')" = "$TESTED_ID" ] || { echo "not the tested image" >&2; exit 1; }
+          tag="$CANDIDATE_IMAGE:sha-$COMMIT"
+          docker tag "$loaded" "$tag"
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          docker push -q "$tag"
+          digest=$(docker image inspect "$tag" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep "^$CANDIDATE_IMAGE@" | head -1 | cut -d@ -f2)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest from the registry" >&2; exit 1; }
+          # what the registry serves under that digest is the image that was tested
+          docker image rm "$tag" "$loaded" > /dev/null
+          docker pull -q "$CANDIDATE_IMAGE@$digest"
+          [ "$(docker image inspect "$CANDIDATE_IMAGE@$digest" --format '{{.Id}}')" = "$TESTED_ID" ] || { echo "the registry returned a different image" >&2; exit 1; }
+          docker logout ghcr.io
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Record the candidate
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+        run: |
+          python3 - <<'PY' > candidate.json
+          import json, os
+          print(json.dumps({"commit": os.environ["COMMIT"], "image": os.environ["CANDIDATE_IMAGE"], "digest": os.environ["DIGEST"],
+                            "site_url": os.environ["SITE_URL"], "repository": os.environ["GITHUB_REPOSITORY"],
+                            "pushed_by": os.environ["ACTOR"], "site": json.load(open("version.json")),
+                            "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"]}, indent=1))
+          PY
+          {
+            echo "### Candidate (not deployed)"
+            echo "- commit: \`$COMMIT\` (pushed to main by $ACTOR)"
+            echo "- image: \`$CANDIDATE_IMAGE@$DIGEST\`"
+            echo "- version.json: \`$(cat version.json)\`"
+            echo "Deployment is a separate, manual step in the private deployment repository."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: {name: candidate, path: candidate.json, retention-days: 30, if-no-files-found: error}

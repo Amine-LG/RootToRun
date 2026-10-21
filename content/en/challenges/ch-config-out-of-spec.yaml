@@ -1,0 +1,141 @@
+id: ch.config-out-of-spec
+kind: challenge
+title: "Take configuration out of the spec"
+subtitle: "A ConfigMap that does not take effect, and a password written into a Deployment"
+summary: "The team changed the greeting in its ConfigMap and nothing happened; a database password sits in plain text in the Deployment. Move both to where they belong and prove the running pods use them."
+module: r1-app-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Any cluster with the UBI images works."
+concepts: [sec.secrets, k8s.deployment, k8s.pod-lifecycle]
+prerequisites: [o1.config-secrets, o1.troubleshooting]
+namespace: academy-ch-config
+objective: |
+  Predict which source wins when the same variable is defined twice, apply a configuration change to running pods,
+  and deliver a credential from a Secret as a file instead of a literal in the workload's spec.
+background: |
+  **Where everything comes from.** The project starts with the ConfigMap `app-settings`, the Secret `db-credentials`
+  holding a made-up practice password, and the `app` Deployment (`sleep` in the UBI 9 minimal image) whose environment
+  you inspect. The app creates the project `academy-ch-config` as your learner identity when you start the challenge
+  and applies the starting objects; everything else is yours to create. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press Grade, as the app's
+  own identities; Clean up deletes the project.
+symptom: |
+  The `app` Deployment (2 replicas) reads `GREETING` and `LOG_LEVEL` from its environment, and a database password
+  from `DB_PASSWORD`. Yesterday someone changed `GREETING` to `Bonjour` in the ConfigMap `app-settings`, and the pods
+  still say `Hello`, even after a restart. A security review also found the database password written directly in
+  the Deployment, where anyone who can read the Deployment sees it. The Secret `db-credentials` (key `password`)
+  already holds the same password. The application can read the password from the file `/etc/db/password`.
+requirements:
+  - "`app-settings` says `GREETING=Bonjour`, and the container takes `GREETING` **from that ConfigMap** (not written in the Deployment)."
+  - "The **running** `app` pods see `GREETING=Bonjour`."
+  - "The password is **not written in the Deployment** any more: the container reads it from the Secret `db-credentials` as the file **`/etc/db/password`**."
+  - "`app` still runs **2 Ready replicas**."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: app-settings}
+    data: {GREETING: Bonjour, LOG_LEVEL: info}
+  - |
+    apiVersion: v1
+    kind: Secret
+    metadata: {name: db-credentials}
+    type: Opaque
+    stringData: {password: practice-only-password}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: app, labels: {app: app}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: app}}
+      template:
+        metadata: {labels: {app: app}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            envFrom:
+            - configMapRef: {name: app-settings}
+            env:
+            - {name: GREETING, value: Hello}
+            - {name: DB_PASSWORD, value: practice-only-password}
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+hints:
+  - "`oc set env deploy/app --list` shows only the explicit `env` entries, not what `envFrom` loads. Read the Deployment with `oc get deploy app -o yaml` and compare `env` with `envFrom`: what happens when a variable comes from both?"
+  - "Environment variables are fixed when a container starts. Which change to the Deployment starts new pods?"
+  - "`oc set volume` can add a Secret volume; `oc set env` removes a variable with `NAME-`."
+fix:
+  - {cmd: "oc set env deploy/app --list -n academy-ch-config", meaning: "only the explicit env entries: GREETING=Hello and the password literal. --list does not show what envFrom loads, so read envFrom from the Deployment next"}
+  - {cmd: "oc get deploy app -n academy-ch-config -o jsonpath='{.spec.template.spec.containers[0].envFrom}{\"\\n\"}'", meaning: "the envFrom entry: a configMapRef to app-settings, which loads every key of that ConfigMap, GREETING included. The explicit GREETING=Hello listed above is defined for the same name and wins, so the ConfigMap's value is shadowed"}
+  - {cmd: "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config", meaning: "remove both literals: GREETING now comes from envFrom, and the template change rolls out new pods"}
+  - {cmd: "oc set volume deploy/app --add --name=db --type=secret --secret-name=db-credentials --mount-path=/etc/db -n academy-ch-config", meaning: "the password as /etc/db/password, read-only"}
+  - {cmd: "oc rollout status deploy/app -n academy-ch-config --timeout=180s", meaning: "two new pods", timeout: 200}
+checks:
+  - {id: setting, title: "app-settings says GREETING=Bonjour", type: field, kind: configmap, name: app-settings, path: data.GREETING, op: eq, value: Bonjour, expect_text: "Bonjour"}
+  - {id: from-configmap, title: "GREETING comes from app-settings, not from the Deployment", type: container, name: app, all: true, env_source: [{var: GREETING, configmap: app-settings}], expect_text: "app: ok"}
+  - {id: running, title: "the running pods see GREETING=Bonjour", type: exec, from: app=app, command: ["printenv", "GREETING"], expect_output: "^Bonjour$", expect_text: "Bonjour"}
+  - {id: no-literal, title: "no password written in the Deployment", type: container, name: app, all: true, no_literal_env: [DB_PASSWORD, PASSWORD, DB_PASS], expect_text: "app: ok"}
+  - {id: secret-file, title: "/etc/db/password comes from Secret db-credentials", type: container, name: app, all: true, secret_mount: {name: db-credentials, path: /etc/db, file: password}, expect_text: "app: ok"}
+  - {id: file-present, title: "the running pods have /etc/db/password", type: exec, from: app=app, command: ["test", "-s", "/etc/db/password"], expect_code: 0, expect_text: "present"}
+  - {id: ready, title: "app runs 2 Ready replicas", type: deployment_ready, name: app, replicas: 2, expect_text: "2/2 ready"}
+trials:
+  - id: restart-only
+    title: "Pods restarted, nothing else changed"
+    kind: wrong
+    expect: partial
+    expect_checks: {setting: pass, from-configmap: fail, running: fail, no-literal: fail, ready: pass}
+    commands:
+      - {cmd: "oc rollout restart deploy/app -n academy-ch-config"}
+      - {cmd: "oc rollout status deploy/app -n academy-ch-config --timeout=180s", timeout: 200}
+  - id: secret-as-env
+    title: "Greeting fixed, password moved to an environment variable from the Secret"
+    kind: partial
+    expect: partial
+    expect_checks: {from-configmap: pass, running: pass, no-literal: pass, secret-file: fail}
+    commands:
+      - {cmd: "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config"}
+      - {cmd: "oc set env deploy/app --from=secret/db-credentials --prefix=DB_ -n academy-ch-config"}
+      - {cmd: "oc rollout status deploy/app -n academy-ch-config --timeout=180s", timeout: 200}
+  - id: single-key
+    title: "A correct alternative: the greeting taken from the ConfigMap in a different way"
+    kind: alternative
+    expect: verified
+    commands:
+      - {cmd: "oc set env deploy/app GREETING- DB_PASSWORD- -n academy-ch-config"}
+      - cmd: "oc patch deploy/app -n academy-ch-config --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/env\",\"value\":[{\"name\":\"GREETING\",\"valueFrom\":{\"configMapKeyRef\":{\"name\":\"app-settings\",\"key\":\"GREETING\"}}}]}]'"
+      - {cmd: "oc set volume deploy/app --add --name=db --type=secret --secret-name=db-credentials --mount-path=/etc/db -n academy-ch-config"}
+      - {cmd: "oc rollout status deploy/app -n academy-ch-config --timeout=180s", timeout: 200}
+root_cause: |
+  Two rules explain the greeting:
+  1. **An explicit `env` entry wins over `envFrom`.** The Deployment sets `GREETING=Hello` itself, so the value from
+     `app-settings` is shadowed whatever the ConfigMap says. A restart starts new pods with exactly the same result.
+  2. **Environment variables are copied when the container starts.** Once the literal is removed, the template
+     changes, the Deployment rolls out new pods, and those read the current ConfigMap.
+  The password problem is about who can see it: anything written in a Deployment is readable by everyone with read
+  access to Deployments (the `view` role included), and it ends up in Git and in backups of manifests. A Secret is
+  protected by its own RBAC (`view` cannot read Secrets). Delivered as a file, it can also be refreshed without a
+  restart (except with subPath), and it does not leak into the environment of child processes or `oc set env --list`.
+alternatives: |
+  `GREETING` may come from `envFrom` (all keys) or from a single-key `valueFrom` reference: both are graded as
+  taken from the ConfigMap. A projected volume that includes the Secret also passes, as long as the file
+  `/etc/db/password` comes from `db-credentials`. Exposing the password as an environment variable from the Secret
+  removes the literal but not the exposure in the process environment; the requirement asks for the file.
+sre: |
+  Record the change as: the variable that was shadowed and why (`oc set env --list` output), the rollout that made
+  it effective, and the credential moved out of the spec. Then rotate the password: it was readable by anyone with
+  view access, and copies of the old Deployment exist in history and backups.
+questions:
+  - q: "A variable is defined by `envFrom` from a ConfigMap and also as `env: [{name: X, value: ...}]`. Which value does the container see?"
+    a: "The explicit env entry: env takes precedence over envFrom for the same name."
+  - q: "You change a ConfigMap used through envFrom. What must happen before the application sees the new value?"
+    a: "New containers must start: a template change rolls out new pods (or oc rollout restart). Running containers keep the values they started with."
+  - q: "Why is a Secret mounted as a file safer than the same value written in the Deployment?"
+    a: "Reading Deployments (view) does not grant reading Secrets, the value stays out of manifests in Git, and a mounted file can be refreshed without restarting the pod."
+references:
+  - {title: "Kubernetes: Define environment variables for a container", url: "https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/"}
+  - {title: "Kubernetes: ConfigMaps", url: "https://kubernetes.io/docs/concepts/configuration/configmap/"}
+  - {title: "Kubernetes: Distribute credentials securely using Secrets", url: "https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/"}

@@ -1,0 +1,166 @@
+{
+ "lab": "inc.pvc-pending",
+ "kind": "incident",
+ "lab_hash": "ff134f8afd53caed",
+ "recorded_at": "2026-10-14T17:25:21+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods,pvc -n academy-inc-pvc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         READY   STATUS    RESTARTS   AGE\npod/ledger-6d54bcf74-bfmmp   0/1     Pending   0          22s\n\nNAME                                STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE\npersistentvolumeclaim/ledger-data   Pending                                      fast-ssd       <unset>                 22s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-pvc --field-selector involvedObject.kind=PersistentVolumeClaim",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON               OBJECT                              MESSAGE\n12s         Warning   ProvisioningFailed   persistentvolumeclaim/ledger-data   storageclass.storage.k8s.io \"fast-ssd\" not found\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get events -n academy-inc-pvc --field-selector reason=FailedScheduling",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT                       MESSAGE\n24s         Warning   FailedScheduling   pod/ledger-6d54bcf74-bfmmp   0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get storageclass",
+   "as": "reader",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE\ncrc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer   false                  197d\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc set volume deploy/ledger -n academy-inc-pvc --add --overwrite --name=data --type=pvc --claim-name=ledger-data-v2 --claim-size=1Gi --claim-mode=rwo --mount-path=/data",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/ledger volume updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc delete pvc ledger-data -n academy-inc-pvc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persistentvolumeclaim \"ledger-data\" deleted from academy-inc-pvc namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/ledger -n academy-inc-pvc --timeout=180s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"ledger\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"ledger\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get pvc -n academy-inc-pvc",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nledger-data-v2   Bound    pvc-29a4371c-7e1f-43a4-b4eb-7f33b2b1ca9b   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 7s\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "ledger-ready",
+    "title": "ledger is available",
+    "expect": "1/1",
+    "status": "fail",
+    "observed": "spec.replicas 1, ready 0/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "bound",
+    "title": "ledger-data-v2 is Bound",
+    "expect": "Bound",
+    "status": "fail",
+    "observed": "Error from server (NotFound): persistentvolumeclaims \"ledger-data-v2\" not found"
+   },
+   {
+    "id": "old-gone",
+    "title": "The unbindable claim was removed",
+    "expect": "absent",
+    "status": "fail",
+    "observed": "pvc/ledger-data still exists"
+   }
+  ],
+  "at": 1791998745.4216774
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ledger-ready",
+    "title": "ledger is available",
+    "expect": "1/1",
+    "status": "pass",
+    "observed": "spec.replicas 1, ready 1/1, updated 1, total 1, observedGeneration current: True"
+   },
+   {
+    "id": "bound",
+    "title": "ledger-data-v2 is Bound",
+    "expect": "Bound",
+    "status": "pass",
+    "observed": "status.phase = 'Bound'"
+   },
+   {
+    "id": "old-gone",
+    "title": "The unbindable claim was removed",
+    "expect": "absent",
+    "status": "pass",
+    "observed": "not found"
+   }
+  ],
+  "at": 1791998759.2837987
+ },
+ "seconds": 38,
+ "cleanup": {
+  "state": "volumes-await-admin",
+  "remaining": 1,
+  "detail": [
+   "Project/academy-inc-pvc: gone",
+   "pv/pvc-29a4371c-7e1f-43a4-b4eb-7f33b2b1ca9b: released-needs-admin"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

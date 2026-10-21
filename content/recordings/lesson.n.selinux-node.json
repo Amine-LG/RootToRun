@@ -1,0 +1,287 @@
+{
+ "lab": "lesson.n.selinux-node",
+ "kind": "lesson",
+ "lab_hash": "f1cec176605b8e37",
+ "recorded_at": "2026-10-16T16:35:35+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-selinux-node",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f box.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/box created\n",
+   "stderr": "",
+   "combined": "deployment.apps/box created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/box --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"box\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"box\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"box\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"box\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/box -- id",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1001540000(1001540000) gid=0(root) groups=0(root),1001540000\n",
+   "stderr": "",
+   "combined": "uid=1001540000(1001540000) gid=0(root) groups=0(root),1001540000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project academy-lesson-n-selinux-node -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "s0:c39,c29\n",
+   "stderr": "",
+   "combined": "s0:c39,c29\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=box -o jsonpath='{.items[0].spec.securityContext.seLinuxOptions}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"level\":\"s0:c39,c29\"}\n",
+   "stderr": "",
+   "combined": "{\"level\":\"s0:c39,c29\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/box -- cat /proc/self/attr/current",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "system_u:system_r:container_t:s0:c29,c39\u0000",
+   "stderr": "",
+   "combined": "system_u:system_r:container_t:s0:c29,c39\u0000",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/box -- sh -c 'echo saved > /data/report.txt && ls -Z /data'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "system_u:object_r:container_file_t:s0:c29,c39 report.txt\n",
+   "stderr": "",
+   "combined": "system_u:object_r:container_file_t:s0:c29,c39 report.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/box -- grep -E '^(CapEff|CapBnd|Seccomp)' /proc/1/status",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nSeccomp:\t2\nSeccomp_filters:\t1\n",
+   "stderr": "",
+   "combined": "CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nSeccomp:\t2\nSeccomp_filters:\t1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f node-debug-ns.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/academy-x-node-debug created\n",
+   "stderr": "",
+   "combined": "namespace/academy-x-node-debug created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host getenforce",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Enforcing\n",
+   "stderr": "Starting pod/crc-debug-sfg7t ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-sfg7t ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nEnforcing\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get namespace academy-lesson-n-selinux-node academy-x-node-debug -o custom-columns='NAME:.metadata.name,MCS:.metadata.annotations.openshift\\.io/sa\\.scc\\.mcs'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                            MCS\nacademy-lesson-n-selinux-node   s0:c39,c29\nacademy-x-node-debug            s0:c39,c34\n",
+   "stderr": "",
+   "combined": "NAME                            MCS\nacademy-lesson-n-selinux-node   s0:c39,c29\nacademy-x-node-debug            s0:c39,c34\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ps -eZ | grep box-app'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "system_u:system_r:container_t:s0:c29,c39 245701 ? 00:00:00 box-app\n",
+   "stderr": "Starting pod/crc-debug-699t4 ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-699t4 ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nsystem_u:system_r:container_t:s0:c29,c39 245701 ? 00:00:00 box-app\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'ls -Z /var/lib/kubelet/pods/*/volumes/kubernetes.io~empty-dir/box-data'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "system_u:object_r:container_file_t:s0:c29,c39 report.txt\n",
+   "stderr": "Starting pod/crc-debug-ct7wf ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-ct7wf ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nsystem_u:object_r:container_file_t:s0:c29,c39 report.txt\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host id -Z",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "system_u:system_r:spc_t:s0\n",
+   "stderr": "Starting pod/crc-debug-sdf4h ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-sdf4h ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nsystem_u:system_r:spc_t:s0\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-node-debug --image-stream=openshift/cli:latest -- chroot /host ausearch -m AVC,USER_AVC -ts recent",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "any",
+   "run": null,
+   "code": 1,
+   "stdout": "<no matches>\n",
+   "stderr": "Starting pod/crc-debug-gd46p ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\nerror: non-zero exit code from debug container\n",
+   "combined": "Starting pod/crc-debug-gd46p ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n<no matches>\n\nRemoving debug pod ...\nerror: non-zero exit code from debug container\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n academy-x-node-debug",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-x-node-debug namespace.\n",
+   "combined": "No resources found in academy-x-node-debug namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete namespace academy-x-node-debug",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace \"academy-x-node-debug\" deleted\n",
+   "stderr": "",
+   "combined": "namespace \"academy-x-node-debug\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 35,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NODE-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete namespace academy-x-node-debug --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-n-selinux-node --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "found=$(oc get namespace academy-x-node-debug --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get namespace academy-x-node-debug --ignore-not-found -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/desiredConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable} {.spec.taints}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get machineconfigs -o name",
+    "same": true
+   }
+  ]
+ }
+}

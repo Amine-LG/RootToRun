@@ -1,0 +1,2522 @@
+# Linux path, module lx1-shell: the lessons after the first one, written as teaching flows.
+- id: lx.shell-basics
+  title: "How a command is built"
+  subtitle: "Commands, options and arguments, and finding help without leaving the terminal"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 15
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.shell]
+  prerequisites: [lx.first-steps]
+  objective: |
+    Say which word of a command is the command, which are options and which are arguments; combine options;
+    find out what a command can do with --help and man; and get out of a command that is waiting for you.
+  flow:
+    - kind: ask
+      id: recall-paths
+      recalls: lx.first-steps
+      prompt: "You used `ls`, `ls -F` and `ls -l` on the same directory. What did adding `-l` change?"
+      choices:
+        - text: "How the list is shown"
+          why: "Same directory, same entries: `-l` only asked for one detailed line per entry. That is what options are for, and this lesson starts there."
+        - text: "Which directory is listed"
+          why: "All three listed the directory you were in. To list another one, you name it after the command, as in `ls notes`."
+        - text: "Which entries are listed"
+          why: "The same three entries appeared each time. Only their presentation changed: one detailed line each."
+      answer: 0
+    - kind: teach
+      id: words
+      title: "A command line is a list of words"
+      body: |
+        In [Your first minutes in a shell](/lesson/lx.first-steps) you typed lines such as `ls -l` and
+        `cat welcome.txt`. Before anything runs, the shell splits what you typed at the spaces into **words**.
+
+        The **first word is the command**: the program to run. Every other word is handed to that program,
+        and the program decides what to do with it. There are two kinds:
+
+        - **Options** start with `-`. They change *how* the command works: `-l` asks `ls` for the long format.
+        - The other words say *what* the command works on: in `cat welcome.txt`, `welcome.txt` is the file to
+          print.
+
+        Together, all the words after the command are its **arguments**: options, values that belong to an
+        option, and the names of what to work on. So `ls -l notes` means: run `ls`, in the long format, on the
+        directory `notes`.
+
+        This lesson's practice directory was prepared like the last one: a `notes` directory with two files, a
+        `readme.txt`, and one hidden file that comes up below (all under "Before you start: source files").
+    - kind: show
+      id: ls-l-notes
+      run: ls -l notes
+      notice: |
+        With an argument, `ls` lists `notes` instead of the directory you are in. The option still applies:
+        one long line per file.
+    - kind: teach
+      id: option-values
+      body: |
+        Some options need a value of their own, written right after them. `head` prints the first lines of a
+        file, ten by default. The option `-n` says how many, and the word after it is that number:
+    - kind: show
+      id: head-n
+      run: head -n 2 notes/todo.txt
+      notice: |
+        Four words in total: `head` is the command, `-n` is an option, `2` is the value that belongs to `-n`,
+        and `notes/todo.txt` is the file to read. The file has three lines; `head` printed two.
+    - kind: ask
+      id: which-word
+      prompt: "`tail -n 5 /var/log/messages` prints the last lines of a file. Which word names the file to read?"
+      choices:
+        - text: "`/var/log/messages`"
+          why: "It is the word that says what `tail` works on. `-n 5` only changes how many lines it prints."
+        - text: "`5`"
+          why: "`5` follows `-n`, an option that takes a value, so `tail` reads it as the number of lines. It is not a file name."
+        - text: "`-n`"
+          why: "`-n` starts with a dash, so it is an option: it changes how `tail` works, here by asking for a number of lines."
+      answer: 0
+    - kind: teach
+      id: combining
+      title: "Short and long options"
+      body: |
+        Names that start with a dot, such as `.settings`, are **hidden**: plain `ls` leaves them out. The option
+        `-a` (all) shows them.
+
+        Options made of one letter can be written separately or together: `ls -F -l` and `ls -Fl` mean the
+        same thing. (An option that takes a value, like `-n` in `head -n 2`, keeps its value right after it.) Many options also have a **long form**, a whole word after two dashes: `ls --all` is the
+        same as `ls -a`. Long forms are easier to read in scripts; short forms are quicker to type.
+    - kind: try
+      id: try-la
+      body: "You are in the practice directory. List everything in it, hidden files included, in the long format, with one command."
+      accept: ["ls --all . -l", "ls -l . --all", "ls -la", "ls -al", "ls -l -a", "ls -a -l", "ls -l --all", "ls --all -l", "ls -la .", "ls -al .", "ls -l -a .", "ls -a -l .", "ls -l --all .", "ls --all -l .", "ls . -la", "ls . -al", "ls . -l -a", "ls . -a -l", "ls . -l --all", "ls . --all -l", "ls -l . -a", "ls -a . -l"]
+      hints:
+        - match: "^ls -l$"
+          say: "That is the long format, but hidden files are still missing. Add the option that shows all files."
+        - match: "^ls -a$"
+          say: "That shows the hidden files, but not in the long format. You can combine both options in one word."
+        - match: "^ls-"
+          say: "The shell splits words at spaces. Without a space, `ls-la` is read as one command name, which does not exist."
+        - match: "-[A-Z]*L|-[a-z]*A"
+          say: "Options are case-sensitive: `-L` and `-A` are different options from `-l` and `-a`."
+        - match: "--al"
+          say: "Two dashes introduce one long word, such as `--all`. To combine one-letter options, use a single dash: `-la`."
+        - match: "practice"
+          say: "There is no directory called `practice` inside the one you are in: the practice directory *is* where you are. Leave the name out, and `ls` lists the current directory (`.` means the same thing)."
+      hint: "Start with `ls`, then one dash followed by both letters: the one for long and the one for all."
+      run: ls -la
+      then: |
+        Now you see `.settings`, and two more entries: `.` is this directory and `..` the one above it, the
+        same `..` you used in paths.
+    - kind: teach
+      id: help
+      title: "Finding out what a command can do"
+      body: |
+        Nobody remembers every option. Most commands describe themselves when you give them `--help`. The
+        summary for `cat` is short enough to read in full:
+    - kind: show
+      id: cat-help
+      run: cat --help
+      highlight: ["-n, --number"]
+      notice: |
+        The first line shows how to call it: `cat [OPTION]... [FILE]...`, meaning any number of options, then
+        any number of files. Square brackets mark parts you can leave out. The options follow; many have a
+        short and a long form side by side, such as `-n, --number`.
+    - kind: try
+      id: try-number
+      body: "Using what the help shows, print `notes/todo.txt` with a number in front of each line."
+      accept: ["cat -n ./notes/todo.txt", "cat --number ./notes/todo.txt", "cat -n notes/todo.txt", "cat --number notes/todo.txt", "cat notes/todo.txt -n", "cat notes/todo.txt --number", "cat -b notes/todo.txt", "cat --number-nonblank notes/todo.txt", "cat notes/todo.txt -b", "cat notes/todo.txt --number-nonblank"]
+      hints:
+        - match: "^cat notes/todo\\.txt$"
+          say: "That prints the file without numbers. Add the option the help listed for numbering lines."
+        - match: "--n "
+          say: "A long option is the whole word after two dashes: `--number`. The short form has one dash: `-n`."
+        - match: "^cat -n$"
+          say: "The option is right, but `cat` also needs to know which file to print. Add the path."
+      hint: "The help listed `-n, --number`. Put the option after `cat`, then the file."
+      run: cat -n notes/todo.txt
+      then: |
+        `-b` gives the same result for this file, because it has no empty lines. The difference shows when there
+        are empty lines: `-n` numbers them, and `-b` skips them.
+    - kind: teach
+      id: man
+      body: |
+        For the full story there is the **manual**: `man cat` opens the manual page. It does not print and
+        exit like the commands so far; it opens a reader that waits for keys:
+
+        | Key | Does |
+        |---|---|
+        | Space | one screen down |
+        | the arrow keys | one line up or down |
+        | `/` then a word, then Enter | search for that word; `n` jumps to the next match |
+        | `q` | quit and return to the prompt |
+
+        `--help` is for a quick reminder, `man` for the details.
+    - kind: teach
+      id: builtins
+      title: "Commands built into the shell"
+      body: |
+        Most commands are programs stored as files. A few are **builtins**: commands that the shell itself
+        carries out, with no separate file. `type` tells you which kind a command is:
+    - kind: show
+      id: type
+      run: type ls cd pwd
+      highlight: ["builtin"]
+      notice: |
+        `ls` is a program in `/usr/bin`, a directory full of commands. `cd` and `pwd` are shell builtins.
+        For a builtin, `help cd` is the most direct help.
+
+        These lessons were recorded on RHEL (Red Hat Enterprise Linux). Linux comes in **distributions**: Linux
+        packaged with a set of tools and settings, such as RHEL, Fedora, Debian or Ubuntu. Most commands behave
+        the same on all of them; small details differ, like these two. On RHEL, `man cd` also works and opens a
+        longer page shared by all builtins. In your own terminal, RHEL first reports
+        ``ls is aliased to `ls --color=auto'``: an alias (a shortcut the shell expands) that runs the same
+        `/usr/bin/ls`. The recording ran without a terminal, where the alias is not set.
+    - kind: ask
+      id: waiting
+      guess: true
+      prompt: "You type `cat` with no file name and press Enter. What do you expect?"
+      choices:
+        - text: "An error, because a file name is missing"
+          why: "Many commands do complain about a missing argument, but `cat` has something else to read when it is given no file."
+        - text: "Nothing, and no new prompt: it waits"
+          why: "With no file, `cat` reads what you type instead, so it sits there waiting for input. The next step explains how to get out."
+        - text: "It prints the files in the current directory"
+          why: "Listing files is the job of `ls`. `cat` prints the content of files, and with no file it has to read from somewhere else."
+      answer: 1
+    - kind: teach
+      id: get-out
+      body: |
+        With no file, `cat` reads from the keyboard: each line you type is printed back, and there is no new
+        prompt. It looks frozen, but it is waiting for you. Two keys get you out:
+
+        - **Ctrl-C** interrupts the command that is running. It works for almost anything that seems stuck.
+        - **Ctrl-D**, on an empty line, means "end of input". `cat` has nothing more to read and finishes.
+
+        Whenever a command does not return to the prompt, try Ctrl-C first.
+    - kind: teach
+      id: less-typing
+      title: "Typing less"
+      body: |
+        Two habits save a lot of typing, and a lot of typing mistakes:
+
+        - **Tab** completes what you started: type `cat no` and press Tab, and the shell fills in `notes/`.
+          If several names match, press Tab twice to see them all.
+        - The **up arrow** brings back the previous command, ready to edit and run again.
+
+        Try both the next time you are at a real prompt. (The practice fields in these lessons only compare
+        what you type, so they do not complete or remember commands.)
+    - kind: ask
+      id: transfer
+      prompt: "`mkdir --help` shows `-p, --parents   make parent directories as needed`. Which command creates `a/b/c` in one go?"
+      choices:
+        - text: "`mkdir -p a/b/c`"
+          why: "`-p` is the short form of `--parents`, and `a/b/c` is the argument: the path to create."
+        - text: "`mkdir -parents a/b/c`"
+          why: "One dash followed by a word is read as several one-letter options: `-p`, `-a`, `-r` and so on. `mkdir` has no `-a`, so it stops with an error. Long options need two dashes."
+        - text: "`mkdir -P a/b/c`"
+          why: "Options are case-sensitive. The help lists a lower-case `-p`; `mkdir` has no `-P` and reports an invalid option."
+      answer: 0
+    - kind: reflect
+      id: explain-parts
+      prompt: "Using `head -n 2 notes/todo.txt` as the example, explain the difference between an option, an option's value and the file to read."
+      model: |
+        `head` is the command. `-n` is an option: it changes how `head` works, here how many lines to print.
+        `2` is the value that belongs to `-n`. `notes/todo.txt` is the file to read: what `head` works on. All
+        the words after `head` are its arguments.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read any command line as a command followed by options and arguments, combine short options,
+        look up what a command offers with `--help` or `man`, and get out of a command that waits for you.
+
+        The next lesson uses these skills on files: making directories, copying, moving, renaming and
+        removing, and how to do it without losing anything by accident.
+  sections:
+    - id: more-help
+      title: "More about help and manual sections"
+      depth: true
+      body: |
+        Manual pages are grouped in numbered **sections**: 1 for commands, 5 for file formats, 8 for
+        administration commands. The same name can exist in several: `man passwd` shows the command that
+        changes a password, while `man 5 passwd` describes the file `/etc/passwd`. `man -f passwd` lists every
+        page with that name.
+
+        On RHEL, `man cd` opens bash's shared page for all builtins, which is long; `help cd` is shorter.
+
+        Why is `cd` a builtin? A separate program runs in its own process and could change only its own current
+        directory, never the shell's. Only the shell itself can change the directory you are working in.
+
+        Not every program supports `--help`, and a few treat it differently, but nearly all GNU tools on a
+        Linux system do. When `--help` prints too much to read at once, the lesson on output and pipes shows
+        how to page through it.
+  limits: |
+    Interactive behaviour (the `man` reader, Ctrl-C, Ctrl-D, Tab, the up arrow, `cat` waiting for input) cannot be
+    captured by the recorder: it is described here, not recorded. Try it at your own prompt.
+  review:
+    - q: "In `head -n 2 notes/todo.txt`, which word is the file to read?"
+      a: "`notes/todo.txt`. `-n` is an option and `2` is the value that belongs to it."
+    - q: "How do you see a short summary of a command's options?"
+      a: "Run the command with `--help`. For the full manual, use `man <command>` (quit with `q`)."
+    - q: "A command seems frozen and gives you no prompt. What do you try first?"
+      a: "Ctrl-C, which interrupts it. If it is waiting for typed input, Ctrl-D on an empty line ends the input."
+    - q: "What do `-la` and `--all` have in common?"
+      a: "Both are options. `-la` combines the one-letter options `-l` and `-a`; `--all` is the long form of `-a`."
+  commands:
+    - cmd: ls -l notes
+      meaning: "ls with an option (-l) and an argument (notes): the long listing of the notes directory"
+    - cmd: head -n 2 notes/todo.txt
+      meaning: "an option with a value (-n 2) and an argument (the file): the first two lines"
+    - cmd: ls -la
+      meaning: "two one-letter options combined: long format, hidden files included"
+    - cmd: cat --help
+      meaning: "a command describing its own options"
+    - cmd: cat -n notes/todo.txt
+      meaning: "the file with line numbers"
+    - cmd: type ls cd pwd
+      meaning: "ls is a program file; cd and pwd are built into the shell"
+    - cmd: mkdir -parents a/b/c
+      expect: fail
+      meaning: "a word after a single dash is read as one-letter options; mkdir has no -a"
+  files:
+    .settings: |
+      colour=auto
+    notes/welcome.txt: |
+      Welcome to the shell.
+      You found this file with ls and read it with cat.
+    notes/todo.txt: |
+      Find out where I am
+      See what is here
+      Read one file
+    readme.txt: |
+      This practice directory holds notes for the lesson on commands.
+  references:
+    - {title: "GNU Bash manual: Simple commands", url: "https://www.gnu.org/software/bash/manual/html_node/Simple-Commands.html"}
+    - {title: "GNU Coreutils manual: Common options", url: "https://www.gnu.org/software/coreutils/manual/html_node/Common-options.html"}
+    - {title: "GNU Coreutils manual: cat invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/cat-invocation.html"}
+    - {title: "GNU Coreutils manual: head invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/head-invocation.html"}
+    - {title: "GNU Bash manual: Bash builtins (type, help)", url: "https://www.gnu.org/software/bash/manual/html_node/Bash-Builtins.html"}
+    - {title: "Linux man-pages: man(1)", url: "https://man7.org/linux/man-pages/man1/man.1.html"}
+
+- id: lx.files-text
+  title: "Create, copy, move and remove"
+  subtitle: "Organising files from the shell, and checking before you delete"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 18
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson; each command continues from the files the previous ones left."
+  concepts: [linux.files]
+  prerequisites: [lx.shell-basics]
+  objective: |
+    Make directories and files, copy and move them (and know when the destination is a new name and when it is
+    a directory), rename, remove files and whole directories, and check before you delete.
+  flow:
+    - kind: ask
+      id: recall-option
+      recalls: lx.shell-basics
+      prompt: "In `head -n 2 notes/todo.txt`, how many arguments does `head` receive?"
+      choices:
+        - text: "Three"
+          why: "Every word after the command is an argument: the option `-n`, its value `2`, and the file. The commands in this lesson take two that matter: what to work on, and where."
+        - text: "One, the file"
+          why: "The file is the argument that says what to work on, but `-n` and `2` are arguments too: every word after the command is one."
+        - text: "Two: `-n` and the file"
+          why: "`2` is an argument as well, the value that belongs to `-n`. Every word after the command counts."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "Tidying up a directory"
+      body: |
+        The practice directory for this lesson is a little messy: a `notes` directory, a `readme.txt` and a
+        `draft.txt` that is ready to become final. They were prepared for the lesson (see "Before you start: source files"),
+        and every command below continues from what the one before it left. You will make a place for old files, copy a backup, rename
+        the draft, and delete what is no longer needed: the things you do every day in a file manager.
+
+        One difference matters more than the others, so here it is first: **the shell has no recycle bin.**
+        A file you remove is gone. Everything in this lesson is safe to practise in this directory, and the
+        last part shows the habits that keep deleting safe elsewhere.
+    - kind: teach
+      id: mkdir
+      title: "Making directories and files"
+      body: |
+        `mkdir` (make directory) creates a directory with the name you give it. It prints nothing when it
+        works. Here it creates `reports`, and `ls -F` lists the practice directory so you can see it (`-F`
+        puts a `/` after directory names):
+    - kind: show
+      id: mkdir-show
+      run: "mkdir reports; ls -F"
+      highlight: [reports/]
+      notice: "`mkdir` printed nothing. `ls -F` shows `reports/`, with the `/` that marks a directory. It stays in the listings that follow."
+    - kind: try
+      id: try-mkdir
+      body: "Create two directories, `archive` and `old`, with one command."
+      accept: ["mkdir old/ archive/", "mkdir ./old ./archive", "mkdir archive old", "mkdir old archive", "mkdir archive/ old/", "mkdir ./archive ./old", "mkdir archive old/", "mkdir archive/ old"]
+      hints:
+        - match: "^mkdir$"
+          say: "`mkdir` needs to know what to create. Add the names as arguments."
+        - match: "^(md|mkdr|makedir)"
+          say: "The command is `mkdir`: m-k-d-i-r, for make directory."
+        - match: "[;&]"
+          say: "That is two commands joined by `;` or `&&`. `mkdir` accepts several names at once: `mkdir`, then both names."
+        - match: "^mkdir \\S+$"
+          say: "That makes one directory. `mkdir` accepts several names: put both after the command, separated by a space."
+        - match: "^cd "
+          say: "`cd` moves into a directory that already exists. First the directories have to be created."
+      hint: "`mkdir`, then both names, separated by a space."
+      run: "mkdir archive old; ls -F"
+      then: "Both are there: `mkdir` makes one directory per argument. `old` stays empty for now; it comes back near the end."
+    - kind: teach
+      id: touch
+      body: |
+        To create an empty file, use `touch`. Its real job is to update a file's date to now, and when the
+        file does not exist, it creates it, empty. That makes it the quickest way to make a placeholder:
+    - kind: show
+      id: touch-show
+      run: "touch empty.txt; ls -l empty.txt"
+      highlight: [empty.txt]
+      notice: "The size is `0`: the file exists, with nothing in it."
+    - kind: teach
+      id: cp
+      title: "Copying"
+      body: |
+        `cp` (copy) is given two names: what to copy, then where. The original stays where it was.
+
+        The second argument can mean two different things, and this is the part worth slowing down for:
+
+        - If it is a **directory that already exists**, the copy goes *inside* it and keeps its name.
+        - If nothing has that name yet, it is the **name of the new file**.
+        - If it is a **file that already exists**, that file is replaced by the copy (more on this below).
+
+        Take the first case, a directory that already exists. `archive` exists now, so this copies
+        `notes/welcome.txt` into it:
+    - kind: show
+      id: cp-into-show
+      run: "cp notes/welcome.txt archive; ls archive"
+      notice: "The copy is inside `archive`, with the same name: `archive/welcome.txt`. The original is still in `notes`."
+    - kind: try
+      id: try-backup
+      body: "Now the second case: make a backup copy of `readme.txt` called `readme.bak`, next to the original."
+      accept: ["cp -i readme.txt readme.bak", "cp readme.txt readme.bak", "cp ./readme.txt ./readme.bak", "cp ./readme.txt readme.bak", "cp readme.txt ./readme.bak"]
+      hints:
+        - match: "^cp readme\\.bak"
+          say: "The order is: what to copy first, then the name of the copy. This would copy a file that does not exist yet."
+        - match: "^mv "
+          say: "`mv` would rename the original, leaving no `readme.txt`. A backup needs both, so copy."
+        - match: "^cp readme\\.txt$"
+          say: "`cp` needs two arguments: the file, and the name of the copy."
+        - match: "^cp readme\\.txt archive"
+          say: "That puts a copy inside `archive`. The task is a copy named `readme.bak`, next to the original."
+      hint: "`cp`, the file to copy, then the name the copy should have."
+      run: "cp readme.txt readme.bak; ls -F"
+      then: "No `readme.bak` existed, so `cp` used the second argument as the name of the new file. Both files are now in the listing."
+    - kind: ask
+      id: guess-typo
+      guess: true
+      prompt: "You mean to copy `readme.txt` into `archive`, but type `cp readme.txt archve`. What happens?"
+      evidence: |
+        archive/  draft.txt  empty.txt  notes/  old/  readme.bak  readme.txt  reports/
+      choices:
+        - text: "A file named `archve` appears"
+          why: "There is no directory `archve`, so `cp` takes it as the name of a new file, without any warning. The next step shows it."
+        - text: "An error: no directory `archve`"
+          why: "That would be the safe outcome, but `cp` cannot know you meant a directory: a name that does not exist becomes a new file. The next step shows it."
+        - text: "The copy goes into `archive`"
+          why: "`cp` uses the exact name you typed; it does not guess what you meant. The next step shows what it does with `archve`."
+      answer: 0
+    - kind: show
+      id: cp-typo
+      run: "cp readme.txt archve; ls -F"
+      highlight: [archve]
+      notice: |
+        `archve` has no `/`: it is an ordinary file, a copy of `readme.txt` under a misspelt name, and nothing
+        complained. A trailing slash protects you: `cp readme.txt archve/` refuses, because no directory of
+        that name exists.
+    - kind: teach
+      id: cp-r
+      body: |
+        `cp` copies files. To copy a whole directory, with everything inside it, it needs the option `-r`
+        (recursive: go into the directory, and into the directories inside it). Without `-r`, it refuses:
+    - kind: show
+      id: cp-dir-fail
+      run: "cp notes notes-copy"
+      notice: "\"omitting directory\" means it copied nothing. With `-r`:"
+    - kind: try
+      id: cp-dir
+      body: "Copy the whole `notes` directory to a new directory called `notes-copy`."
+      accept: ["cp -r ./notes notes-copy", "cp notes notes-copy -r", "cp -R ./notes notes-copy", "cp -r notes notes-copy", "cp -R notes notes-copy", "cp -r notes/ notes-copy", "cp -a notes notes-copy", "cp -r ./notes ./notes-copy", "cp -r notes ./notes-copy"]
+      hints:
+        - match: "^cp notes"
+          say: "That is the command that was refused: `cp` needs `-r` to copy a directory and what is inside it."
+        - match: "^cp -r notes-copy notes"
+          say: "The order is: what to copy, then the new name."
+        - match: "^mkdir"
+          say: "No need to create it first: `cp -r` creates `notes-copy` when it does not exist."
+      hint: "`cp`, the option for directories, the directory, then the new name."
+      run: "cp -r notes notes-copy; ls notes-copy"
+      then: "`notes-copy` is a new directory with copies of both files."
+    - kind: teach
+      id: mv
+      title: "Moving and renaming are the same thing"
+      body: |
+        `mv` (move) works like `cp`, with one difference: the original does not stay behind. Moving a file
+        into a directory and renaming it are the same operation in Linux; only the destination differs.
+
+        - `mv readme.bak archive` moves the file into `archive`, because `archive` is a directory.
+        - `mv notes.txt meeting.txt` would give a file a new name, because `meeting.txt` does not exist.
+
+        There is no separate rename command for everyday use: renaming is `mv`.
+    - kind: show
+      id: mv-into
+      run: "mv readme.bak archive; ls archive"
+      notice: "`archive` now holds `readme.bak` next to the copy of `welcome.txt` from earlier. The file left the practice directory: a move, not a copy."
+    - kind: try
+      id: try-rename
+      body: "The draft is ready. In one command, move `draft.txt` into `reports` and name it `final.txt` there."
+      accept: ["mv draft.txt reports/final.txt", "mv ./draft.txt reports/final.txt", "mv draft.txt ./reports/final.txt", "mv ./draft.txt ./reports/final.txt"]
+      hints:
+        - match: "[;&]"
+          say: "That is two commands joined by `;` or `&&`. One `mv` can do both: give it the path of the new name, inside `reports`."
+        - match: "^cp "
+          say: "`cp` would leave `draft.txt` behind. Moving is `mv`."
+        - match: "^mv \\S*final"
+          say: "The order matters: first the file you have, then where it goes and what it is called."
+        - match: "^mv draft\\.txt$"
+          say: "`mv` needs two arguments: the file, and where it goes."
+        - match: "^mv draft\\.txt final\\.txt$"
+          say: "That renames it, but leaves it in the practice directory. Put the directory in front of the new name: `reports/`, then `final.txt`."
+        - match: "^mv draft\\.txt reports/?$"
+          say: "That moves it into `reports`, still called `draft.txt`. Add the new name after `reports/`."
+      hint: "`mv draft.txt`, then a path: the directory, a `/`, and the new name."
+      run: "mv draft.txt reports/final.txt; ls reports"
+      then: "`reports` now holds `final.txt`. Moved and renamed together: the destination was a new name inside a directory that exists, and `draft.txt` no longer exists under its old name."
+    - kind: teach
+      id: overwrite
+      title: "Copying over a file that exists"
+      body: |
+        If the destination is a file that already exists, `cp` and `mv` replace it, without asking. Watch
+        what happens to `reports/final.txt` when `readme.txt` is copied onto it:
+    - kind: show
+      id: overwrite-show
+      run: "cat reports/final.txt; cp readme.txt reports/final.txt; cat reports/final.txt"
+      notice: |
+        The first `cat` shows the draft's text; the second shows the readme's. The draft's content is gone,
+        and nothing warned you.
+
+        The option `-i` (interactive) makes `cp`, `mv` and `rm` ask before replacing or removing anything:
+        `cp -i readme.txt reports/final.txt` would now stop and wait for `y` or `n`, because that file exists.
+        It is worth using whenever you are not
+        sure what is already there.
+    - kind: ask
+      id: which-safe
+      prompt: "`report.txt` may already exist in `backup`, and you must not lose it. Which command copies safely?"
+      choices:
+        - text: "`cp -i report.txt backup`"
+          why: "With `-i`, `cp` asks before replacing a file that exists, so you can say no."
+        - text: "`cp report.txt backup`"
+          why: "Without `-i`, `cp` replaces an existing `backup/report.txt` silently."
+        - text: "`mv report.txt backup`"
+          why: "`mv` also replaces an existing file without asking, and it removes your original too."
+      answer: 0
+    - kind: teach
+      id: rm
+      title: "Removing files and directories"
+      body: |
+        `rm` (remove) deletes files. It does not move them to a recycle bin; they are gone.
+
+        Like `cp`, it refuses directories unless you add `-r`, which removes the directory and everything
+        inside it. For an empty directory there is also `rmdir`, which refuses if anything is still inside:
+        a cheap safety check.
+    - kind: show
+      id: rm-file
+      run: "rm archve; ls -F"
+      notice: "The misspelt copy `archve` is gone. No question, no message."
+    - kind: show
+      id: rm-dir-fail
+      run: "rm notes-copy"
+      notice: "`rm` without `-r` refuses a directory, which protects you from removing a whole tree by accident."
+    - kind: show
+      id: rmdir-old
+      body: "`rmdir` is the careful alternative for an empty directory, such as `old`, created at the start:"
+      run: "rmdir old; ls -F"
+      notice: "`old` is gone. Had anything been inside, `rmdir` would have refused and kept it."
+    - kind: try
+      id: try-rm-r
+      body: "Remove the directory `notes-copy` and everything in it."
+      accept: ["rm -r notes-copy", "rm -r notes-copy/", "rm -r ./notes-copy", "rm -ri notes-copy", "rm -ir notes-copy", "rm -rI notes-copy", "rm -Ir notes-copy", "rm -R notes-copy"]
+      hints:
+        - match: "^rm notes-copy/?$"
+          say: "That is the command that failed a moment ago: `rm` needs `-r` to remove a directory and its contents."
+        - match: "^rmdir "
+          say: "`rmdir` only removes empty directories, and `notes-copy` still has two files in it."
+        - match: "^rm -rf? notes$|^rm -rf? notes/$"
+          say: "Careful: that is the original `notes` directory. The task is to remove the copy, `notes-copy`."
+        - match: "-rf|-fr"
+          say: "That works, but `-f` (force) skips confirmation prompts and ignores names that do not exist. It does not get past permissions or hide other errors, and it removes a safeguard. Leave it out unless you have a reason: plain `-r` is enough here."
+      hint: "`rm`, the option that goes into directories, then the directory name."
+      run: "rm -r notes-copy; ls -F"
+    - kind: teach
+      id: habits
+      title: "Check before removing"
+      body: |
+        Removing is the one thing in this lesson you cannot undo, so experienced people follow a routine:
+
+        1. **Look first.** `ls` the exact path you are about to remove, and read it.
+        2. **Copy anything you might need**, and check that the copy is really there.
+        3. **Then remove**, with the same path you looked at.
+
+        Be most careful with `rm -r` and with the option `-f` (force), which skips confirmation prompts and
+        ignores names that do not exist. It does not bypass permissions or hide other removal errors. Both
+        options do exactly what you typed.
+    - kind: order
+      id: order-cleanup
+      prompt: "You want to delete the `notes` directory, keeping a backup in `archive`. Put the steps in a safe order."
+      items:
+        - "`ls notes`: see what is in it"
+        - "`cp -r notes archive`: copy it into `archive`"
+        - "`ls archive/notes`: check the copy is there"
+        - "`rm -r notes`: remove the original"
+      why: "Look, copy, check the copy, and only then remove. If anything goes wrong before the last step, nothing is lost."
+    - kind: reflect
+      id: explain-destination
+      prompt: "Why can `cp readme.txt archive` do two different things? Explain it as you would to a colleague."
+      model: |
+        It depends on what `archive` already is. If it is an existing directory, `cp` puts the copy inside
+        it, as `archive/readme.txt`. If no directory of that name exists, `cp` takes `archive` as the name of
+        the new file and creates a file called `archive`. Running `ls -F` first, or writing `archive/`, avoids
+        the surprise.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can create directories and files, copy and move them, rename with `mv`, remove files and whole
+        directories, and you know the two traps: a destination that does not exist becomes a new name, and
+        nothing you replace or remove comes back.
+
+        So far every command has worked on names you typed in full. The next lesson shows what the shell
+        does with patterns such as `*.txt`, with spaces in names and with quotes, before a command even
+        starts. It is the key to using `rm` and `cp` on many files at once, safely.
+  sections:
+    - id: copy-details
+      title: "Keeping dates and permissions when you copy"
+      depth: true
+      body: |
+        A plain `cp` gives the copy the current date and your ownership. `cp -a` (archive) keeps the
+        original's permissions, dates and links, and, when run as root, its owner. It also implies `-r`. Use
+        it for backups.
+
+        `mv` within one filesystem only changes the name in the directory, so it is instant whatever the
+        file's size; across filesystems it copies and then removes the original.
+
+        `mkdir -p a/b/c` creates every missing directory on the path, and does not complain if they already
+        exist, which makes it safe to repeat in scripts.
+  review:
+    - q: "`cp file dest`: when does the copy go inside `dest`, and when is `dest` the new name?"
+      a: "Inside, if `dest` is an existing directory. Otherwise `dest` is the name of the new file."
+    - q: "How do you rename a file?"
+      a: "With `mv old-name new-name`. Moving and renaming are the same operation."
+    - q: "Which option lets `cp` and `rm` work on whole directories?"
+      a: "`-r` (recursive). `rmdir` removes only empty directories."
+    - q: "Which option makes `cp`, `mv` and `rm` ask before replacing or removing?"
+      a: "`-i` (interactive)."
+  commands:
+    - cmd: "mkdir reports; ls -F"
+      meaning: "mkdir prints nothing; ls -F shows the new directory with a trailing /"
+    - cmd: "mkdir archive old; ls -F"
+      meaning: "one directory per argument"
+    - cmd: "touch empty.txt; ls -l empty.txt"
+      meaning: "touch creates an empty file: size 0"
+    - cmd: "cp notes/welcome.txt archive; ls archive"
+      meaning: "the destination is an existing directory, so the copy goes inside it"
+    - cmd: "cp readme.txt readme.bak; ls -F"
+      meaning: "the destination does not exist, so it is the new file's name"
+    - cmd: "cp readme.txt archve; ls -F"
+      meaning: "a misspelt destination becomes a new file, without warning"
+    - cmd: "cp notes notes-copy"
+      expect: fail
+      meaning: "cp refuses a directory without -r"
+    - cmd: "cp -r notes notes-copy; ls notes-copy"
+      meaning: "-r copies the directory and its contents"
+    - cmd: "mv readme.bak archive; ls archive"
+      meaning: "moved into an existing directory"
+    - cmd: "mv draft.txt reports/final.txt; ls reports"
+      meaning: "moved and renamed in one command"
+    - cmd: "cat reports/final.txt; cp readme.txt reports/final.txt; cat reports/final.txt"
+      meaning: "cp replaces an existing file without asking"
+    - cmd: "rm archve; ls -F"
+      meaning: "rm removes a file, without a message"
+    - cmd: "rm notes-copy"
+      expect: fail
+      meaning: "rm refuses a directory without -r"
+    - cmd: "rmdir old; ls -F"
+      meaning: "rmdir removes an empty directory"
+    - cmd: "rm -r notes-copy; ls -F"
+      meaning: "-r removes the directory and everything in it"
+  files:
+    readme.txt: |
+      Practice directory for the lesson on files.
+    draft.txt: |
+      Draft: the plan for next week.
+    notes/todo.txt: |
+      Make an archive directory
+      Back up the notes
+    notes/welcome.txt: |
+      Welcome back to the shell.
+  references:
+    - {title: "GNU Coreutils manual: cp invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/cp-invocation.html"}
+    - {title: "GNU Coreutils manual: mv invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/mv-invocation.html"}
+    - {title: "GNU Coreutils manual: rm invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/rm-invocation.html"}
+    - {title: "GNU Coreutils manual: mkdir invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/mkdir-invocation.html"}
+    - {title: "GNU Coreutils manual: touch invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/touch-invocation.html"}
+
+- id: lx.users-permissions
+  title: "Who may read, change and run a file"
+  subtitle: "Users, groups and permissions, and why you get \"Permission denied\""
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 22
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on CentOS Stream 9 (the upstream of RHEL 9). Outputs recorded on a disposable virtual machine as an ordinary user, in a practice directory made for this lesson; each command continues from the files the previous ones left."
+  concepts: [linux.permissions]
+  prerequisites: [lx.files-text]
+  objective: |
+    Read who you are and who owns a file, read a file's permissions, predict whether an access is allowed
+    (including on directories), and change permissions with chmod.
+  flow:
+    - kind: ask
+      id: recall-ls-l
+      recalls: lx.first-steps
+      prompt: "A look back. What kind of entry is this `ls -l` line about?"
+      evidence: |
+        drwxr-xr-x. 2 alice staff 4096 Oct 15 09:12 plans
+      choices:
+        - text: "A directory"
+          why: "The first character is the type, and `d` means directory. The letters after it are permissions, which this lesson explains."
+        - text: "An ordinary file"
+          why: "An ordinary file starts with `-`. This line starts with `d`."
+        - text: "A file that only `alice` may read"
+          why: "Who may read a file is told by the nine letters after the first character, not by the first character. This line is a directory, `d`."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "\"Permission denied\""
+      body: |
+        In the first lesson, `ls -l` showed nine letters such as `rw-r--r--` before each name, and you were
+        told they say who may read or change the file. Sooner or later every Linux user meets their
+        consequence: a command that stops with **Permission denied**.
+
+        The system compares a few facts about you with a few facts about the file, always in the same order:
+        owner, then group, then everyone else. Once you can read those facts, you can predict the answer
+        before you try, and fix the cause instead of guessing.
+
+        Start with the facts about you.
+    - kind: teach
+      id: who-am-i
+      title: "Who you are: users and groups"
+      body: |
+        Every account on the system is a **user**, with a name such as `learner`. Every user belongs to one or
+        more **groups**. A group is a named set of users, such as a team, that can be given access together.
+
+        `id` prints your user and your groups:
+    - kind: try
+      id: id
+      body: "Ask the system who you are: type the two-letter command."
+      accept: ["id"]
+      hints:
+        - match: "^(whoami|who)$"
+          say: "That command exists and prints your name, but not your numbers or groups. The one that shows everything is `id`."
+        - match: "^ID$"
+          say: "Commands are case-sensitive: type it in lower case."
+      hint: "It is short for identity."
+      run: id
+      then: |
+        `uid=1000(learner)`: you are the user named `learner`. The system also numbers every user and group;
+        the number is the **UID** (user ID) for users and the **GID** (group ID) for groups, and the name is
+        for people. `gid` is your main group, and `groups=` lists every group you belong to (these are this
+        recording machine's groups; yours will differ). The last part, `context=`, is your **SELinux** label.
+        SELinux is an extra security layer on RHEL: every process and file carries a label, and a system policy
+        says which labels may use which, so it can refuse what the permissions in this lesson would allow. It
+        comes back with containers and has its own lesson much later; ignore it here. (The label shown,
+        `cloud_init_t`, belongs to the recording machine's provisioning service, which ran the recorder; yours, in
+        a login session, will usually be `unconfined_t`.)
+    - kind: teach
+      id: the-letters
+      title: "Reading the nine letters"
+      body: |
+        Each file has an **owner** (a user) and a **group**, the third and fourth columns of `ls -l`. The
+        nine letters are three sets of three:
+
+        ```
+         rw-   r--   r--
+        owner group others
+        ```
+
+        In each set, `r` means read, `w` means write (change), and `x` means execute (run it as a program). A
+        `-` means that permission is missing. So `rw-r--r--` says: the owner may read and change it, members
+        of its group may only read it, and everyone else may only read it.
+    - kind: show
+      id: listing
+      body: "The practice directory was prepared with three files and a directory, `box`, holding one note (see \"Before you start: source files\"). `backup.sh` is a two-line script that only prints a message. Before this listing, the recorder set the files' permissions with `chmod 600 private.txt; chmod 755 backup.sh; chmod 644 notes.txt`; `chmod` and those numbers are explained later in this lesson:"
+      run: ls -l
+      notice: |
+        `notes.txt` is readable by everyone and changeable only by its owner, the most common setting.
+        `private.txt` has `rw-------`: only the owner may read or change it. `backup.sh` has `x` in all three
+        sets, so it may be run as a program by anyone who may read it. `box` is a directory; it comes back
+        later in this lesson.
+    - kind: ask
+      id: read-perms
+      prompt: "Another file, on a shared machine. `sam` is a member of the group `devs` and does not own the file. What may `sam` do with `report.txt`?"
+      evidence: |
+        -rw-rw----. 1 learner devs 512 Oct 15 14:10 report.txt
+      choices:
+        - text: "Only read it"
+          why: "Read-only would be `r--`. The group set, the middle three letters, is `rw-`: read and change."
+        - text: "Read it and change it"
+          why: "The file's group is `devs` and its group set is `rw-`, so members of `devs` may read and change it."
+        - text: "Nothing: only the owner `learner` has permissions"
+          why: "The owner set is not the only one. The group set `rw-` gives members of `devs` read and write; only others get `---`."
+      answer: 1
+    - kind: teach
+      id: one-set
+      title: "Only one set applies to you"
+      body: |
+        Here is the rule the system follows for ordinary permissions. It does not add the sets together. It
+        picks **one**:
+
+        1. If you are the file's owner, it uses the **owner** set, and only that one.
+        2. Otherwise, if you are in the file's group, it uses the **group** set.
+        3. Otherwise, it uses the **others** set.
+
+        Then it checks whether the letter you need is in that set. For these examples, assume ordinary users
+        and ordinary permissions, with no extra access rules. Other restrictions exist, such as SELinux, and
+        later lessons cover them.
+    - kind: ask
+      id: hinge
+      prompt: "You own `draft.txt`, which is `r--rw-r--`, and you are in its group. Can you change it?"
+      choices:
+        - text: "No: the owner set applies, and it has no `w`"
+          why: "You are the owner, so the system uses the owner set, `r--`, and stops there. The group's `w` is never considered for you."
+        - text: "Yes: the group set has `w`, and you are in the group"
+          why: "The sets are not combined. The system picks the first one that applies to you, the owner set, and it has no `w`."
+        - text: "Yes: owners may always change their own files"
+          why: "Ownership gives you the owner set, nothing more. What owners can always do is change the permissions themselves, with `chmod`, and then write."
+      answer: 0
+    - kind: teach
+      id: execute
+      title: "Running a file: x"
+      body: |
+        A script is a text file of commands. To run it by its path, as `./backup.sh` (the `./` means "the one
+        in this directory"), the system requires `x` for you. Without it, the content does not matter:
+    - kind: show
+      id: run-ok
+      run: "./backup.sh"
+      notice: "`backup.sh` has `x`, so it runs and prints its message."
+    - kind: show
+      id: run-denied
+      body: "`chmod a-x` removes `x` from all three sets (`a` is all). Then the same command:"
+      run: "chmod a-x backup.sh; ls -l backup.sh; ./backup.sh"
+      notice: "The script is unchanged, but without `x` the system refuses to run it. `Permission denied` here means \"missing `x`\", not \"wrong user\"."
+    - kind: teach
+      id: chmod
+      title: "Changing permissions: chmod"
+      body: |
+        `chmod` (change mode) changes the letters. You can only change files you own, unless you are the
+        administrator. The readable way names who, adds or removes, and says which letter:
+
+        | Part | Means |
+        |---|---|
+        | `u`, `g`, `o`, `a` | user (owner), group, others, all three |
+        | `+`, `-` | add, remove |
+        | `r`, `w`, `x` | the permission |
+
+        `chmod u+x backup.sh` adds `x` for the owner. `chmod go-r private.txt` removes read from group and
+        others. `chmod a-x` removes `x` from all three sets, as you saw above.
+    - kind: try
+      id: try-chmod
+      body: "Give the owner of `backup.sh` the right to run it again, and change nothing else: group and others keep what they have."
+      accept: ["chmod u+x backup.sh", "chmod u+x ./backup.sh", "chmod 744 backup.sh", "chmod 744 ./backup.sh", "chmod u=rwx backup.sh", "chmod u+rwx backup.sh", "chmod u=rwx ./backup.sh", "chmod u+rwx ./backup.sh"]
+      hints:
+        - match: "^chmod (\\+x|a\\+x|ugo\\+x|755)( |$)"
+          say: "That adds `x` for everyone, group and others included, not only the owner. The task is to change the owner's set and leave the others alone: use `u`."
+        - match: "^chmod 700"
+          say: "That gives the owner `x`, but also removes the read that group and others have now. Only the owner's `x` should change."
+        - match: "^chmod backup\\.sh"
+          say: "`chmod` wants the change first, then the file: `chmod <who><+ or -><letter> <file>`."
+        - match: "^chmod u-x"
+          say: "`-` removes a permission. To add one, use `+`."
+        - match: "^chmod [ugoa]*\\+[rw] "
+          say: "Read and write are already there. Running a program needs the letter `x`."
+        - match: "^chmod 777"
+          say: "That works, but it also lets everyone change the script, which you never want for a program people run. Add only what is needed."
+        - match: "^\\./backup"
+          say: "First fix the permission, then run it. The task is the `chmod` command."
+      hint: "`chmod`, then `u+x` (user, add, execute), then the file."
+      run: "chmod u+x backup.sh; ls -l backup.sh; ./backup.sh"
+      then: "Only the owner set has `x` now (`rwxr--r--`), and the script runs again."
+    - kind: teach
+      id: numbers
+      body: |
+        You will also see permissions written as three digits, such as `chmod 644`. Each digit is one set:
+        owner, group, others. Inside a digit, read is worth 4, write 2 and execute 1, added together:
+
+        | Digit | Letters |
+        |---|---|
+        | 7 | `rwx` (4+2+1) |
+        | 6 | `rw-` (4+2) |
+        | 5 | `r-x` (4+1) |
+        | 4 | `r--` |
+        | 0 | `---` |
+
+        So `644` is `rw-r--r--`, `600` is `rw-------`, and `755` is `rwxr-xr-x`.
+    - kind: ask
+      id: digits
+      prompt: "A file has mode `640`. You are in its group but do not own it. What may you do with the file?"
+      choices:
+        - text: "Read it"
+          why: "You are not the owner, so the group set applies: the middle digit, 4, which is read alone. The owner has 6 (read and write), others 0."
+        - text: "Read and change it"
+          why: "That is 6, the first digit, which belongs to the owner. The group's digit is the middle one, 4."
+        - text: "Nothing"
+          why: "Nothing is the last digit, 0, which is for others. The group's digit is the middle one, 4: read."
+      answer: 0
+    - kind: teach
+      id: directories
+      title: "On a directory, the letters mean something else"
+      body: |
+        A directory is a list of names. Its letters are about that list:
+
+        - `r` lets you **read the list**: see which names are in it.
+        - `w`, together with `x`, lets you **change the list**: add, rename or remove names.
+        - `x` lets you **go through it**: use the names in it to reach the files, and `cd` into it.
+
+        `x` is the surprising one. Without it, a file inside can be perfectly readable, and you still cannot
+        reach it.
+    - kind: ask
+      id: guess-dir
+      guess: true
+      prompt: "`chmod a-x box` removes `x` from the directory `box`. Inside it, `note.txt` is `rw-r--r--`. As the ordinary user shown by `id`, what does `cat box/note.txt` do?"
+      choices:
+        - text: "It prints the note: the file itself is readable"
+          why: "The file's own permissions allow reading, but the path goes through `box`, and going through a directory needs `x` on it. The next step shows the result."
+        - text: "It fails with `Permission denied`"
+          why: "Reaching `note.txt` means going through `box`, which needs `x` on `box`, and nobody has it now. The next step shows the real message."
+        - text: "It fails with `No such file or directory`"
+          why: "The file is still there; the name exists. What is missing is permission to go through the directory, so the error is about permission, not about the name. The next step shows it."
+      answer: 1
+    - kind: show
+      id: dir-x
+      run: "chmod a-x box; ls -ld box; cat box/note.txt"
+      notice: |
+        `ls -ld` shows the directory itself (`-d`) rather than its contents: `rw-r--r--`, no `x` anywhere.
+        `cat` is refused although `note.txt` is readable, because reaching it means going through `box`, and
+        that needs `x` on `box`. When "Permission denied" names a file whose permissions look fine, check every
+        directory on the path.
+    - kind: ask
+      id: delete
+      prompt: "`old.txt` is `r--r--r--` and owned by a colleague, in a directory you own with mode `rwxr-xr-x`. Can you delete it?"
+      choices:
+        - text: "Yes: deletion changes the directory, which you own"
+          why: "Removing a name changes the directory's list, so it needs `w` (and `x`) on the directory. The file's own permissions are not consulted."
+        - text: "No: the file itself is read-only for you"
+          why: "A file's `w` is about changing its content. Deleting removes its name from the directory, which is the directory's business."
+        - text: "No: only the file's owner may delete it"
+          why: "Ownership of the file does not decide this; the directory's permissions do. (A special directory setting, the sticky bit on `/tmp`, restricts removal to the file's owner, the directory's owner or a privileged user; ordinary directories do not have it.)"
+      answer: 0
+    - kind: teach
+      id: root
+      title: "Owners, and the administrator"
+      body: |
+        Changing who owns a file is not allowed for ordinary users, even for their own files: otherwise
+        anyone could hand files to someone else. It needs the administrator account, **root** (UID 0). Root
+        can bypass the ordinary read and write permission bits, although other restrictions can still
+        apply. That is why administrators use it only when they need it, through `sudo` (run one command as
+        root).
+    - kind: show
+      id: chown-denied
+      run: "chown root notes.txt"
+      notice: "Even for a file you own, `chown` (change owner) needs root. As an ordinary user you get \"Operation not permitted\"."
+    - kind: reflect
+      id: explain-denied
+      prompt: "A colleague cannot read `/srv/app/conf/app.yaml`, although `ls -l` shows it as `rw-r--r--`. What would you check, and why?"
+      model: |
+        Check every directory on the path: `ls -ld /srv /srv/app /srv/app/conf`. To reach the file, the
+        colleague needs `x` on each of them, for the set that applies to them. If any one is missing `x` for
+        them, the file's own `r` never gets a chance. Also check which set applies: `id` run in their session
+        (or their `id` output, which you can ask for) shows their user and groups. Your own `id` says nothing
+        about their access. Only one set (owner, group or others) is used.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read who you are (`id`), who owns a file and what each of the nine letters allows, apply the
+        one-set rule to predict "Permission denied", explain what `r`, `w` and `x` mean on a directory, and
+        change permissions with `chmod`, in letters or digits.
+
+        Programs run as users too, and the same rule decides what they may read and write. That idea comes
+        back with every service you start, and later with every container: a container that runs as an
+        unexpected user ID fails with exactly this "Permission denied".
+
+        Next: logging in to other machines with SSH, which refuses a key file whose permissions are too open.
+  sections:
+    - id: umask-and-special
+      title: "Default permissions, and the special bits"
+      depth: true
+      body: |
+        New files get their permissions from the program that creates them, minus your **umask**. Most
+        programs ask for `666` for files and `777` for directories; with the usual umask `022`, the result is
+        `644` and `755`. `umask` prints yours; a umask of `027` gives `640` and `750`.
+
+        Three special bits exist. **setuid** on a program makes it run as the file's owner (`passwd` uses it
+        to update a file only root may write). **setgid** on a directory makes new files inside inherit the
+        directory's group, useful for shared team directories. The **sticky bit** on a directory such as
+        `/tmp` (`t` in place of the last `x`) restricts removal to the file's owner, the directory's owner or a
+        privileged user, in addition to the normal directory permissions.
+
+        Group membership is read when you log in: after being added to a group, a running session does not
+        have it until you log in again (or start a new login shell with `su - <you>` or `newgrp`).
+  review:
+    - q: "Which permission set does the system use when you own a file?"
+      a: "The owner set, and only that one, even if the group or others sets allow more."
+    - q: "What does `x` mean on a directory?"
+      a: "Permission to go through it: use the names inside to reach files, and `cd` into it."
+    - q: "What decides whether you may delete a file?"
+      a: "Write (and execute) permission on the directory that holds it, not the file's own permissions."
+    - q: "What is `chmod 640` in letters?"
+      a: "`rw-r-----`: owner read and write, group read, others nothing."
+  commands:
+    - cmd: id
+      meaning: "your user, your main group, every group you are in, and the SELinux context"
+    - cmd: "chmod 600 private.txt; chmod 755 backup.sh; chmod 644 notes.txt; ls -l"
+      meaning: "prepare three files with different permissions (shown in the lesson as plain ls -l)"
+    - cmd: ls -l
+      meaning: "the three files and the box directory"
+    - cmd: "./backup.sh"
+      meaning: "a script with x runs"
+    - cmd: "chmod a-x backup.sh; ls -l backup.sh; ./backup.sh"
+      expect: fail
+      meaning: "without x, the system refuses to run it"
+    - cmd: "chmod u+x backup.sh; ls -l backup.sh; ./backup.sh"
+      meaning: "x for the owner only, and the script runs again"
+    - cmd: "chmod a-x box; ls -ld box; cat box/note.txt"
+      expect: fail
+      meaning: "a readable file in a directory without x cannot be reached"
+    - cmd: "chown root notes.txt"
+      expect: fail
+      meaning: "changing the owner needs root"
+    - cmd: "chmod +x box"
+      meaning: "restore the directory so the practice directory can be removed (not shown in the lesson)"
+  files:
+    notes.txt: |
+      Shared notes: anyone may read these.
+    private.txt: |
+      Only the owner should see this.
+    backup.sh: |
+      #!/bin/sh
+      echo "backup.sh is running: this would copy the notes"
+    box/note.txt: |
+      A readable note, in a directory you cannot go through.
+  references:
+    - {title: "GNU Coreutils manual: File permissions", url: "https://www.gnu.org/software/coreutils/manual/html_node/File-permissions.html"}
+    - {title: "GNU Coreutils manual: chmod invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/chmod-invocation.html"}
+    - {title: "Linux man-pages: path_resolution(7) (search permission on directories)", url: "https://man7.org/linux/man-pages/man7/path_resolution.7.html"}
+    - {title: "Linux man-pages: inode(7) (permission bits, sticky bit)", url: "https://man7.org/linux/man-pages/man7/inode.7.html"}
+    - {title: "Linux man-pages: chown(2) (only a privileged process may change the owner)", url: "https://man7.org/linux/man-pages/man2/chown.2.html"}
+    - {title: "RHEL 9: Managing file system permissions", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_basic_system_settings/managing-file-system-permissions_configuring-basic-system-settings"}
+
+- id: lx.shell-expansion
+  title: "What the shell changes before a command runs"
+  subtitle: "Wildcards, quotes, variables, and names with spaces"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 20
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.shell]
+  prerequisites: [lx.files-text]
+  objective: |
+    Predict what the shell does to a line before the command sees it: expand wildcards, replace variables,
+    split words at spaces, and use quotes to keep text together or literal. Preview a dangerous command
+    before running it.
+  flow:
+    - kind: ask
+      id: recall-rm
+      recalls: lx.files-text
+      prompt: "A look back. Which command removes the directory `old` and everything in it?"
+      choices:
+        - text: "`rm -r old`"
+          why: "`-r` lets `rm` go into the directory and remove everything inside it, then the directory itself."
+        - text: "`rm old`"
+          why: "Without `-r`, `rm` refuses a directory: \"Is a directory\"."
+        - text: "`rmdir old`"
+          why: "`rmdir` removes only empty directories. It refuses when anything is still inside."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "Who understands the star?"
+      body: |
+        The `logs` directory has piled up files, and you want to remove every file ending in `.log`. You have
+        probably seen the answer somewhere: `rm logs/*.log`. The `*` means "any characters". (The practice
+        directory was prepared with that `logs` directory and a file called `My Report.txt`, used further down;
+        see "Before you start: source files".)
+
+        Here is the surprising part: `rm` never sees that `*`. Before running any command, **the shell rewrites
+        the line**. It replaces `logs/*.log` with the list of matching names, and `rm` receives that list.
+        This is called **expansion**, and it explains a whole family of surprises, some of them expensive.
+
+        To watch it happen, use `echo`. It prints its arguments, so `echo` followed by a pattern shows which
+        names the shell put in its place. For the simple file names in this lesson that is a fair preview; it
+        does not show where one argument ends and the next begins, a limit that matters when names contain
+        spaces, further down.
+    - kind: show
+      id: ls-logs
+      body: "First, what is in `logs`:"
+      run: ls logs
+    - kind: show
+      id: echo-glob
+      run: "echo logs/*.log"
+      notice: |
+        The shell replaced `logs/*.log` with the two names that match, in alphabetical order. `notes.txt` does
+        not end in `.log`, so it is not there. Patterns like this are called **wildcards** (or globs): `*`
+        matches zero or more characters within one name (it never crosses a `/`), `?` exactly one character.
+    - kind: show
+      id: ls-hidden
+      body: "One more file is hidden in `logs`, because its name starts with a dot. `ls -a` shows it:"
+      run: "ls -a logs"
+      highlight: [.debug.log]
+      notice: "`.debug.log` ends in `.log`, but `echo logs/*.log` did not list it: `*` does not match a leading dot. To match hidden names, the pattern has to start with the dot itself, as in `logs/.*.log`."
+    - kind: ask
+      id: guess-nomatch
+      guess: true
+      prompt: "There is no `.csv` file in `logs`. What does `echo logs/*.csv` print?"
+      choices:
+        - text: "An empty line"
+          why: "A reasonable guess, but bash does not remove a pattern that matched nothing. The next step shows what it passes on instead."
+        - text: "`logs/*.csv`, unchanged"
+          why: "Bash leaves a pattern that matches nothing as it is, so `echo` receives the text `logs/*.csv`. The next step shows it."
+        - text: "An error from the shell"
+          why: "The shell does not complain about a pattern that matches nothing. The next step shows what it does instead."
+      answer: 1
+    - kind: show
+      id: echo-nomatch
+      run: "echo logs/*.csv"
+      notice: |
+        When a pattern matches nothing, bash leaves it as it is. The command then receives the literal text
+        `logs/*.csv`, and usually complains that no such file exists:
+    - kind: show
+      id: ls-nomatch
+      run: "ls logs/*.csv"
+      notice: "`ls` looked for a file whose name is literally `*.csv`. The error comes from `ls`, about a name the shell handed over unchanged."
+    - kind: teach
+      id: preview
+      title: "Preview before you delete"
+      body: |
+        Because the shell expands the pattern before the command runs, you can always see the result first.
+        Put `echo` in front of a dangerous command: `echo rm logs/*.log` prints the `rm` command with the
+        matching names in place of the pattern, and removes nothing. If the list is what you expect, retype
+        the original command without the `echo`. Do not copy the printed line back into the shell: `echo`
+        does not keep quotes, so a name with a space in it would come back as two names.
+    - kind: try
+      id: try-preview
+      body: "Without removing anything, show which files `rm logs/*.txt` would remove."
+      accept: ["echo rm logs/*.txt", "echo logs/*.txt", "ls logs/*.txt", "ls -l logs/*.txt", "ls -d logs/*.txt"]
+      hints:
+        - match: "^rm "
+          say: "That would remove them. Put `echo` in front so that the command is printed instead of run."
+        - match: "echo ['\\\"]"
+          say: "Quotes stop the shell from expanding the pattern, so `echo` would print the pattern itself, not the matching names. Leave the pattern unquoted."
+        - match: "\\*\\.log"
+          say: "The task is about `.txt` files."
+      hint: "Put `echo` in front of the `rm` command."
+      run: "echo rm logs/*.txt"
+      then: "Only `logs/notes.txt` matches. Running it without `echo` would remove that one file."
+    - kind: teach
+      id: quotes
+      title: "Quotes: single and double"
+      body: |
+        Sometimes you need a `*` to reach the command untouched, for example as a search pattern for another
+        program. **Single quotes** keep text literal: whatever is between them is passed exactly as written.
+        **Double quotes** keep the text together as one argument, and also protect `*` from becoming a list of
+        file names, but they still allow variables to be replaced (the next part shows it).
+    - kind: show
+      id: single-quotes
+      run: "echo 'logs/*.log'"
+      notice: "Inside single quotes, `*` is an ordinary character. `echo` received the pattern itself."
+    - kind: teach
+      id: variables
+      title: "Variables"
+      body: |
+        The shell can also remember values in **variables**. `name=value` sets one (no spaces around `=`), and
+        `$name` is replaced by its value, except inside single quotes. Some are set for you: `$HOME` holds your home
+        directory, `$USER` your user name.
+
+        Quotes matter here too. **Double quotes** still allow variables to be replaced; **single quotes** do
+        not:
+    - kind: show
+      id: var-quotes
+      run: "city=Lisbon; echo \"I live in $city\"; echo 'I live in $city'"
+      notice: "With double quotes, `$city` became `Lisbon`. With single quotes, the text stayed exactly as typed."
+    - kind: ask
+      id: which-quotes
+      prompt: "Which command prints your home directory's path inside a sentence?"
+      choices:
+        - text: "`echo \"Home is $HOME\"`"
+          why: "Double quotes keep the sentence together and still let the shell replace `$HOME` with its value."
+        - text: "`echo 'Home is $HOME'`"
+          why: "Single quotes stop every replacement: this prints `Home is $HOME` literally."
+        - text: "`echo Home is HOME`"
+          why: "Without `$`, `HOME` is only a word. The `$` asks the shell for the variable's value."
+      answer: 0
+    - kind: teach
+      id: spaces
+      title: "Spaces split words"
+      body: |
+        You saw in the lesson on commands that the shell splits a line into words at the spaces. That is a
+        problem for a file called `My Report.txt`: typed as it is, it becomes two arguments, `My` and
+        `Report.txt`.
+    - kind: show
+      id: space-fail
+      run: "ls -l My Report.txt"
+      notice: "Two errors, one for each word: `ls` looked for a file called `My` and another called `Report.txt`."
+    - kind: try
+      id: try-space
+      body: "List `My Report.txt` in the long format, as one name."
+      accept: ["ls -l \"My Report.txt\"", "ls -l 'My Report.txt'", "ls -l My\\ Report.txt", "ls -l \"My Report\".txt", "ls -l My' 'Report.txt", "ls -l My\" \"Report.txt", "ls -l \"My Report.txt\" ", "ls \"My Report.txt\" -l", "ls 'My Report.txt' -l", "ls My\\ Report.txt -l", "ls -l ./\"My Report.txt\"", "ls -l './My Report.txt'", "ls -l \"./My Report.txt\"", "ls -l ./My\\ Report.txt", "ls --format=long \"My Report.txt\"", "ls -l -- \"My Report.txt\""]
+      hints:
+        - match: "^ls -l My Report\\.txt$"
+          say: "That is the command that failed: the space splits the name in two. Put the whole name in quotes."
+        - match: "^ls -l My_Report"
+          say: "The file's name really has a space in it. Keep the space, and protect it with quotes."
+      hint: "Put the whole name between quotes, single or double."
+      run: "ls -l \"My Report.txt\""
+      then: "Quoted, the name stays one argument. A backslash before the space (`My\\ Report.txt`) works too, and is what Tab completion types for you."
+    - kind: teach
+      id: unquoted-vars
+      body: |
+        The same split happens after a variable is replaced, when the variable is not quoted. This is behind
+        many script accidents:
+    - kind: show
+      id: var-split
+      run: "f='My Report.txt'; ls -l $f"
+      notice: "Unquoted, `$f` was replaced and then split at the space: two wrong names, two errors. The same with quotes:"
+    - kind: show
+      id: var-quoted
+      run: "f='My Report.txt'; ls -l \"$f\""
+      notice: |
+        Quoted, it stayed one name. The rule that prevents this whole family of problems: **put double quotes
+        around every variable** (`"$f"`), unless you have a reason not to.
+    - kind: ask
+      id: transfer
+      prompt: "A script sets `dir='old reports'` and later runs `rm -r $dir`, without quotes. What does `rm` receive?"
+      choices:
+        - text: "Two names: `old` and `reports`"
+          why: "The value is split at the space, so `rm` would remove a directory `old` and one called `reports` if they exist. `rm -r \"$dir\"` keeps it one name."
+        - text: "One name: `old reports`"
+          why: "That needs quotes where the variable is used: `\"$dir\"`. Quotes in the assignment only kept the value whole while setting it."
+        - text: "Nothing: the shell refuses names with spaces"
+          why: "The shell expands and splits without complaint, which is what makes this mistake dangerous."
+      answer: 0
+    - kind: reflect
+      id: explain-expansion
+      prompt: "Explain to a colleague why `rm logs/*.log` and `rm 'logs/*.log'` behave differently."
+      model: |
+        Without quotes, the shell expands `logs/*.log` into the list of matching files before `rm` runs, so
+        `rm` removes those files. In single quotes, the shell does no expansion, so `rm` receives the literal
+        name `logs/*.log` and looks for a file with a star in its name, which normally does not exist.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can predict what the shell passes to a command: wildcards replaced by matching names (or left as
+        they are when nothing matches, and skipping hidden names), variables replaced by their values, words
+        split at spaces, single-quoted text left literal, and double-quoted text kept together but still
+        getting variables. You can preview a dangerous command with `echo`.
+
+        The next lesson follows what comes *out* of a command: its normal output and its errors, sending them
+        to files, and connecting one command to the next.
+  sections:
+    - id: more-expansion
+      title: "Hidden files, other expansions, and options"
+      depth: true
+      body: |
+        - `*` does not match names that start with a dot (hidden files) unless bash's `dotglob` option is set.
+        - `[0-9]` matches one character from a set; `{a,b}` (brace expansion) produces both words whether or not
+          files exist: `cp app.conf{,.bak}` becomes `cp app.conf app.conf.bak`.
+        - `~` at the start of a word becomes your home directory, but not inside quotes: `"~/notes"` is
+          `notes` inside a directory literally called `~`. Use `"$HOME/notes"`.
+        - `$(command)` is replaced by the command's output: `echo "Today is $(date +%A)"`.
+        - With bash's `nullglob` option, a pattern that matches nothing disappears instead of staying literal;
+          it is off by default.
+  review:
+    - q: "Who expands `*.log` in `rm *.log`: the shell or `rm`?"
+      a: "The shell, before `rm` runs. `rm` receives the list of matching names."
+    - q: "What happens to a wildcard that matches nothing in bash?"
+      a: "It is passed to the command unchanged, as literal text."
+    - q: "Single or double quotes: which still allow `$variable` to be replaced?"
+      a: "Double quotes. Single quotes stop every expansion."
+    - q: "Why write `\"$f\"` rather than `$f`?"
+      a: "Unquoted, the value is split at spaces (and wildcards in it are expanded). Quoted, it stays one argument."
+  commands:
+    - cmd: ls logs
+      meaning: "three files in logs"
+    - cmd: "echo logs/*.log"
+      meaning: "the shell replaced the pattern with the matching names"
+    - cmd: "ls -a logs"
+      meaning: "the hidden file .debug.log, which * did not match"
+    - cmd: "echo logs/*.csv"
+      meaning: "a pattern that matches nothing is left unchanged"
+    - cmd: "ls logs/*.csv"
+      expect: fail
+      meaning: "ls receives the literal pattern"
+    - cmd: "echo rm logs/*.txt"
+      meaning: "a preview of the rm command"
+    - cmd: "echo 'logs/*.log'"
+      meaning: "single quotes stop expansion"
+    - cmd: "city=Lisbon; echo \"I live in $city\"; echo 'I live in $city'"
+      meaning: "double quotes replace variables, single quotes do not"
+    - cmd: "ls -l My Report.txt"
+      expect: fail
+      meaning: "a name with a space, unquoted, becomes two arguments"
+    - cmd: "ls -l \"My Report.txt\""
+      meaning: "quoted, it is one argument"
+    - cmd: "f='My Report.txt'; ls -l $f"
+      expect: fail
+      meaning: "an unquoted variable is split at the space"
+    - cmd: "f='My Report.txt'; ls -l \"$f\""
+      meaning: "a quoted variable stays one argument"
+  files:
+    logs/app.log: |
+      2026-10-14 09:00:01 INFO server started
+    logs/old.log: |
+      2026-10-13 23:59:59 INFO rotated
+    logs/notes.txt: |
+      Remember to clean up the logs.
+    logs/.debug.log: |
+      2026-10-14 09:00:02 DEBUG hidden by its leading dot
+    "My Report.txt": |
+      Quarterly report draft.
+  references:
+    - {title: "GNU Bash manual: Shell expansions", url: "https://www.gnu.org/software/bash/manual/html_node/Shell-Expansions.html"}
+    - {title: "GNU Bash manual: Filename expansion", url: "https://www.gnu.org/software/bash/manual/html_node/Filename-Expansion.html"}
+    - {title: "GNU Bash manual: Quoting", url: "https://www.gnu.org/software/bash/manual/html_node/Quoting.html"}
+    - {title: "GNU Bash manual: Shell parameters", url: "https://www.gnu.org/software/bash/manual/html_node/Shell-Parameters.html"}
+    - {title: "GNU Bash manual: Word splitting", url: "https://www.gnu.org/software/bash/manual/html_node/Word-Splitting.html"}
+
+- id: lx.redirection
+  title: "Output, errors and pipes"
+  subtitle: "Where a command's output goes, and how to send it somewhere else"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 20
+  level: 1
+  supports: "Bash 5.1 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson; each command continues from the files the previous ones left."
+  concepts: [linux.shell]
+  prerequisites: [lx.shell-expansion]
+  objective: |
+    Tell a command's normal output from its error messages, save either or both to a file (replacing or
+    appending), throw output away, and connect commands with a pipe.
+  flow:
+    - kind: ask
+      id: recall-quotes
+      recalls: lx.shell-expansion
+      prompt: "A look back. Which command prints the value of the variable `HOME` inside a sentence?"
+      choices:
+        - text: "`echo \"Home: $HOME\"`"
+          why: "Double quotes keep the sentence as one argument and still let `$HOME` be replaced."
+        - text: "`echo 'Home: $HOME'`"
+          why: "Single quotes stop every replacement, so this prints `$HOME` literally."
+        - text: "`echo Home: HOME`"
+          why: "Without `$`, `HOME` is an ordinary word."
+      answer: 0
+    - kind: teach
+      id: two-streams
+      title: "Two kinds of output"
+      body: |
+        So far, everything a command printed appeared on your screen. In fact a command has two separate
+        places to write to, called **streams**:
+
+        - **standard output** (stdout), for its results: the names `ls` lists, the lines `cat` prints;
+        - **standard error** (stderr), for its complaints: "No such file or directory".
+
+        Both are connected to your terminal, so they look the same. They are separate so that you can send the
+        results to a file, or to another program, and still see the errors.
+    - kind: teach
+      id: redirect
+      title: "Sending output to a file: >"
+      body: |
+        `>` followed by a file name sends standard output to that file instead of the screen. The file is
+        created if needed. Nothing appears on the screen, because the output went elsewhere.
+
+        The practice directory holds a `logs` directory with two short logs, `app.log` and `old.log` (see
+        "Before you start: source files"). The name `nosuchdir`, used below, deliberately does not exist, to produce an error:
+    - kind: show
+      id: to-file
+      run: "ls logs > list.txt; cat list.txt"
+      notice: "`ls` printed nothing on the screen; its output is in `list.txt`, which `cat` then shows."
+    - kind: ask
+      id: guess-error
+      guess: true
+      prompt: "Now `ls logs nosuchdir > list.txt`: one directory exists, one does not. What appears on the screen?"
+      choices:
+        - text: "Nothing: everything went to the file"
+          why: "That would be true if both streams went to the file, but `>` redirects only standard output. The next step shows what is left on the screen."
+        - text: "Only the error about `nosuchdir`"
+          why: "`>` sends only standard output, the listing, to the file. The error is on standard error, which still points at the terminal. The next step shows it."
+        - text: "The listing and the error"
+          why: "The listing is the command's standard output, which `>` sends to the file. The next step shows the rest."
+      answer: 1
+    - kind: show
+      id: error-on-screen
+      run: "ls logs nosuchdir > list.txt"
+      notice: |
+        Only the error reached the screen. `>` redirects standard output; the error went to standard error,
+        which still points at the terminal. The listing is in the file:
+    - kind: show
+      id: file-has-results
+      run: "cat list.txt"
+      notice: "The listing is there. With more than one name to list, `ls` labels each listing, hence the `logs:` line."
+    - kind: teach
+      id: stderr
+      title: "Redirecting errors: 2> and 2>&1"
+      body: |
+        Each stream has a number: 1 is standard output, 2 is standard error. `2>` redirects errors only. To send
+        both to the same file, write `> file 2>&1`: first standard output goes to the file, then `2>&1` says
+        "send stream 2 wherever stream 1 goes now".
+    - kind: show
+      id: both
+      run: "ls logs nosuchdir > all.txt 2>&1; cat all.txt"
+      notice: "Nothing on the screen during the command; the file holds the error and the listing, in the order `ls` wrote them."
+    - kind: ask
+      id: deploy-log
+      prompt: "`ls logs nosuchdir > list.txt` still prints its error on your screen. How do you put the error into `list.txt` too?"
+      choices:
+        - text: "`ls logs nosuchdir > list.txt 2>&1`"
+          why: "`2>&1` after the `>` sends standard error where standard output now goes: into the file."
+        - text: "`ls logs nosuchdir 2> list.txt`"
+          why: "That captures only the errors; the listing would now appear on the screen instead."
+        - text: "`ls logs nosuchdir >> list.txt`"
+          why: "`>>` appends standard output instead of replacing the file, but the error still goes to the screen."
+      answer: 0
+    - kind: teach
+      id: append
+      title: "Replace or append: > and >>"
+      body: |
+        `>` **replaces** the file's content, without asking. `>>` **appends** to the end instead. One character
+        separates keeping a file and emptying it:
+    - kind: show
+      id: append-show
+      run: "echo first > notes.txt; cat notes.txt"
+      notice: "`>` created `notes.txt` with one line."
+    - kind: show
+      id: append-second
+      run: "echo second >> notes.txt; cat notes.txt"
+      notice: "`>>` added `second` at the end, and `first` is still there."
+    - kind: ask
+      id: guess-replace
+      guess: true
+      prompt: "Now `echo oops > notes.txt`, with a single `>`. What will `notes.txt` contain?"
+      choices:
+        - text: "Only `oops`"
+          why: "`>` replaces the whole content of the file, so the earlier lines disappear. The next step shows it."
+        - text: "`first`, `second` and `oops`"
+          why: "That is what `>>` would give. `>` does not add to the file; it empties it first. The next step shows the result."
+        - text: "`first` and `second`"
+          why: "The new text is written to the file either way. With `>` it replaces what was there. The next step shows the result."
+      answer: 0
+    - kind: show
+      id: replace-show
+      run: "echo oops > notes.txt; cat notes.txt"
+      notice: "Only `oops` is left. The earlier lines are gone, and nothing asked first."
+    - kind: ask
+      id: add-line
+      prompt: "You want to add a line at the end of `notes.txt`, keeping what is already there. Which command?"
+      choices:
+        - text: "`echo 'call back' >> notes.txt`"
+          why: "`>>` appends to the end of the file and leaves the existing lines alone."
+        - text: "`echo 'call back' > notes.txt`"
+          why: "`>` replaces the whole content: only the new line would remain."
+        - text: "`cat 'call back' >> notes.txt`"
+          why: "`cat` prints files; it does not take text. It would look for a file named `call back`, fail, and add nothing."
+      answer: 0
+    - kind: teach
+      id: devnull
+      body: |
+        To throw output away, send it to `/dev/null`, a special file that discards everything written to it.
+        Redirecting errors there, with `2>/dev/null`, hides messages you do not need. Here `ls` fails, and
+        then `echo finished` proves that the command line ran to the end:
+    - kind: show
+      id: devnull-show
+      run: "ls nosuchdir 2>/dev/null; echo finished"
+      notice: "Without the redirection, the error about `nosuchdir` would appear above `finished`. It went to `/dev/null`."
+    - kind: try
+      id: try-devnull
+      body: "List `logs` and `nosuchdir` again, but throw the error away."
+      accept: ["ls logs nosuchdir 2>/dev/null", "ls logs nosuchdir 2> /dev/null", "ls nosuchdir logs 2>/dev/null", "ls nosuchdir logs 2> /dev/null", "ls 2>/dev/null logs nosuchdir", "ls 2> /dev/null logs nosuchdir", "ls 2>/dev/null nosuchdir logs", "ls 2> /dev/null nosuchdir logs"]
+      hints:
+        - match: "^ls logs nosuchdir >"
+          say: "`>` redirects standard output, the listing. The error is on stream 2, so write `2>`."
+        - match: "/dev/nul($| )"
+          say: "The special file is spelled `/dev/null`."
+        - match: "^ls logs nosuchdir$"
+          say: "That prints the error. Add a redirection of stream 2 to `/dev/null`."
+      hint: "`ls logs nosuchdir`, then `2>` and the file that discards everything."
+      run: "ls logs nosuchdir 2>/dev/null"
+      then: "The listing of `logs` is there, and the error is gone. The badge still says exit status 2: `2>/dev/null` hides the message, not the failure. The next lesson is about that number."
+    - kind: teach
+      id: pipes
+      title: "Pipes: one command's output into the next"
+      body: |
+        A command has a place to write to, and also a place to read from: **standard input** (stdin). When you
+        give a command a file name, it reads that file; with no file name, many commands read standard input
+        instead.
+
+        The **pipe**, `|`, connects two commands: `a | b` feeds `a`'s standard output into `b`'s standard
+        input. Small commands, each doing one thing, become a tool for a new question.
+
+        Two commands to combine: `grep word file` prints only the lines that contain a word ([Answering questions
+        from text](/lesson/lx.text-tools), two lessons on, covers it properly), and `wc -l` counts lines. How many lines of the application log are errors? First
+        the lines themselves:
+    - kind: show
+      id: grep-errors
+      run: "grep ERROR logs/app.log"
+      highlight: [ERROR]
+      notice: "Three lines contain `ERROR`. Now the same command, with its output piped into `wc -l`:"
+    - kind: show
+      id: pipe
+      run: "grep ERROR logs/app.log | wc -l"
+      notice: "`grep` printed the same three lines, but into the pipe, not onto the screen. `wc -l` was given no file name, so it read those lines from standard input and counted them: `3`."
+    - kind: try
+      id: try-pipe
+      body: "How many informational messages (lines containing `INFO`) does `logs/app.log` hold? Get the number with a pipe."
+      accept: ["grep INFO logs/app.log|wc -l", "grep INFO logs/app.log |wc -l", "grep INFO logs/app.log| wc -l", "grep INFO logs/app.log | wc -l", "grep 'INFO' logs/app.log|wc -l", "grep 'INFO' logs/app.log |wc -l", "grep 'INFO' logs/app.log| wc -l", "grep 'INFO' logs/app.log | wc -l", "grep \"INFO\" logs/app.log|wc -l", "grep \"INFO\" logs/app.log |wc -l", "grep \"INFO\" logs/app.log| wc -l", "grep \"INFO\" logs/app.log | wc -l", "cat logs/app.log|grep INFO|wc -l", "cat logs/app.log | grep INFO | wc -l", "grep INFO logs/app.log | wc --lines", "grep -c INFO logs/app.log", "grep -c 'INFO' logs/app.log", "grep -c \"INFO\" logs/app.log"]
+      hints:
+        - match: "^grep ERROR"
+          say: "The task is about `INFO` lines this time."
+        - match: "\\| ?wc$"
+          say: "`wc` alone prints three counts (lines, words, bytes). `-l` asks for lines only."
+        - match: "^wc -l .*\\| ?grep"
+          say: "The order matters: first select the lines with `grep`, then count them with `wc -l`."
+        - match: "^grep INFO logs/app\\.log$"
+          say: "That shows the lines. Add a pipe to a command that counts them."
+      hint: "Select the lines with `grep`, then send them through `|` to the command that counts lines."
+      run: "grep INFO logs/app.log | wc -l"
+      then: "Three lines. (`grep -c INFO logs/app.log` counts by itself, without a pipe; both are fine.)"
+    - kind: show
+      id: pipe-head
+      body: "Pipes also tame long output. `/usr/bin` holds hundreds of commands; here are the first five:"
+      run: "ls /usr/bin | head -n 5"
+      notice: "`head` read `ls`'s output and kept the first five lines. (Yes, `[` is a command; scripts use it to test conditions.) With `less` instead of `head`, you can page through all of it: space to go on, `q` to quit."
+    - kind: ask
+      id: pipe-errors
+      prompt: "In `ls logs nosuchdir | wc -l`, what happens to the error about `nosuchdir`?"
+      choices:
+        - text: "It appears on the screen"
+          why: "The pipe carries standard output only. The error goes to standard error, still the terminal, so you see it, and `wc` does not count it."
+        - text: "`wc -l` counts it as a line"
+          why: "Only standard output goes through the pipe. To count errors too you would add `2>&1` before the `|`."
+        - text: "It is lost"
+          why: "Nothing redirected standard error, so it still reaches the terminal."
+      answer: 0
+    - kind: reflect
+      id: explain-streams
+      prompt: "Explain to a colleague why `command > out.txt` can still print messages on the screen, and how to capture everything."
+      model: |
+        A command writes results to standard output and errors to standard error. `>` redirects only standard
+        output, so errors still go to the terminal. `command > out.txt 2>&1` sends standard output to the file
+        and then standard error to the same place, so the file holds both.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can tell results from errors, send either or both to a file, choose between replacing and
+        appending, discard output with `/dev/null`, and chain commands with pipes.
+
+        Next: every command also ends with a small number saying whether it worked, and the shell can use it to
+        decide what to run next.
+  sections:
+    - id: more-redirection
+      title: "Order of redirections, and reading input"
+      depth: true
+      body: |
+        - Redirections are processed from left to right, and `2>&1` copies wherever stream 1 points *at that
+          moment*. So `cmd 2>&1 > file` sends errors to the terminal (where stdout pointed before) and output to
+          the file, unlike `cmd > file 2>&1`.
+        - `&> file` is bash's shorthand for `> file 2>&1`.
+        - `< file` gives a file to a command as its standard input: `wc -l < logs/app.log` counts lines without
+          printing the file name.
+        - `tee file` copies its input both to a file and onward: `cmd | tee out.txt | grep ERROR`.
+        - The default exit status of a pipeline is that of its last command; the next lesson comes back to it.
+  review:
+    - q: "What are standard output and standard error?"
+      a: "Two separate output streams: 1 for results, 2 for error messages. Both go to the terminal by default."
+    - q: "How do you send both output and errors to one file?"
+      a: "`command > file 2>&1`."
+    - q: "What is the difference between `>` and `>>`?"
+      a: "`>` replaces the file's content; `>>` appends to it."
+    - q: "What does `a | b` do?"
+      a: "Sends the standard output of `a` to `b` as its input. Errors from `a` still go to the terminal."
+  commands:
+    - cmd: "ls logs > list.txt; cat list.txt"
+      meaning: "standard output into a file"
+    - cmd: "ls logs nosuchdir > list.txt"
+      expect: fail
+      meaning: "the error still reaches the screen"
+    - cmd: "cat list.txt"
+      meaning: "the listing went to the file"
+    - cmd: "ls logs nosuchdir > all.txt 2>&1; cat all.txt"
+      meaning: "both streams in one file"
+    - cmd: "echo first > notes.txt; cat notes.txt"
+      meaning: "> creates the file with one line"
+    - cmd: "echo second >> notes.txt; cat notes.txt"
+      meaning: ">> appends a line"
+    - cmd: "echo oops > notes.txt; cat notes.txt"
+      meaning: "> replaces the whole content"
+    - cmd: "ls nosuchdir 2>/dev/null; echo finished"
+      meaning: "the error goes to /dev/null"
+    - cmd: "ls logs nosuchdir 2>/dev/null"
+      expect: fail
+      meaning: "the listing stays, the error is discarded"
+    - cmd: "grep ERROR logs/app.log"
+      meaning: "the three error lines"
+    - cmd: "grep ERROR logs/app.log | wc -l"
+      meaning: "count the error lines with a pipe"
+    - cmd: "grep INFO logs/app.log | wc -l"
+      meaning: "count the INFO lines"
+    - cmd: "ls /usr/bin | head -n 5"
+      meaning: "the first five commands in /usr/bin"
+  files:
+    logs/app.log: |
+      2026-10-14T09:00:01 INFO server started on port 8080
+      2026-10-14T09:00:05 INFO connected to database
+      2026-10-14T09:12:40 ERROR timeout calling payments
+      2026-10-14T09:12:41 WARN retrying request
+      2026-10-14T09:12:47 ERROR timeout calling payments
+      2026-10-14T09:30:02 ERROR invalid token from client
+      2026-10-14T09:45:00 INFO health check ok
+    logs/old.log: |
+      2026-10-13T23:59:59 INFO rotated
+  references:
+    - {title: "GNU Bash manual: Redirections", url: "https://www.gnu.org/software/bash/manual/html_node/Redirections.html"}
+    - {title: "GNU Bash manual: Pipelines", url: "https://www.gnu.org/software/bash/manual/html_node/Pipelines.html"}
+    - {title: "GNU Coreutils manual: wc invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/wc-invocation.html"}
+    - {title: "Linux man-pages: null(4)", url: "https://man7.org/linux/man-pages/man4/null.4.html"}
+
+- id: lx.exit-status
+  title: "Did it work? Exit status, && and ||"
+  subtitle: "The number every command leaves behind, and how the shell uses it"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 15
+  level: 1
+  supports: "Bash 5.1, GNU coreutils 8.32 and GNU grep 3.6 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.shell, linux.process]
+  prerequisites: [lx.redirection]
+  objective: |
+    Read a command's exit status, know what 0 and the common non-zero values mean, and use `;`, `&&` and `||`
+    to run a command only when the previous one succeeded or failed.
+  flow:
+    - kind: ask
+      id: recall-pipe
+      recalls: lx.redirection
+      prompt: "A look back. In `ls logs nosuchdir | wc -l`, does `wc` count the error line?"
+      choices:
+        - text: "No: errors bypass the pipe"
+          why: "The pipe carries standard output only; the error goes to standard error, the terminal."
+        - text: "Yes: the pipe carries everything"
+          why: "Only standard output goes through `|`. You would need `2>&1` before the pipe to include errors."
+        - text: "Only if `ls` fails completely"
+          why: "Whether `ls` fails or not, its error messages go to standard error, not into the pipe."
+      answer: 0
+    - kind: teach
+      id: status
+      title: "Every command ends with a number"
+      body: |
+        When a command finishes, it leaves behind a number called its **exit status**. It is not printed, but
+        the shell keeps it in a special variable, `$?`, until the next command replaces it.
+
+        The convention is simple: **0 means success**, and anything else means something went wrong. Each
+        command documents its own non-zero values. Scripts and tools use this number to decide what to do
+        next, which is why it matters even though you never see it.
+
+        To read it, run a command, then `echo` the variable on the same line. The `;` between two commands
+        runs the second after the first. The practice directory holds one prepared file, `logs/app.log` (see
+        "Before you start: source files"); `nosuchdir`, `missing.log` and `nosuchcommand` below deliberately do not exist. Here
+        with `echo hello` as the first command:
+    - kind: show
+      id: status-demo
+      run: "echo hello; echo \"status: $?\""
+      notice: "`hello` came from the first command. The second prints `status: ` and then `$?`, the status the first one left: 0, success."
+    - kind: try
+      id: status-ok-fail
+      body: "Now the same for `ls logs`: run it, then print its exit status on the same line, with `;` between the two commands."
+      accept: ["ls logs; echo $?", "ls logs ; echo $?", "ls logs; echo \"$?\"", "ls logs; echo \"status: $?\"", "ls logs;echo $?"]
+      hints:
+        - match: "echo \\?"
+          say: "The variable needs its `$`: `$?`."
+        - match: "echo '\\$\\?'"
+          say: "Single quotes stop the replacement, so this prints `$?` literally. Use no quotes or double quotes."
+        - match: "&&"
+          say: "That works when `ls` succeeds, but would print nothing if it failed. `;` always runs the `echo`."
+      hint: "`ls logs`, then `;`, then `echo $?`."
+      run: "ls logs; echo \"status: $?\""
+      then: "`ls` worked, and `$?` is 0. (The recording printed `status:` before the number.)"
+    - kind: show
+      id: status-fail
+      run: "ls nosuchdir; echo \"status: $?\""
+      notice: "`ls` failed, with status 2, which its manual describes as \"serious trouble\", such as a name it cannot access."
+    - kind: teach
+      id: grep-codes
+      body: |
+        Non-zero does not always mean "broken". `grep` uses three values: **0** when a line matched, **1** when
+        nothing matched (a normal answer), **2** when something went wrong, such as a missing file. `-q`
+        (quiet) stops `grep` from printing the lines it finds, so the status gives the answer. Error messages
+        can still appear, as the missing file shows:
+    - kind: show
+      id: grep-statuses
+      run: "grep -q ERROR logs/app.log; echo \"ERROR: $?\"; grep -q FATAL logs/app.log; echo \"FATAL: $?\"; grep -q ERROR missing.log; echo \"missing file: $?\""
+      notice: "0: found. 1: not found. 2: could not search at all: the `grep: missing.log: No such file or directory` line is its error message on standard error, which `-q` does not hide."
+    - kind: ask
+      id: read-status
+      prompt: "A script runs `grep -q ready status.txt` and gets exit status 1. What happened?"
+      choices:
+        - text: "It found no `ready` line"
+          why: "For `grep`, 1 means \"no match\": the search worked, and found nothing."
+        - text: "The file does not exist"
+          why: "A missing file is an error, which `grep` reports with status 2."
+        - text: "`grep` failed to run"
+          why: "1 is one of `grep`'s normal answers: no line matched. A failure to search gives 2."
+      answer: 0
+    - kind: teach
+      id: shell-codes
+      body: |
+        The shell adds two values of its own: **127** when the command does not exist (often a typo, or a
+        program that is not installed), and **126** when the file exists but cannot be run. The usual cause is a
+        missing `x` (execute) permission: every file records whether it may be run as a program, as
+        [Who may read, change and run a file](/lesson/lx.users-permissions) explains later in this module.
+    - kind: show
+      id: not-found
+      run: "nosuchcommand; echo \"status: $?\""
+      notice: "\"command not found\", status 127."
+    - kind: teach
+      id: chaining
+      title: "Running the next command only if…"
+      body: |
+        You can put several commands on one line, and the exit status decides what runs:
+
+        | Between commands | The second runs |
+        |---|---|
+        | `a ; b` | always |
+        | `a && b` | only if `a` succeeded (status 0) |
+        | `a \|\| b` | only if `a` failed (non-zero) |
+
+        Read `&&` as "and then, if that worked" and `||` as "or else".
+    - kind: ask
+      id: guess-cleanup
+      guess: true
+      prompt: "`cd nosuchdir && echo cleaning up`: the directory does not exist. What is printed?"
+      choices:
+        - text: "Only the error from `cd`"
+          why: "`&&` runs the second command only if the first succeeded. `cd` fails, so nothing follows. The next step shows it."
+        - text: "The error, then `cleaning up`"
+          why: "That is what `;` would do, because it always runs the second command. `&&` does not. The next step shows it."
+        - text: "Only `cleaning up`"
+          why: "`cd` runs first and prints its error, and its failure is what stops `&&` from going on. The next step shows it."
+      answer: 0
+    - kind: show
+      id: and-and
+      run: "cd nosuchdir && echo cleaning up"
+      notice: "`cd` failed, so `&&` did not run the `echo`. With `;` instead, it would have run anyway. The `line 1:` comes from the recorder running each line as a one-line script; at your prompt the message has no line number."
+    - kind: teach
+      id: why-it-matters
+      body: |
+        This matters most before destructive commands. A script line `cd /srv/build; rm -rf ./*` is a known
+        disaster: if `/srv/build` is missing, `cd` fails, the shell stays where it was, and `rm` removes the
+        files and directories of the wrong directory (`./*` skips names that start with a dot, but everything
+        else goes). Written as `cd /srv/build && rm -rf ./*`, nothing is removed when `cd` fails.
+    - kind: try
+      id: try-or
+      body: "Search `logs/app.log` for `ERROR` with `grep -q`, and use `||` to print `not found, or failed` when `grep` does not succeed."
+      accept: ["grep -q ERROR logs/app.log || echo 'not found, or failed'", "grep -q 'ERROR' logs/app.log || echo 'not found, or failed'", "grep -q ERROR logs/app.log||echo 'not found, or failed'", "grep -q ERROR logs/app.log || echo \"not found, or failed\"", "grep -q \"ERROR\" logs/app.log || echo \"not found, or failed\"", "grep -q ERROR logs/app.log||echo \"not found, or failed\"", "grep -q ERROR logs/app.log || echo not found, or failed", "grep -q ERROR logs/app.log || echo not\\ found,\\ or\\ failed"]
+      hints:
+        - match: "&&"
+          say: "`&&` runs the `echo` when `grep` *succeeds*, that is, when it finds an error line: the opposite. You want \"or else\"."
+        - match: "; ?echo"
+          say: "`;` runs the `echo` whatever `grep` found. Use `||` so that it runs only when `grep` does not succeed: status 1 (no match) or 2 (it could not search)."
+        - match: "^grep ERROR"
+          say: "Add `-q`, so that `grep` prints nothing and only its status speaks."
+      hint: "`grep -q ERROR logs/app.log`, then `||`, then the `echo`."
+      run: "grep -q ERROR logs/app.log || echo 'not found, or failed'"
+      then: "Nothing printed: the log does contain `ERROR` lines, so `grep` succeeded and `||` skipped the `echo`. Now two cases where it does not succeed:"
+    - kind: show
+      id: or-both-cases
+      run: "grep -q FATAL logs/app.log || echo 'not found, or failed'; grep -q ERROR missing.log || echo 'not found, or failed'"
+      notice: "The first message is for a search that found no `FATAL` (status 1). The second search could not open the file, so `grep` printed its error and status 2 ran the `||` branch as well. The message cannot tell the two apart: if it appears, look for an error above it."
+    - kind: ask
+      id: transfer
+      prompt: "You copy `report.txt` into `archive` and then remove the original, but only if the copy worked. Which line?"
+      choices:
+        - text: "`cp report.txt archive && rm report.txt`"
+          why: "`&&` runs `rm` only if `cp` succeeded, so a failed copy never costs you the original."
+        - text: "`cp report.txt archive; rm report.txt`"
+          why: "`;` runs `rm` even when `cp` fails, so the original could be removed with no copy made."
+        - text: "`cp report.txt archive || rm report.txt`"
+          why: "`||` runs `rm` only when `cp` *fails*, which removes the file in exactly the case where you have no copy."
+      answer: 0
+    - kind: reflect
+      id: explain-status
+      prompt: "Explain to a colleague what an exit status is, and why `grep` returning 1 is not necessarily a problem."
+      model: |
+        Every command ends with a number, its exit status, kept in `$?`: 0 for success, non-zero otherwise, with
+        meanings each command documents. For `grep`, 1 means "searched, found nothing", which can be the expected
+        answer; 2 means it could not search. Scripts and `&&`/`||` use this number to decide what runs next.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read a command's exit status, interpret 0, 1, 2, 126 and 127, and chain commands so that each
+        step runs only when it should.
+
+        The same number comes back later in many places: scripts stop on it, services are restarted because
+        of it, and container platforms report it when a container ends. Next, more tools for answering
+        questions from text files.
+  sections:
+    - id: more-status
+      title: "Pipelines, set -e, and statuses above 128"
+      depth: true
+      body: |
+        - The status of a pipeline `a | b` is the status of its *last* command. `set -o pipefail` makes the
+          pipeline fail when any part of it fails.
+        - In a script, `set -e` stops at the first command that fails, except in tested positions (after `if`,
+          before `&&` or `||`), which the bash manual details.
+        - A status above 128 usually means the process was killed by a signal: 128 + the signal's number. 130 is
+          Ctrl-C (signal 2), 137 is SIGKILL (9), 143 is SIGTERM (15). The lesson on processes and signals
+          explains them.
+        - `$?` is replaced by every command, including `echo` and `[`. Save it first if you need it later:
+          `rc=$?`.
+  review:
+    - q: "What does exit status 0 mean? And non-zero?"
+      a: "0: success. Non-zero: something went wrong, with a meaning each command documents."
+    - q: "What do `grep`'s statuses 0, 1 and 2 mean?"
+      a: "0: a line matched. 1: nothing matched. 2: an error, such as a missing file."
+    - q: "Which statuses does the shell itself use for \"command not found\" and \"cannot run\"?"
+      a: "127 and 126."
+    - q: "Difference between `a ; b`, `a && b` and `a || b`?"
+      a: "`;` always runs `b`; `&&` only if `a` succeeded; `||` only if `a` failed."
+  commands:
+    - cmd: "echo hello; echo \"status: $?\""
+      meaning: "reading the status of the previous command"
+    - cmd: "ls logs; echo \"status: $?\""
+      meaning: "a successful command: status 0"
+    - cmd: "ls nosuchdir; echo \"status: $?\""
+      meaning: "ls cannot access a name: status 2"
+    - cmd: "grep -q ERROR logs/app.log; echo \"ERROR: $?\"; grep -q FATAL logs/app.log; echo \"FATAL: $?\"; grep -q ERROR missing.log; echo \"missing file: $?\""
+      meaning: "grep's three statuses"
+    - cmd: "nosuchcommand; echo \"status: $?\""
+      meaning: "command not found: 127"
+    - cmd: "cd nosuchdir && echo cleaning up"
+      expect: fail
+      meaning: "&& skips the second command when the first fails"
+    - cmd: "grep -q ERROR logs/app.log || echo 'not found, or failed'"
+      meaning: "|| runs the echo only when grep does not succeed; here it does, so nothing is printed"
+    - cmd: "grep -q FATAL logs/app.log || echo 'not found, or failed'; grep -q ERROR missing.log || echo 'not found, or failed'"
+      meaning: "no match (status 1) and a missing file (status 2) both run the || branch"
+  files:
+    logs/app.log: |
+      2026-10-14T09:00:01 INFO server started on port 8080
+      2026-10-14T09:12:40 ERROR timeout calling payments
+      2026-10-14T09:45:00 INFO health check ok
+  references:
+    - {title: "GNU Bash manual: Exit status", url: "https://www.gnu.org/software/bash/manual/html_node/Exit-Status.html"}
+    - {title: "GNU Bash manual: Lists of commands (;, &&, ||)", url: "https://www.gnu.org/software/bash/manual/html_node/Lists.html"}
+    - {title: "GNU grep manual: Exit status", url: "https://www.gnu.org/software/grep/manual/html_node/Exit-Status.html"}
+    - {title: "GNU Coreutils manual: ls invocation (exit status)", url: "https://www.gnu.org/software/coreutils/manual/html_node/ls-invocation.html"}
+
+- id: lx.text-tools
+  title: "Answering questions from text"
+  subtitle: "grep, sort, uniq, cut and tail, one at a time, then together"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 22
+  level: 1
+  supports: "GNU grep 3.6 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.shell, linux.files, obs.signals]
+  prerequisites: [lx.exit-status]
+  objective: |
+    Answer questions about a log file by combining small tools: find lines with grep, keep columns with cut,
+    sort and count with sort and uniq -c, and look at the end of a file with tail.
+  flow:
+    - kind: ask
+      id: recall-or
+      recalls: lx.exit-status
+      prompt: "A look back. `grep -q ERROR app.log || echo clean` prints nothing. What does that tell you?"
+      choices:
+        - text: "`app.log` contains an `ERROR` line"
+          why: "`grep` found a match and succeeded, so `||` skipped the `echo`."
+        - text: "`app.log` has no `ERROR` line"
+          why: "Then `grep` would fail (status 1), and `||` would run the `echo`."
+        - text: "`grep` could not read the file"
+          why: "That is a failure too (status 2): `||` would run the `echo`, and `grep` would print an error."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "A question, and a file of answers"
+      body: |
+        Customers of a web shop say that some checkouts failed this morning. The web server keeps an access
+        log: one line for every **request**, which is a browser (the **client**) asking the server for a page.
+        Somewhere in its thousands of lines is the answer: which pages failed, how often, and for whom.
+
+        Opening it in an editor and scrolling does not scale. Instead, you combine a few small tools, each doing
+        one job, with the pipes from [Output, errors and pipes](/lesson/lx.redirection). The log used here,
+        `access.log`, is a short one written for this lesson (nine lines; see "Before you start: source files"). Its
+        first three lines:
+    - kind: show
+      id: head
+      run: "head -n 3 access.log"
+      notice: |
+        Take the first line, `10.0.0.4 09:00:01 GET /index.html 200 5120`, as fields separated by spaces:
+        `10.0.0.4` is the client's address (where the request came from), `09:00:01` the time, `/index.html`
+        the page asked for, and `200` the **status code**: the server's answer (200 means OK, 404 not found,
+        500 and up mean the server failed). `GET` is the kind of request and `5120` the size of the reply in
+        bytes; you can ignore those two here.
+    - kind: teach
+      id: grep
+      title: "Finding lines: grep"
+      body: |
+        `grep pattern file` prints the lines that contain the pattern. In this lesson the pattern is plain
+        text. `grep` also has its own pattern language, which is not the shell's `*` wildcard: `grep '*.log'`
+        does not mean "anything ending in `.log`". Three options you will use constantly: `-c` counts
+        matching lines instead of printing them, `-i` ignores upper and lower case, and `-v` keeps the lines
+        that do **not** match.
+    - kind: show
+      id: grep-500
+      run: "grep ' 500 ' access.log"
+      notice: "The spaces around `500` matter: they match the status field, not a `500` inside a path or a size. The quotes keep the spaces in the pattern."
+    - kind: try
+      id: try-count
+      body: "Count the lines with status 500, without printing them."
+      accept: ["grep ' 500 ' access.log | wc -l", "grep ' 500 ' access.log|wc -l", "grep ' 500 ' access.log| wc -l", "grep ' 500 ' access.log |wc -l", "grep -c ' 500 ' access.log", "grep --count ' 500 ' access.log", "grep ' 500 ' -c access.log", "grep \" 500 \" access.log | wc -l", "grep \" 500 \" access.log|wc -l", "grep \" 500 \" access.log| wc -l", "grep \" 500 \" access.log |wc -l", "grep -c \" 500 \" access.log", "grep --count \" 500 \" access.log", "grep \" 500 \" -c access.log"]
+      hints:
+        - match: "^grep -c 500"
+          say: "Without the spaces, `500` also matches inside sizes such as `1500`. Keep the pattern `' 500 '`, quoted."
+        - match: "^grep -v"
+          say: "`-v` keeps the lines that do *not* match. Counting is `-c`."
+        - match: "^grep ' 500 ' access\\.log$"
+          say: "That prints the lines. Add the option that counts them instead."
+      hint: "The same `grep`, with `-c`."
+      run: "grep -c ' 500 ' access.log"
+      then: "Four failed requests."
+    - kind: teach
+      id: cut
+      title: "Keeping one column: cut"
+      body: |
+        To ask "which clients?", keep only the first field. In `cut -d ' ' -f 1`, the option `-d ' '` sets the
+        **delimiter**, the character that separates the fields: here one space, quoted. The option `-f 1`
+        keeps field 1, the first one. Fed from `grep` through a pipe, it lists the client of each failed
+        request:
+    - kind: show
+      id: cut-show
+      run: "grep ' 500 ' access.log | cut -d ' ' -f 1"
+    - kind: teach
+      id: sort-uniq
+      title: "Counting: sort and uniq -c"
+      body: |
+        `uniq -c` collapses repeated lines into one, with a count in front. It only merges lines that are
+        **next to each other**. `sort` puts identical lines next to each other, so the usual order is
+        `sort | uniq -c`.
+    - kind: ask
+      id: guess-uniq
+      guess: true
+      prompt: "`uniq -c` alone, without `sort`, gets this list of clients. How many lines does it print?"
+      evidence: |
+        10.0.0.7
+        10.0.0.4
+        10.0.0.7
+        10.0.0.7
+      choices:
+        - text: "Three"
+          why: "The runs of neighbouring identical lines are `10.0.0.7`, then `10.0.0.4`, then `10.0.0.7` twice: three runs, three lines. The next step shows it."
+        - text: "Two"
+          why: "Two is the number of different clients, which is what you get after sorting. Without it, `uniq` only compares each line with the one before it."
+        - text: "Four"
+          why: "Four would mean no two neighbouring lines are equal. The last two lines are identical neighbours, so they merge into one."
+      answer: 0
+    - kind: show
+      id: uniq-unsorted
+      run: "grep ' 500 ' access.log | cut -d ' ' -f 1 | uniq -c"
+      notice: "`10.0.0.7` appears twice, with separate counts, because its lines were not adjacent. Sort first, and identical lines are neighbours:"
+    - kind: show
+      id: sorted-list
+      run: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort"
+      notice: "The same four addresses, with the three `10.0.0.7` lines together. Now add `uniq -c`:"
+    - kind: show
+      id: sorted-counted
+      run: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c"
+      notice: "One line per client, with its count in front: `10.0.0.4` once, `10.0.0.7` three times. They are in address order, not by count."
+    - kind: teach
+      id: rank
+      body: |
+        To rank them, add one more `sort` at the end. `sort -rn` sorts numerically (`-n`, so 10 comes after
+        9, not after 1) and in reverse (`-r`), largest first. The number to sort by is the count that `uniq -c`
+        put at the start of each line.
+    - kind: try
+      id: try-rank
+      body: "Extend the pipeline `grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c` so that the client with the most failed requests comes first."
+      accept: ["grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -rn", "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -nr", "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -r -n", "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -n -r", "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort --reverse --numeric-sort"]
+      hints:
+        - match: "sort$"
+          say: "A plain `sort` orders the lines as text, by address. To sort by the count, numerically and largest first, add `-n` and `-r`."
+        - match: "sort -n$"
+          say: "`-n` sorts numerically, but smallest first. Add `-r` to reverse it."
+        - match: "sort -r$"
+          say: "`-r` reverses, but compares the counts as text, so a count of `9` can come before `10`. Add `-n` so the counts are compared as numbers."
+      hint: "Add `| sort -rn` at the end."
+      run: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -rn"
+      then: |
+        Three of the four 500 responses were sent to `10.0.0.7`. Counting shows an association,
+        not a cause: finding the cause needs more evidence. The failed lines themselves show that all four were
+        `POST /checkout`, so that page is the place to look next.
+    - kind: order
+      id: order-pipeline
+      prompt: "Build a pipeline that lists the most requested paths, most frequent first. Put the pieces in order."
+      items:
+        - "`cut -d ' ' -f 4 access.log` (the path is field 4)"
+        - "`sort`"
+        - "`uniq -c`"
+        - "`sort -rn`"
+      why: "Extract the field, sort so that identical paths are adjacent, count them, then sort the counts from largest to smallest."
+    - kind: teach
+      id: tail
+      title: "The end of a file: tail"
+      body: |
+        Logs grow at the bottom, so the newest lines are at the end. `tail -n 5` prints the last five lines.
+        `tail -f` keeps the file open and prints new lines as they are written, until you press Ctrl-C: the
+        usual way to watch a log while you reproduce a problem.
+    - kind: show
+      id: tail-show
+      run: "tail -n 2 access.log"
+    - kind: ask
+      id: transfer
+      prompt: "Which command counts the requests that did **not** return status 200?"
+      choices:
+        - text: "`grep -vc ' 200 ' access.log`"
+          why: "`-v` keeps the lines without ` 200 `, and `-c` counts them."
+        - text: "`grep -c ' 200 ' access.log`"
+          why: "That counts the successful requests, the opposite."
+        - text: "`grep -v 200 access.log | uniq -c`"
+          why: "Without the spaces, `200` would also match a size such as `1200` or a path that contains it; and `uniq -c` counts runs of identical lines, not lines."
+      answer: 0
+    - kind: reflect
+      id: explain-pipeline
+      prompt: "Explain to a colleague why `sort` must come before `uniq -c`."
+      model: |
+        `uniq -c` only merges identical lines that are next to each other; it compares each line with the one
+        before. Unsorted, the same value can appear in several places and gets several separate counts. `sort`
+        puts identical lines together first, so each value is counted once.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can answer questions from text: find lines with `grep`, keep a column with `cut`, count with
+        `sort | uniq -c`, rank with `sort -rn`, and watch a log with `tail`.
+
+        Application logs on servers, and later the logs of containers, are read with exactly these tools. Next:
+        finding files by name, age or size, and what links are.
+  sections:
+    - id: sed-awk
+      title: "A little sed and awk"
+      depth: true
+      body: |
+        You will meet both in scripts and runbooks.
+
+        - `sed -n '10,20p' file` prints lines 10 to 20; `sed 's/debug/info/' file` prints the file with the
+          first `debug` on each line replaced (add `g` after the last slash for every one). `sed -i` changes
+          the file in place: run without `-i` first and check the result.
+        - `awk` splits each line into fields `$1`, `$2`, … at whitespace (or at the separator given with `-F`):
+          `awk '$5 >= 500 {print $1, $4}'` prints the client and path of each line whose fifth field, the status,
+          is 500 or more. It is often simpler than `cut` when fields are separated by several spaces.
+        - The values can also be attached to the options: `cut -d' ' -f1` means the same as
+          `cut -d ' ' -f 1`, because the shell joins the quoted space to `-d`.
+        - `grep ' 5[0-9][0-9] '` matches any 5xx status (no option needed: brackets are basic regular
+          expressions); `grep -E` adds extended ones, such as the alternation `'(404|500)'`.
+  review:
+    - q: "Which `grep` options count, ignore case, and invert the match?"
+      a: "`-c`, `-i` and `-v`."
+    - q: "Why does `uniq -c` need `sort` before it?"
+      a: "It only merges identical lines that are adjacent."
+    - q: "What does `cut -d ' ' -f 1` do?"
+      a: "Splits each line at spaces and keeps the first field."
+    - q: "How do you watch new lines being added to a log?"
+      a: "`tail -f file`, stopped with Ctrl-C."
+  commands:
+    - cmd: "head -n 3 access.log"
+      meaning: "the format of the log"
+    - cmd: "grep ' 500 ' access.log"
+      meaning: "the failed requests"
+    - cmd: "grep -c ' 500 ' access.log"
+      meaning: "how many"
+    - cmd: "grep ' 500 ' access.log | cut -d ' ' -f 1"
+      meaning: "the client of each failed request"
+    - cmd: "grep ' 500 ' access.log | cut -d ' ' -f 1 | uniq -c"
+      meaning: "uniq without sort counts separate runs"
+    - cmd: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort"
+      meaning: "the same clients, identical lines together"
+    - cmd: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c"
+      meaning: "one line per client, with a count"
+    - cmd: "grep ' 500 ' access.log | cut -d ' ' -f 1 | sort | uniq -c | sort -rn"
+      meaning: "clients by number of failed requests"
+    - cmd: "tail -n 2 access.log"
+      meaning: "the last two lines"
+  files:
+    access.log: |
+      10.0.0.4 09:00:01 GET /index.html 200 5120
+      10.0.0.7 09:00:02 GET /cart 200 1500
+      10.0.0.7 09:00:05 POST /checkout 500 312
+      10.0.0.9 09:00:06 GET /index.html 200 5120
+      10.0.0.4 09:00:09 POST /checkout 500 312
+      10.0.0.7 09:00:12 POST /checkout 500 312
+      10.0.0.5 09:00:15 GET /missing 404 210
+      10.0.0.7 09:00:21 POST /checkout 500 312
+      10.0.0.9 09:00:30 GET /cart 200 1500
+  references:
+    - {title: "GNU grep manual: Usage and options", url: "https://www.gnu.org/software/grep/manual/grep.html"}
+    - {title: "GNU Coreutils manual: cut invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/cut-invocation.html"}
+    - {title: "GNU Coreutils manual: sort invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/sort-invocation.html"}
+    - {title: "GNU Coreutils manual: uniq invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/uniq-invocation.html"}
+    - {title: "GNU Coreutils manual: tail invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/tail-invocation.html"}
+
+- id: lx.find-links
+  title: "Finding files, and links"
+  subtitle: "find by name; symbolic and hard links"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 18
+  level: 1
+  supports: "GNU findutils 4.8 and GNU coreutils 8.32 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson; each command continues from the files the previous ones left."
+  concepts: [linux.files]
+  prerequisites: [lx.text-tools]
+  objective: |
+    Find files by name with find, and explain symbolic and hard links: what each one is, how ls shows it,
+    and what happens to it when the original is removed or renamed.
+  flow:
+    - kind: ask
+      id: recall-uniq
+      recalls: lx.text-tools
+      prompt: "A look back. `uniq -c`, run on an unsorted list of clients, printed this. What puts all the `10.0.0.7` lines into one count?"
+      evidence: |
+            2 10.0.0.7
+            1 10.0.0.4
+            1 10.0.0.7
+      choices:
+        - text: "Run `sort` before `uniq -c`"
+          why: "Sorting puts identical lines next to each other, and `uniq -c` merges only neighbours, so each value is counted once."
+        - text: "Run `sort` after `uniq -c`"
+          why: "That orders the result lines, but the counting has already been split. `uniq -c` merges only neighbouring lines, so the sorting must come first."
+        - text: "Run `uniq -c` a second time"
+          why: "The three result lines all differ, because each starts with its own count, so a second pass finds nothing to merge."
+      answer: 0
+    - kind: teach
+      id: find
+      title: "Finding files: find"
+      body: |
+        `ls` shows one directory. When you do not know where a file is, `find` walks through a directory and
+        everything below it, testing every entry. The pattern is `find <where> <test>`. The test you need most
+        is `-name 'pattern'`, which keeps the entries whose name matches, with the same wildcards as the shell,
+        except that here `*` also matches a name that starts with a dot. (Tests for type, age and size are in
+        the depth section at the end.)
+
+        With no test, `find` lists everything. Here is the practice project, a small `project` directory
+        prepared for this lesson with configuration files, logs and notes (see "Before you start: source files"):
+    - kind: show
+      id: find-all
+      run: "find project"
+    - kind: show
+      id: find-conf
+      run: "find project -name '*.conf'"
+      notice: "Every entry whose name ends in `.conf`, at any depth below `project`. Here they are all files, but `-name` tests only the name: a directory called `x.conf` would match too."
+    - kind: ask
+      id: why-quotes
+      prompt: "Why is `'*.conf'` in quotes in that command?"
+      choices:
+        - text: "So that `find`, not the shell, expands it"
+          why: "Unquoted, the shell would replace `*.conf` with matching names in the *current* directory before `find` ran. `find` needs the pattern itself."
+        - text: "Because `find` requires every argument in quotes"
+          why: "`find` needs no quotes in general: `find project -type f` works as it is. The quotes are there for the `*`."
+        - text: "To match names that contain spaces"
+          why: "The quotes protect the `*` from the shell, not spaces in file names, which `find` handles anyway."
+      answer: 0
+    - kind: try
+      id: try-find
+      body: "Find every entry below `project` whose name ends in `.log`."
+      accept: ["find project -name '*.log'", "find project -name '*.log' -print", "find project -type f -name '*.log'", "find project -name '*.log' -type f", "find project -name \"*.log\"", "find project -name \"*.log\" -print", "find project -type f -name \"*.log\"", "find project -name \"*.log\" -type f", "find project -name \\*.log", "find project -type f -name \\*.log", "find project/ -name '*.log'", "find project/ -name '*.log' -print", "find project/ -type f -name '*.log'", "find project/ -name '*.log' -type f", "find project/ -name \"*.log\"", "find project/ -name \"*.log\" -print", "find project/ -type f -name \"*.log\"", "find project/ -name \"*.log\" -type f", "find project/ -name \\*.log", "find project/ -type f -name \\*.log", "find ./project -name '*.log'", "find ./project -name '*.log' -print", "find ./project -type f -name '*.log'", "find ./project -name '*.log' -type f", "find ./project -name \"*.log\"", "find ./project -name \"*.log\" -print", "find ./project -type f -name \"*.log\"", "find ./project -name \"*.log\" -type f", "find ./project -name \\*.log", "find ./project -type f -name \\*.log"]
+      hints:
+        - match: "-name \\*\\.log|-name \\*.log$"
+          say: "That might work here, but only by luck: if a `.log` file existed in the current directory, the shell would replace the pattern. Quote it."
+        - match: "^find -name"
+          say: "Without a starting directory, `find` searches the current one. Give `project` first, as the task asks."
+        - match: "^ls "
+          say: "`ls` lists one directory at a time. `find` searches below it too."
+      hint: "`find project`, then `-name` and the quoted pattern."
+      run: "find project -name '*.log'"
+    - kind: teach
+      id: system-find
+      body: |
+        On a whole system, `find` meets directories you may not read and prints a "Permission denied" for each.
+        Those messages go to standard error, so `2>/dev/null` (from the lesson on output) hides them and leaves
+        the results:
+    - kind: show
+      id: find-system
+      run: "find /etc -name 'sshd_config' 2>/dev/null"
+      notice: |
+        The configuration file of the SSH server (the program that lets people log in to this machine over the
+        network, covered at the end of this module), found among thousands of entries under `/etc`. The exit status
+        under the output is 1, not 0: `find` reports that some directories could not be read, even though the
+        messages were discarded and the file was found. Exit statuses describe the whole run.
+    - kind: teach
+      id: symlinks
+      title: "Symbolic links: a name that points to a path"
+      body: |
+        A **symbolic link** (symlink) is a small special file that contains a path to another file. Opening the
+        link opens whatever the path points to. It is like a shortcut on a desktop. `ln -s target linkname`
+        creates one; `ls -l` shows it with an `l` as type and an arrow to the target. A relative path stored in
+        a link is read from the directory that holds the link, not from the directory you happen to be in:
+    - kind: show
+      id: make-symlink
+      run: "ln -s project/config/app.conf current.conf; ls -l current.conf; cat current.conf"
+      highlight: ["->"]
+      notice: "`current.conf -> project/config/app.conf`, and reading the link reads the configuration file."
+    - kind: try
+      id: symlink-elsewhere
+      body: "Pretend you are inside the `project` directory, one level below the link. Print the link through its relative path."
+      accept: ["cat ../current.conf", "cat ./../current.conf"]
+      hints:
+        - match: "^cd (\\./)?project"
+          say: "You are already inside `project`: there is no `project` below it to change into. Give only the command that reads the link."
+        - match: "^cat current\\.conf"
+          say: "From inside `project` there is no `current.conf`: the link lives one level up, so its path starts with `..`."
+        - match: "^cat \\.\\./project"
+          say: "That goes up and then back down into `project`, where the link is not. The link is in the directory above."
+      hint: "`cat`, then `..` (the directory above), a slash, and the link's name."
+      run: "cd project; cat ../current.conf"
+      then: "The recording starts with `cd project;` because each recorded command starts in the practice directory, the one that holds the link. From inside `project`, the link is named `../current.conf`, and it still works: its stored path is read from the directory that holds the link, here the practice directory. If you moved the link itself to another directory, the same stored path would point somewhere else and could dangle. If you ran `cd project` yourself, go back with `cd ..` before the next step."
+    - kind: ask
+      id: guess-dangling
+      guess: true
+      prompt: "The target is renamed to `app.conf.old`. What happens when you read `current.conf` now?"
+      choices:
+        - text: "It still shows the configuration"
+          why: "A symlink holds a path, not the file's content. After the rename nothing is at that path, so the content cannot be reached. The next step shows it."
+        - text: "An error: the path leads nowhere"
+          why: "The link keeps the path it was given, and nothing has that name now, so reading it fails. The next step shows the real error."
+        - text: "The link follows the rename"
+          why: "Nothing updates a symlink when its target moves. The next step shows the effect."
+      answer: 1
+    - kind: show
+      id: dangling
+      run: "mv project/config/app.conf project/config/app.conf.old; ls -l current.conf; cat current.conf"
+      notice: |
+        The link is still there, still pointing at `project/config/app.conf`, but nothing has that name any
+        more. A link in this state is called **dangling**. Its own permissions and existence look fine; only
+        its target is missing.
+    - kind: teach
+      id: hardlinks
+      title: "Hard links: a second name for the same data"
+      body: |
+        The filesystem keeps one record for each file, called an **inode**, identified by a number. It holds
+        the file's attributes and where its contents are stored. A directory entry is a name pointing to an
+        inode number. A **hard link** is a second name for the same inode: `ln original second` (no `-s`). `ls -i` shows the inode numbers:
+    - kind: show
+      id: make-hardlink
+      run: "ln project/notes.txt notes-copy.txt; ls -li project/notes.txt notes-copy.txt"
+      highlight: ["notes"]
+      notice: |
+        The same inode number on both lines, and a **link count** of 2 (the number after the permissions):
+        two names, one file. Neither name is "the original" any more.
+    - kind: show
+      id: hardlink-survives
+      run: "rm project/notes.txt; cat notes-copy.txt; ls -li notes-copy.txt"
+      notice: "Removing one name leaves the other working, and the count drops to 1. Storage can be reclaimed after the last hard link is removed and no program still has the file open."
+    - kind: ask
+      id: compare
+      prompt: "Which link still works after the file it was made from is deleted?"
+      choices:
+        - text: "A hard link"
+          why: "It is another name for the same inode, so the data stays until its last name is removed."
+        - text: "A symbolic link"
+          why: "A symlink stores a path. Once nothing exists at that path, it dangles."
+        - text: "Both"
+          why: "Only the hard link: the symlink points to a name, and the name is gone."
+      answer: 0
+    - kind: teach
+      id: where-symlinks
+      body: |
+        You meet symbolic links all over a Linux system. On RHEL 9, `/bin` is a symlink to `usr/bin`, so old
+        paths keep working. Many tools keep several versions side by side and point a fixed name at the current
+        one. Symlinks can cross filesystems and point to directories; hard links cannot.
+    - kind: reflect
+      id: explain-links
+      prompt: "Explain the difference between a symbolic link and a hard link to a colleague, with what happens when the original is deleted."
+      model: |
+        A symbolic link is a small file containing a path; reading it follows the path, so if the original is
+        deleted or renamed, the link dangles. A hard link is a second name for the same inode, the same data;
+        deleting the other name leaves the data in place, reachable through the remaining name.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can find files by name, hide permission noise while searching the whole system,
+        and explain symbolic and hard links, including a dangling link.
+
+        Next: changing a file's content in an editor, directly in the terminal.
+  sections:
+    - id: more-find
+      title: "Acting on what find finds"
+      depth: true
+      body: |
+        - `-type f` keeps files and `-type d` directories, which is how you leave out a directory whose name
+          matches: `find project -type f -name '*.log'`.
+        - `-mtime -1` keeps what was modified less than one day ago, and `-size +10M` what is larger than 10 MiB
+          (mebibytes, 1,048,576 bytes). `-` means less than and `+` means more than.
+        - `-mtime +7` means modified 8 or more days ago: `find` counts whole days and drops the fraction.
+        - `-exec cmd {} +` runs a command on the files found, many at once: `find project -name '*.log' -exec
+          ls -l {} +`.
+        - `-delete` removes what matches. Always run the same `find` without it first, and check the list.
+        - `ls -l` shows other file types too: `c` and `b` for devices such as `/dev/null`, `s` for sockets, `p`
+          for named pipes.
+        - `file name` looks inside a file and reports what it contains (text, a program, an archive), whatever
+          its name.
+  review:
+    - q: "How do you find every `.conf` file below `/etc`, hiding permission errors?"
+      a: "`find /etc -name '*.conf' 2>/dev/null`."
+    - q: "Why quote the pattern after `-name`?"
+      a: "So that the shell passes it to `find` instead of expanding it in the current directory."
+    - q: "What is a dangling symbolic link?"
+      a: "A symlink whose target path no longer exists."
+    - q: "What does a link count of 2 in `ls -l` mean for a file?"
+      a: "The file has two names (hard links) pointing to the same inode."
+  commands:
+    - cmd: "find project"
+      meaning: "everything below project"
+    - cmd: "find project -name '*.conf'"
+      meaning: "the .conf files, at any depth"
+    - cmd: "find project -name '*.log'"
+      meaning: "the .log files"
+    - cmd: "find /etc -name 'sshd_config' 2>/dev/null"
+      expect: any
+      meaning: "a search of the system, permission errors discarded (exit status 1: some directories could not be read)"
+    - cmd: "ln -s project/config/app.conf current.conf; ls -l current.conf; cat current.conf"
+      meaning: "a symbolic link and what it points to"
+    - cmd: "cd project; cat ../current.conf"
+      meaning: "the link's stored path is read from the directory that holds the link"
+    - cmd: "mv project/config/app.conf project/config/app.conf.old; ls -l current.conf; cat current.conf"
+      expect: fail
+      meaning: "the target was renamed: the link dangles"
+    - cmd: "ln project/notes.txt notes-copy.txt; ls -li project/notes.txt notes-copy.txt"
+      meaning: "a hard link: same inode, link count 2"
+    - cmd: "rm project/notes.txt; cat notes-copy.txt; ls -li notes-copy.txt"
+      meaning: "the data survives through the other name"
+  files:
+    project/config/app.conf: |
+      port=8080
+      mode=production
+    project/config/db.conf: |
+      host=db.internal
+    project/logs/app.log: |
+      started
+    project/logs/archive/old.log: |
+      rotated
+    project/notes.txt: |
+      Notes about the project.
+  references:
+    - {title: "GNU findutils manual", url: "https://www.gnu.org/software/findutils/manual/html_mono/find.html"}
+    - {title: "GNU Coreutils manual: ln invocation", url: "https://www.gnu.org/software/coreutils/manual/html_node/ln-invocation.html"}
+    - {title: "Linux man-pages: symlink(7)", url: "https://man7.org/linux/man-pages/man7/symlink.7.html"}
+    - {title: "Linux man-pages: inode(7)", url: "https://man7.org/linux/man-pages/man7/inode.7.html"}
+
+- id: lx.editing
+  title: "Editing a file in the terminal"
+  subtitle: "vi's modes, the few keys you need, and how to get out"
+  module: lx1-shell
+  mode: GUIDED_INVESTIGATION
+  minutes: 15
+  level: 1
+  supports: "vim 8.2 (as vi) and GNU nano 5.6 on RHEL 9. Editors are interactive, so nothing in this lesson is a recording; the practice step asks you to try vi yourself, in a real terminal."
+  concepts: [linux.shell, linux.files]
+  prerequisites: [lx.find-links]
+  objective: |
+    Explain vi's modes, and know the keys to change text, save and quit, and leave without saving when
+    something went wrong, then practise them on a disposable file.
+  flow:
+    - kind: ask
+      id: recall-links
+      recalls: lx.find-links
+      prompt: "A look back. `ls -l` shows `app.conf -> /etc/app/app.conf`. What is `app.conf`?"
+      choices:
+        - text: "A symbolic link to `/etc/app/app.conf`"
+          why: "The `->` and the `l` type mark a symlink: a small file holding a path."
+        - text: "A copy of `/etc/app/app.conf`"
+          why: "A copy is an ordinary file with its own data. The arrow means the name points to a path."
+        - text: "A hard link to `/etc/app/app.conf`"
+          why: "Hard links look like ordinary files in `ls -l`, with a link count above 1, and no arrow."
+      answer: 0
+    - kind: teach
+      id: why-vi
+      title: "Why learn vi at all"
+      body: |
+        Sooner or later you need to change a text file, such as a configuration file, on a machine with no
+        graphical editor. On almost every Linux system, the editor that is guaranteed to be there is **vi**
+        (on RHEL, `vi` starts `vim`, an improved version). Some tools open a terminal editor for you, and vi
+        is one you may meet.
+
+        If **nano** is installed, it is simpler: you type, and the shortcuts are listed at the bottom of the
+        screen (Ctrl-O saves, Ctrl-X quits). Use it whenever you can choose. This lesson is about vi, because
+        sometimes you cannot choose.
+    - kind: teach
+      id: modes
+      title: "The one idea: modes"
+      body: |
+        vi has **modes**, and nearly all confusion with it comes from typing in the wrong one:
+
+        - **Normal mode** is where vi starts. Keys are *commands*: `x` deletes a character, `dd` deletes a line.
+          Typing a word here does not insert it; each letter does something.
+        - **Insert mode** is for typing text. You enter it with `i` (insert before the cursor), and leave it
+          with `Esc`. While you are in it, the bottom line says `-- INSERT --`.
+        - **Command-line mode** starts with `:` from normal mode, for commands such as saving and quitting.
+
+        When you are unsure where you are, press `Esc`: it always brings you back to normal mode.
+    - kind: show
+      id: screen
+      body: "This is the file `app.conf`. `vi app.conf` opens it in normal mode, shows these two lines, and fills the empty lines below with `~`. A status line at the bottom gives the file name and its size."
+      code: |
+        port=8080
+        mode=staging
+      caption: "app.conf"
+      notice: "You are in normal mode, with the cursor on the first character."
+    - kind: ask
+      id: guess-typing
+      prompt: "vi has opened `app.conf` and you want to type the word `production` into it. What do you press first?"
+      choices:
+        - text: "`i`, to enter insert mode"
+          why: "Keys type text only in insert mode, which `i` starts."
+        - text: "`Esc`, to be able to type"
+          why: "`Esc` leaves insert mode and returns to normal mode, where keys are commands. vi already starts in normal mode."
+        - text: "Nothing: vi starts in insert mode"
+          why: "vi starts in normal mode. Typing a word there would run its letters as commands."
+      answer: 0
+    - kind: teach
+      id: what-happened
+      body: |
+        What if you type the word straight away, in normal mode? Each letter is a command. For example, `p`
+        pastes, `r` takes the next key as a replacement for the character under the cursor, and `o` opens a
+        new line and switches to insert mode, after which the remaining letters are typed as text. The result
+        is hard to predict, and the file can look scrambled.
+
+        The rescue never changes: press `Esc`, then `u` (undo) as many times as needed. Or leave without saving:
+        `Esc`, then `:q!` and Enter. `q` is quit, and `!` means "even though there are unsaved changes".
+    - kind: teach
+      id: edit
+      title: "Changing a line, saving, quitting"
+      body: |
+        To change `staging` to `production` on line 2:
+
+        1. Move the cursor to the start of `staging` with the arrow keys.
+        2. Type `cw` (change word), still in normal mode. It deletes `staging` and enters insert mode.
+        3. Type `production`.
+        4. Press `Esc` to return to normal mode.
+        5. Type `:wq` and Enter: write (save) and quit.
+
+        To add a line at the end instead, `G` jumps to the last line, and `o` opens a new line below it and
+        enters insert mode.
+    - kind: show
+      id: after-edit
+      body: "After step 4, the second line has changed. After step 5, this is what is saved in `app.conf`:"
+      code: |
+        port=8080
+        mode=production
+      caption: "app.conf, saved"
+      notice: "Only the word changed. If the line looks different, press `Esc`, then `u` to undo, and try again from step 1."
+    - kind: order
+      id: order-keys
+      prompt: "You opened a file in vi. Put the steps to add a line at the end and save in order."
+      items:
+        - "`G`: jump to the last line (normal mode)"
+        - "`o`: open a new line below and enter insert mode"
+        - "Type the new text"
+        - "`Esc`: back to normal mode"
+        - "`:wq` and Enter: save and quit"
+      why: "Movement and commands happen in normal mode; text is typed in insert mode; saving is a command-line command, reached from normal mode after `Esc`."
+    - kind: ask
+      id: stuck
+      prompt: "The bottom line says `-- INSERT --` and you type `:wq`, but vi does not quit. Why?"
+      choices:
+        - text: "In insert mode, `:wq` is typed as text"
+          why: "Insert mode inserts every key. Press `Esc` first, then `:wq`. (Delete the stray `:wq` from the file, or quit with `:q!`.)"
+        - text: "The file is read-only, so saving fails"
+          why: "A read-only file gives an error message after `:wq`. Here vi did not even see a command: it was still inserting text."
+        - text: "`:wq` works only from visual mode in vim"
+          why: "`:` commands are typed from normal mode. The problem is that insert mode was still on."
+      answer: 0
+    - kind: ask
+      id: rescue
+      prompt: "You have mangled a configuration file in vi and want to leave it exactly as it was on disk. What do you type?"
+      choices:
+        - text: "`Esc`, then `:q!` and Enter"
+          why: "`:q!` quits and throws away every unsaved change. The file on disk is untouched."
+        - text: "`Esc`, then `:wq` and Enter"
+          why: "`:wq` saves the mangled version first, which is the opposite of what you want."
+        - text: "`Ctrl-C`"
+          why: "In vim, Ctrl-C cancels the current command but does not quit, and the changes stay in the buffer."
+      answer: 0
+    - kind: teach
+      id: practice
+      title: "Practise on a disposable file"
+      body: |
+        Nothing in this lesson can run vi for you, so try it in a real terminal, on a file you can lose:
+
+        1. Make a scratch directory and create the file there (`printf` prints text like `echo`, and each `\n`
+           starts a new line, so this writes the file's two lines):
+           `mkdir -p ~/vi-practice && cd ~/vi-practice && printf 'port=8080\nmode=staging\n' > app.conf`
+        2. Open it with `vi app.conf`, change `staging` to `production` as above, and save and quit with `:wq`.
+        3. Print it with `cat app.conf`. The second line should read `mode=production`.
+        4. Open it again, press `dd` to delete a line, then leave without saving: `Esc`, then `:q!` and Enter.
+        5. Run `cat app.conf` once more: it is unchanged.
+
+        If a step does not give this result, press `Esc`, then `u`, and read the step again.
+    - kind: reflect
+      id: explain-modes
+      prompt: "A colleague says vi \"ate\" their text when they started typing. Explain what happened, and the two keys that always help."
+      model: |
+        vi starts in normal mode, where keys are commands, so typing a word ran a series of commands instead of
+        inserting it. `Esc` always returns to normal mode, and `u` undoes changes one by one; if it is beyond
+        repair, `:q!` leaves without saving. To type text, press `i` first.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You know vi's modes and its basic keys: change a word, add a line, save and quit, and leave without
+        saving. Practising them on a disposable file, as in the step before, is what makes them reliable.
+
+        Next: who is allowed to read, change and run files, and why "Permission denied" happens.
+  sections:
+    - id: more-vi
+      title: "More of vi, and choosing your editor"
+      depth: true
+      body: |
+        - `dd` deletes a line, `yy` copies it, `p` pastes it below; `5dd` deletes five lines; `.` repeats the
+          last change.
+        - `/word` searches forward (`n` for the next match), `G` jumps to the end of the file and `gg` to the
+          start.
+        - `:%s/old/new/g` replaces every `old` with `new` in the file.
+        - `:set number` shows line numbers; `:set list` shows tabs as `^I`, the quickest way to find a tab in a
+          file that must use spaces.
+        - Tools that open an editor for you usually choose it from settings such as the `EDITOR` (or `VISUAL`)
+          environment variable: `export EDITOR=nano` in your shell's startup file makes them prefer nano. Each
+          tool has its own rules, so check its documentation.
+        - `vimtutor`, if installed, is a 30-minute interactive tutorial inside vim itself.
+  review:
+    - q: "What are vi's normal mode and insert mode for?"
+      a: "Normal mode: keys are commands (move, delete, undo). Insert mode: keys type text. `i` enters insert mode, `Esc` leaves it."
+    - q: "How do you save and quit vi? And quit without saving?"
+      a: "`:wq` (from normal mode). `:q!` quits and discards changes."
+    - q: "You are lost in vi. What do you press first?"
+      a: "`Esc`, to return to normal mode. Then `u` to undo, or `:q!` to leave without saving."
+  references:
+    - {title: "Vim documentation: vim tutor and user manual", url: "https://vimhelp.org/usr_02.txt.html"}
+    - {title: "Vim documentation: modes", url: "https://vimhelp.org/intro.txt.html#vim-modes-intro"}
+    - {title: "GNU nano documentation", url: "https://www.nano-editor.org/dist/latest/nano.html"}

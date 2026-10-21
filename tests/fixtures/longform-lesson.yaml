@@ -1,0 +1,278 @@
+- id: h.observability
+  title: "Events, logs, metrics, traces"
+  subtitle: "Four signals and the question each answers"
+  module: p2-reliability
+  mode: GUIDED_INVESTIGATION
+  minutes: 45
+  level: 1
+  supports: "Events and container logs are fully available on OpenShift Local and are read in recorded labs and incidents. The monitoring stack (Prometheus, Alertmanager, Metrics Server) is disabled on the course's OpenShift Local 4.21 cluster: its recorded ClusterOperator list has no `monitoring` entry and `oc adm top nodes` answers `Metrics API not available`, so metrics, alerting and tracing are studied as concepts."
+  concepts: [obs.signals, obs.prometheus]
+  prerequisites: [b.pod-lifecycle]
+  objective: |
+    Pick the signal that answers your question (events, logs, metrics or traces), read events and container logs
+    correctly during triage, including the previous container instance, and explain how OpenShift collects metrics
+    and alerts and why each signal has a limited lifetime.
+  sections:
+    - id: why-signals
+      title: "Why the choice of signal matters"
+      body: |
+        "The portal is broken" can mean a pod that never started, a container that crashes, a slow database or a
+        network rule. Each of those leaves evidence in a different place, and each kind of evidence disappears on its
+        own schedule. Engineers who triage quickly are not faster at typing: they know which signal answers which
+        question, and where to look *before* the evidence expires.
+
+        The four signals below are complementary. Events tell you what the platform did; logs tell you what your
+        program said; metrics tell you how much and how often over time; traces tell you where one request spent its
+        time. Most incidents need two of them.
+    - id: four-signals-four-questions
+      title: "Four signals, four questions"
+      body: |
+        | Signal | Answers | On OpenShift | Lives for |
+        |---|---|---|---|
+        | Events | what did Kubernetes do or refuse to do, recently? | `oc get events`, the Events section of `oc describe` | 3 hours by default on OpenShift (the API server's `event-ttl`; upstream Kubernetes defaults to 1 hour) |
+        | Logs | what did the program say? | `oc logs` (current and `--previous`); Red Hat OpenShift Logging 6 collects with Vector and stores in LokiStack or forwards to external systems | as long as the container's files stay on the node, unless collected |
+        | Metrics | how much, how fast, how often, over time? | platform Prometheus in `openshift-monitoring`; monitoring for user-defined projects (opt-in) for apps | 15 days by default for platform Prometheus, if it has storage |
+        | Traces | where did this request spend its time across services? | Red Hat build of OpenTelemetry + the distributed tracing platform (Tempo) (add-ons) | whatever the trace store keeps |
+
+        Events are the fastest triage tool and the most forgotten: most "why is my pod not running?" answers
+        are in `oc describe` events. They expire, so an incident review the next day needs logs or metrics instead.
+
+        After a crash, `oc logs <pod>` shows the restarted container. The kubelet keeps the log of the previous,
+        terminated instance, which `oc logs <pod> --previous` reads.
+    - id: events-in-practice
+      title: "Events in practice"
+      body: |
+        An event is an API object that records a reason (`FailedScheduling`, `BackOff`, `Killing`, `FailedCreate`),
+        a message, the object it is about, and how many times it happened. Two ways to read them:
+
+        - `oc describe pod <pod>` ends with the events of that one object: the first place to look for a pod that is
+          Pending, never pulls its image, or keeps restarting.
+        - Across a namespace or the cluster, filter and sort. The cluster health lab records this on the course's
+          cluster:
+
+        ```
+        oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp
+        ```
+
+        Read the **REASON** and **OBJECT** columns first, then the message. Warnings on a ReplicaSet (for example
+        `FailedCreate` when admission rejects a pod) are easy to miss if you only look at pods.
+
+        Three limits to keep in mind. Events are **best-effort**: Kubernetes describes them as informative and
+        supplemental, so a missing event proves nothing. Repeated events are **aggregated** (a count and the last time
+        seen), so one line can stand for a hundred restarts. And they **expire**: on OpenShift the retention is 3
+        hours unless an administrator changes it (the `eventTTLMinutes` setting, 5 to 180 minutes, was a Technology
+        Preview in 4.21.0 and is generally available from 4.21.12).
+    - id: logs-in-practice
+      title: "Logs in practice: current, previous, and which pod"
+      body: |
+        CRI-O writes each container's standard output and error to files on its node; `oc logs` asks the kubelet for
+        them. Three details decide whether you see the line you need.
+
+        **Current versus previous.** In the recorded troubleshooting lab, `oc logs <pod> --previous` run *before* the
+        container has ever restarted fails with
+        `previous terminated container "app" in pod "…" not found`. Once the container has crashed and been restarted,
+        the same command prints the fatal line (`fatal: CONFIG_URL is not set`) while the current instance only shows
+        its start-up. By default the kubelet keeps one terminated instance per container, so after the next restart the
+        older output is gone.
+
+        **Which pod.** `oc logs deploy/app` does not merge replicas: it picks one pod and says so
+        (`Found 2 pods, using pod/app-…` in the same recording). With several replicas, a problem that hits one pod in
+        three can be invisible in the pod it picked. Add `--all-pods` (`oc logs deploy/app --all-pods` prefixes each line
+        with its pod), read each pod, or use the logging stack.
+
+        **How long.** Log files are rotated by size, and `oc logs` only serves the latest file. When a pod is deleted
+        or evicted, or its node is replaced, the files go with it. Kubernetes leaves log storage to add-ons; on
+        OpenShift that is OpenShift Logging (the lesson on collecting and forwarding logs covers it).
+    - id: prometheus-and-alerting
+      title: "Metrics, Prometheus and alerting"
+      body: |
+        Prometheus scrapes `/metrics` endpoints and stores time series; alerting rules (PromQL) fire to
+        Alertmanager, which groups, silences and routes notifications. On OpenShift the Cluster Monitoring Operator
+        manages the stack: Prometheus, Alertmanager, Thanos Querier (one query endpoint over platform and user
+        metrics), kube-state-metrics and node-exporter, and Metrics Server, which serves `oc adm top` (it replaced
+        Prometheus Adapter in 4.16). The console's **Observe** section shows the same data.
+
+        Metrics are the only signal that shows **trends**: memory creeping up for a week before an OOM kill, error
+        ratio rising after a release, a disk filling. They are cheap to keep because they are numbers, not text, but
+        every distinct combination of label values is a separate series: a label holding user or request IDs
+        multiplies the series and makes Prometheus slow and expensive.
+
+        Good alerts are **symptom-based** (users see errors or latency), actionable and rare. Alerting on every cause
+        (CPU 80%) produces **alert fatigue**: people stop reading alerts, and the important one is missed. A rule's
+        `for` duration keeps an alert pending until the condition has held long enough, which filters short spikes.
+
+        **Guided observation (recorded).** On the course's OpenShift Local cluster the stack is disabled to save
+        memory. The cluster health lab's `oc get clusteroperators` lists no `monitoring` operator, and
+        `oc adm top nodes` answers `error: Metrics API not available`. The same missing API is why a
+        HorizontalPodAutoscaler there cannot read CPU usage. On a production cluster both commands work, and the
+        Observe pages show targets, alerts and dashboards.
+    - id: traces-and-choosing
+      title: "Traces, and choosing a signal"
+      body: |
+        A trace follows one request through several services: each hop records a span with its start, duration and
+        result, linked by a trace ID that the services pass along. Traces answer "the checkout takes 4 seconds: which
+        of the seven services is slow?", which neither logs nor metrics answer cleanly. They require instrumentation
+        in the applications (OpenTelemetry libraries or auto-instrumentation) and a collector and store; on OpenShift
+        those are the Red Hat build of OpenTelemetry and the Tempo-based distributed tracing platform, both add-ons.
+
+        | You want to know… | Start with | Then |
+        |---|---|---|
+        | why a pod is Pending, not pulling, or not created | events (`oc describe`) | the controller's events (ReplicaSet, Deployment) |
+        | why a container exits or restarts | `oc logs --previous`, last state and exit code | events (`BackOff`, `Killing`, OOM) |
+        | whether users are affected, and since when | metrics (error ratio, latency) | logs of the failing component |
+        | where a slow request spends its time | traces | metrics and logs of the slow service |
+        | what happened last night | collected logs and metrics | events are already gone |
+
+        Practise the first two rows on real broken workloads:
+        [CrashLoopBackOff after a configuration change](/lab/inc.crashloop-config),
+        [OOMKilled at start-up](/lab/inc.oomkilled), [Restarts, but no errors](/lab/inc.liveness-restarts),
+        [Pending forever](/lab/inc.pending-resources), [ImagePullBackOff](/lab/inc.imagepull) and
+        [A Deployment with no pods](/lab/inc.scc-root).
+    - id: what-goes-wrong
+      title: "What goes wrong in triage"
+      body: |
+        | Symptom | Evidence | Cause | Fix |
+        |---|---|---|---|
+        | logs look clean, restarts keep climbing | `oc describe pod`: `Killing` events with liveness probe failures; last state `Error` or `Completed` | the kubelet kills a healthy program because the probe is wrong | fix the probe ([incident](/lab/inc.liveness-restarts)) |
+        | restarts, no stack trace in `oc logs` | `oc logs --previous`; last state `OOMKilled`, exit code 137 | the evidence is in the previous instance, or the kernel killed it before it could print | raise the memory limit or fix the leak ([incident](/lab/inc.oomkilled)) |
+        | Deployment shows 0 pods, no pod events at all | `oc get events` warnings on the ReplicaSet: `FailedCreate` | admission (SCC, quota) rejected the pod before it existed | fix the pod spec or the quota ([incident](/lab/inc.scc-root)) |
+        | "nothing in the events" the morning after | event list empty or only recent | events expired (3 hours) | use collected logs and metrics; collect them before you need them |
+        | `oc logs deploy/x` shows no error, users see some errors | the "Found N pods, using…" line | `oc logs` read one replica | `oc logs deploy/x --all-pods`, or query the logging stack |
+    - id: common-mistakes
+      title: "Common mistakes"
+      depth: true
+      body: |
+        - **Reading only the current container's logs after a crash.** The stack trace is usually in the previous
+          instance: `oc logs <pod> --previous`.
+        - **Reading `oc logs deploy/<name>` as "the Deployment's logs".** It picks one pod; with several replicas,
+          look at each pod or use the logging stack.
+        - **Coming back tomorrow for events.** They expire after a few hours.
+        - **Treating a missing event as proof.** Events are best-effort; absence of a warning is not evidence of
+          health.
+        - **Using `oc adm top` for capacity planning.** It shows current usage, not requests or limits, and needs
+          the Metrics API (absent on the course's OpenShift Local cluster).
+        - **Alerting on causes instead of symptoms**, and high-cardinality metric labels (user IDs, request IDs)
+          that make Prometheus slow and expensive.
+  predict:
+    - prompt: "A container crashed and was restarted. `oc logs <pod>` only shows clean startup lines. Where is the error that killed it?"
+      after: four-signals-four-questions
+      choices:
+        - "Lost: logs are deleted when a container restarts"
+        - "In the previous instance: `--previous` shows its output"
+        - "Only in the pod's events, not in any log"
+      answer: 1
+      explain: "The kubelet keeps the log of the last terminated instance of each container; `oc logs <pod> --previous` reads it (used in several incidents)."
+      feedback:
+        - "The kubelet keeps the previous instance's log until the next restart. It is lost only after another restart or when the pod is deleted, which is why central logging exists."
+        - "`--previous` shows the output of the instance that died. Combine it with the pod's `lastState.terminated` reason and exit code (OOMKilled, Error) to know how it died."
+        - "Events say *that* the container was restarted or killed (BackOff, Killing, OOM), not what the program printed."
+    - prompt: "A new pod has just started and its container has never restarted. What does `oc logs <pod> --previous` return?"
+      role: predict
+      after: events-in-practice
+      answered_by: logs-in-practice
+      choices:
+        - "The same output that `oc logs <pod>` shows for the pod"
+        - "An error saying no previous terminated container exists"
+        - "The logs of the pod that this one replaced"
+      answer: 1
+      explain: "`--previous` reads the last terminated instance of the same container in the same pod. Before the first restart there is none, and the recorded lab shows the error."
+      feedback:
+        - "`--previous` never falls back to the current instance; it asks specifically for a terminated one."
+        - "The troubleshooting lab records `previous terminated container \"app\" in pod … not found` before the crash, and the fatal line after it."
+        - "A replaced pod is a different object; its logs went with it. `--previous` only looks inside the same pod."
+    - prompt: "A Deployment's new pod has been Pending for ten minutes. Which signal answers 'why' fastest?"
+      after: events-in-practice
+      choices:
+        - "The logs of the pending pod's containers"
+        - "The events shown by `oc describe pod`"
+        - "Prometheus CPU metrics for the whole cluster"
+      answer: 1
+      explain: "Start with the pod's events and its `PodScheduled` condition. If scheduling failed, the scheduler's `FailedScheduling` event says why. Pending also covers a scheduled pod whose images are still being pulled or whose init containers have not finished: then inspect the container and init-container states, and the init containers' logs."
+      feedback:
+        - "Logs come only from containers that have started. An unscheduled pod has none; a scheduled one may have init-container logs, but its events tell you first which case you are in."
+        - "The scheduler explains in the events what did not fit: `FailedScheduling` names the filter that failed (insufficient CPU, taints, affinity). The pending-resources incident practises it."
+        - "Usage metrics do not explain scheduling, which is based on requests, and they need the monitoring stack."
+    - prompt: "An outage happened yesterday at 14:00. Today at 10:00 you run `oc get events -n shop` to reconstruct it. What do you find?"
+      after: events-in-practice
+      choices:
+        - "The full event history of yesterday afternoon, up to the outage"
+        - "Nothing from 14:00: events are kept for 3 hours by default"
+        - "Only the warning events, because normal events are deleted first"
+      answer: 1
+      explain: "Events are short-lived by design. Post-incident reviews rely on signals that were collected and stored."
+      feedback:
+        - "Events are deleted after their time to live; a day later they are long gone."
+        - "On OpenShift events are kept for 3 hours by default, so the review needs collected logs and metrics. If you need event history, forward events or rely on logs and metrics that a stack keeps."
+        - "Expiry is by age, not by type: warnings expire too."
+    - prompt: "Users report that about one request in three fails. `oc logs deploy/web` (3 replicas) shows no errors. What is the most likely explanation?"
+      after: logs-in-practice
+      choices:
+        - "The application is not logging its errors at all anywhere"
+        - "`oc logs deploy/web` read one pod, not the failing one"
+        - "Logs are delayed by several minutes before they appear"
+      answer: 1
+      explain: "With a Deployment reference, `oc logs` chooses one pod and prints which one. One failing replica out of three matches the symptom."
+      feedback:
+        - "Possible, but check the cheaper explanation first: you read only one of three pods."
+        - "The failing replica may be another one. Read each pod, or compare the pods' readiness and restarts, before concluding the app is silent."
+        - "`oc logs` reads the node's files directly through the kubelet; there is no meaningful delay."
+    - prompt: "Which alert is most useful to page an on-call engineer at night?"
+      after: prometheus-and-alerting
+      choices:
+        - "Node CPU above 80% on any worker node for 5 minutes"
+        - "Over 2% of checkout requests failing for 10 minutes"
+        - "Any pod restart anywhere in the cluster, at any time"
+      answer: 1
+      explain: "Page on symptoms users feel, with a duration that filters spikes. Causes such as CPU belong on dashboards or tickets."
+      feedback:
+        - "High CPU is often harmless (a batch job, a busy but healthy service); paging on it trains people to ignore pages."
+        - "It is a user-facing symptom, actionable and rare."
+        - "Restarts happen during normal rollouts and evictions; paging on every one produces alert fatigue."
+  explain:
+    - prompt: "Explain to a junior developer which signal to check first when their application misbehaves on OpenShift, and why events and logs can disappear."
+      audience: junior developer
+      rubric:
+        - "events (oc describe) for pods that do not start or are killed, logs for what the program printed"
+        - "`--previous` for the instance before a restart"
+        - "events expire after a few hours; logs live only as long as the container's files on the node"
+        - "metrics for trends and user impact; a logging and monitoring stack keeps history"
+      model: |
+        Start with the question. If the pod never starts, is Pending or keeps being killed, look at its events with
+        `oc describe pod`: the platform explains what it did or refused to do. If the program itself fails, read its
+        logs, and after a restart use `--previous`, because the current container only shows the fresh start. Both kinds
+        of evidence are short-lived: events are deleted after about three hours, and container logs disappear when the
+        pod is deleted or moved. For anything older, or for trends such as error rates, you need the collected logs and
+        Prometheus metrics, which is why the platform keeps them centrally.
+  review:
+    - q: "Which signal would you check first for a pod that never started?"
+      a: "Events (oc describe pod / oc get events)."
+    - q: "What makes an alert good?"
+      a: "Symptom-based, actionable, rare enough to be read; tied to a runbook."
+    - q: "How long does OpenShift keep events by default?"
+      a: "3 hours (the API server's event TTL; upstream Kubernetes defaults to 1 hour)."
+    - q: "What does `oc logs <pod> --previous` return before the container has ever restarted?"
+      a: "An error: the previous terminated container is not found."
+    - q: "Which pod does `oc logs deploy/<name>` read when there are several replicas?"
+      a: "One of them, which it names; add --all-pods, read each pod, or use the logging stack."
+    - q: "Which signal answers 'where did this slow request spend its time across services'?"
+      a: "Traces (OpenTelemetry instrumentation and a trace store such as Tempo)."
+  labs: [lab.troubleshooting-tools, lab.cluster-health]
+  limits: |
+    Events and container logs are real on OpenShift Local and are practised in the troubleshooting lab and the
+    incidents. Metrics, alerting and tracing are not: the course's single-node cluster runs without the monitoring
+    stack (it is disabled to fit a laptop's memory), so there is no Prometheus to query, no alert to watch and no
+    Metrics API, and neither OpenTelemetry nor a trace store is installed. Those parts are concepts here and need a
+    cluster with monitoring enabled.
+  references:
+    - {title: "Monitoring stack for Red Hat OpenShift 4.21: Monitoring stack architecture", url: "https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.21/html/about_monitoring/monitoring-stack-architecture"}
+    - {title: "Red Hat OpenShift Logging 6.4: About OpenShift Logging", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_logging/6.4/html/about_openshift_logging"}
+    - {title: "Prometheus: Alerting best practices", url: "https://prometheus.io/docs/practices/alerting/"}
+    - {title: "Prometheus: Alerting rules (the for clause)", url: "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"}
+    - {title: "Prometheus: Metric and label naming (cardinality)", url: "https://prometheus.io/docs/practices/naming/"}
+    - {title: "Kubernetes: Logging architecture", url: "https://kubernetes.io/docs/concepts/cluster-administration/logging/"}
+    - {title: "Kubernetes API: Event (events.k8s.io/v1)", url: "https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/event-v1/"}
+    - {title: "OpenShift 4.21: Setting the event time to live (etcd)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/etcd/etcd-performance"}
+    - {title: "OpenTelemetry: Traces", url: "https://opentelemetry.io/docs/concepts/signals/traces/"}
+    - {title: "OpenShift 4.21 release notes (eventTTLMinutes, GA from 4.21.12)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/release_notes/ocp-4-21-release-notes"}
+    - {title: "kubectl logs reference (--all-pods)", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/"}
+

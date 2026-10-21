@@ -1,0 +1,122 @@
+id: inc.crashloop-config
+kind: incident
+title: "CrashLoopBackOff after a configuration change"
+summary: "A one-line web server configuration change and the portal no longer starts."
+module: a3-troubleshoot
+minutes: 20
+level: 1
+supports: "Recorded on OpenShift 4.21.8 with the UBI 9 httpd 2.4 image."
+concepts: [k8s.pod-lifecycle, container.debugging, obs.signals]
+prerequisites: [o1.troubleshooting]
+namespace: academy-inc-crash
+objective: |
+  Find the crashed container's own error message, repair the cause, and show that the portal now stays up.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`, plus the ConfigMap `httpd-extra`, mounted into httpd's configuration directory as one extra
+  file, `academy.conf`. The app creates the project `academy-inc-crash` as your learner identity when you start the
+  incident, with everything listed here in the state the symptom describes; how it got into that state is part of the
+  investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The team added a hardening directive to the portal's httpd configuration (a ConfigMap). The pod now restarts again
+  and again and the status column says Error or CrashLoopBackOff.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts:
+            - {name: content, mountPath: /var/www/html}
+            - {name: extra, mountPath: /etc/httpd/conf.d/academy.conf, subPath: academy.conf}
+          volumes:
+          - {name: content, configMap: {name: web-content}}
+          - {name: extra, configMap: {name: httpd-extra}}
+break:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: httpd-extra}
+    data:
+      academy.conf: |
+        # hardening: hide version details
+        ServerTokenz Prod
+investigate:
+  - {cmd: "oc get pods -n academy-inc-crash", meaning: "0/1 with STATUS Error or CrashLoopBackOff (the column alternates between the two as the container exits and waits to be restarted) and a growing RESTARTS count (Error and 2 restarts when recorded)"}
+  - {cmd: "oc describe pod <pod> -n academy-inc-crash", run: "oc describe pod {anypod:app=web} -n academy-inc-crash", meaning: "State: Terminated, Reason Error, Exit Code 1 when recorded (at another moment it reads Waiting, CrashLoopBackOff); Last State: Terminated, Reason Error, Exit Code 1, started and finished within a second; Restart Count 2; event BackOff \"Back-off restarting failed container httpd\". Other events (a FailedMount while the ConfigMap cache syncs, a readiness \"connection refused\") may also appear on other runs: they are side effects, not the cause"}
+  - {cmd: "oc logs <pod> --previous -n academy-inc-crash", run: "oc logs {anypod:app=web} --previous -n academy-inc-crash", meaning: "the crashed instance's last words: AH00526 Syntax error on line 2 of /etc/httpd/conf.d/academy.conf, Invalid command 'ServerTokenz'", expect: any}
+  - {cmd: "oc logs <pod> -n academy-inc-crash", run: "oc logs {anypod:app=web} -n academy-inc-crash", meaning: "the same lines here. When recorded the container had just terminated (see describe): plain logs showed that run, --previous the run before it, and every run fails the same way. While the container waits in back-off, plain logs also fall back to the last terminated run; once a new attempt starts it shows only that attempt", expect: any}
+  - {cmd: "oc get configmap httpd-extra -n academy-inc-crash -o jsonpath='{.data.academy\\.conf}'", meaning: "the directive httpd rejected: ServerTokenz Prod (line 2, after the comment)"}
+hints:
+  - "The container exits immediately. The application's own message is in the logs of the previous instance."
+  - "httpd names the file and the line. Compare the directive with the httpd documentation."
+  - "Correct the ConfigMap, then restart the rollout: files mounted with subPath are never updated in running pods."
+fix:
+  - {cmd: "oc set data configmap/httpd-extra -n academy-inc-crash academy.conf='ServerTokens Prod'", meaning: "the correct directive name"}
+  - {cmd: "oc rollout restart deploy/web -n academy-inc-crash", meaning: "new pods read the corrected file"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-crash --timeout=120s", meaning: "successfully rolled out", timeout: 140}
+fix_wait: [web-ready, route-ok]
+checks:
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: stable, title: "The running pod has not restarted", type: pods, selector: app=web, ready: true, max_restarts: 0, expect_text: "Ready, 0 restarts"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  `ServerTokenz` is not an httpd directive (the right one is `ServerTokens`). httpd validates its whole configuration at
+  start and exits with an error: the container exits, the kubelet restarts it with an increasing back-off, and the
+  status becomes CrashLoopBackOff. The error is only in the crashed container's own log: `oc logs --previous`, or
+  plain `oc logs` while no new attempt is running (the recording shows both returning the same AH00526 line: plain
+  logs read the run that had just ended, `--previous` the one before it, and every run fails the same way).
+alternatives: |
+  - Validate configuration before shipping it: run `httpd -t` against the file in CI, or in a debug copy of the pod
+    (`oc debug` against the Deployment with `-- httpd -t` as the command, as the troubleshooting lab does with `-- env`).
+  - Mount the ConfigMap as a whole directory instead of a subPath file so updates propagate (in a dedicated directory
+    that the main configuration includes: mounting over /etc/httpd/conf.d would hide the image's own files). The
+    application still needs a restart or reload to read them.
+sre: |
+  Configuration is code: review it, test it in CI and roll it out like an image, with a rollback path. Keeping
+  `revisionHistoryLimit` and putting config into the pod template (for example a hash annotation, or Kustomize's
+  `configMapGenerator`) makes every config change a rollout that can be undone.
+questions:
+  - q: "Here `oc logs` without --previous showed the same error. Why is `--previous` still the habit to keep?"
+    a: "While the container waits in back-off, `oc logs` falls back to the last terminated instance, so both match. As soon as the kubelet starts the next attempt, `oc logs` shows that new instance (often only start-up lines), while `--previous` explicitly asks for the instance that crashed (as long as the runtime still has its log)."
+  - q: "Why is a rollout restart needed after fixing a subPath-mounted ConfigMap?"
+    a: "A subPath mount pins the file as it was when the container started; the kubelet's updates of ConfigMap volumes never reach it, so only a new container sees the fix."
+references:
+  - {title: "Kubernetes: Debug running pods", url: "https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/"}
+  - {title: "Apache httpd: ServerTokens", url: "https://httpd.apache.org/docs/2.4/mod/core.html#servertokens"}
+  - {title: "Kubernetes: Container restarts and back-off", url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-restarts"}
+  - {title: "Kubernetes: Mounted ConfigMaps are updated automatically (not with subPath)", url: "https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically"}
+symptom_checks: [web-ready, stable, route-ok]  # monitoring-level evidence shown before the answer

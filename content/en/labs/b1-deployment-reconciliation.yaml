@@ -1,0 +1,250 @@
+id: lab.deployment-reconciliation
+title: "Watch desired state win"
+subtitle: "Deployments, ReplicaSets and Pods"
+summary: "Watch controllers reconcile: delete pods, scale, roll out, roll back, and fight the Deployment controller (and lose)."
+module: f2-kubernetes
+mode: REAL_LAB
+minutes: 35
+level: 1
+supports: "Verified on CRC / OpenShift 4.21.8 (Kubernetes 1.34). Uses apps/v1 Deployment, stable since Kubernetes 1.9."
+concepts: [k8s.controllers, k8s.deployment, k8s.replicaset, k8s.ownerrefs, k8s.rollout]
+prerequisites: [b.reconciliation]
+namespace: academy-deploy
+objective: |
+  Prove to yourself that Kubernetes is a set of control loops comparing **desired state** (spec) with
+  **observed state** (status), and that each object has at most one *managing* controller, recorded as the
+  `controller: true` entry in its `ownerReferences`. By the end you can explain what happens, step by step, when
+  someone creates a Deployment.
+background: |
+  A **Deployment** does not run pods. It owns **ReplicaSets**, and each ReplicaSet owns **Pods**.
+  Three different loops are involved:
+
+  1. The **Deployment controller** (in kube-controller-manager) makes sure there is a ReplicaSet whose pod
+     template matches the Deployment's template, and scales old and new ReplicaSets during a rollout.
+  2. The **ReplicaSet controller** counts pods that match its selector and creates or deletes pods until
+     the count equals `.spec.replicas`.
+  3. The **scheduler** binds each new pod to a node, and the **kubelet** on that node starts the containers.
+
+  The link between them is the **ownerReference** in `metadata.ownerReferences`: a Pod points to its
+  ReplicaSet, a ReplicaSet points to its Deployment. Garbage collection follows these links when an owner
+  is deleted. A rollout is just the Deployment controller creating a *new* ReplicaSet (a new pod-template
+  hash) and shifting replicas from old to new according to the strategy (`maxSurge`, `maxUnavailable`).
+
+  **Where everything comes from.** The app creates the project `academy-deploy` and applies the ConfigMap
+  `web-content` and the Deployment `web` shown below; `web` runs Red Hat's UBI 9 Apache httpd image
+  (`registry.access.redhat.com/ubi9/httpd-24`), which needs no login, and its readiness probe reads the `healthz` file
+  from the ConfigMap. Clean up deletes the project.
+
+  **What you need first.** The steps use `oc`, OpenShift's client: for these commands it behaves like `kubectl`
+  ([From kubectl to oc](/lesson/k.kubectl-to-oc)). The last two steps run a rollout and undo it; this background
+  says enough to follow them, and [Rollout strategies and change control](/lesson/g.rollouts-change) teaches them fully later.
+commands:
+  - cmd: "oc get deploy,rs,pods -n academy-deploy -o wide"
+    meaning: "The three layers side by side. Pod names start with the ReplicaSet name, which starts with the Deployment name."
+  - cmd: "oc get pod <pod> -n academy-deploy -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'"
+    run: "oc get pod {pod:app=web} -n academy-deploy -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'"
+    meaning: "Who owns this pod. Do the same on the ReplicaSet to reach the Deployment."
+  - cmd: "oc rollout history deploy/web -n academy-deploy"
+    meaning: "Revisions = ReplicaSets the Deployment keeps (revisionHistoryLimit: 5 in this lab; the default is 10)."
+  - cmd: "oc rollout undo deploy/web -n academy-deploy"
+    meaning: "Copy an older ReplicaSet's template back into the Deployment. It creates a new revision number."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: web-content
+    data:
+      index.html: "<h1>academy web</h1><p>served by httpd from a ConfigMap</p>"
+      healthz: "ok"
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web
+      labels: {app: web}
+    spec:
+      replicas: 2
+      revisionHistoryLimit: 5
+      selector:
+        matchLabels: {app: web}
+      template:
+        metadata:
+          labels: {app: web}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe:
+              httpGet: {path: /healthz, port: 8080}
+              periodSeconds: 5
+            resources:
+              requests: {cpu: 10m, memory: 32Mi}
+              limits: {memory: 128Mi}
+            volumeMounts:
+            - {name: content, mountPath: /var/www/html}
+          volumes:
+          - name: content
+            configMap: {name: web-content}
+steps:
+  - id: layers
+    title: "See the three layers"
+    do: |
+      List the Deployment, its ReplicaSet and the pods. Compare the names: the ReplicaSet name is the
+      Deployment name plus a **pod-template hash**; each pod name is the ReplicaSet name plus a random suffix.
+    commands:
+      - {cmd: "oc get deploy,rs,pods -n academy-deploy", meaning: "all three layers"}
+    predict:
+      prompt: "How many ReplicaSets exist right after the Deployment was created?"
+      choices: ["0: the Deployment manages pods directly", "1", "2: one per replica"]
+      answer: 1
+      explain: "One ReplicaSet per distinct pod template. Replicas are pods of the same ReplicaSet, not separate ReplicaSets."
+      feedback:
+        - "A Deployment never creates pods itself: the Deployment controller creates a ReplicaSet, and the ReplicaSet controller creates the pods."
+        - "Right: one pod template, one ReplicaSet (`web-<hash>`), which runs both replicas."
+        - "Replicas are copies made by one ReplicaSet. A second ReplicaSet appears only when the pod template changes (a rollout)."
+    observe: "One ReplicaSet `web-<hash>` with DESIRED 2, and two pods `web-<hash>-<suffix>`, READY 1/1 once the readiness probe passes."
+    why: "The Deployment controller hashed the pod template and created a ReplicaSet for it. That hash is also stored as the `pod-template-hash` label and added to the ReplicaSet's selector (`app=web,pod-template-hash=…` in the `-o wide` output), so old and new ReplicaSets never select each other's pods."
+    checks: [ready2]
+    wait_for: [ready2]
+  - id: owners
+    title: "Follow the ownerReferences"
+    do: |
+      Pick one pod and print its owner. Then print the owner of that ReplicaSet.
+    commands:
+      - {cmd: "oc get pods -n academy-deploy -o custom-columns=POD:.metadata.name,OWNER:.metadata.ownerReferences[0].name", meaning: "owner of every pod"}
+      - {cmd: "oc get rs -n academy-deploy -o custom-columns=RS:.metadata.name,OWNER:.metadata.ownerReferences[0].name,CONTROLLER:.metadata.ownerReferences[0].controller", meaning: "owner of the ReplicaSet"}
+    observe: "Pods are owned by the ReplicaSet; the ReplicaSet is owned by `web` with `controller: true`."
+    why: "At most one ownerReference per object can be the managing controller (`controller: true`). The garbage collector deletes dependents when the owner is deleted (`oc delete` uses background cascading deletion by default)."
+  - id: delete-pod
+    title: "Delete a pod and watch it come back"
+    do: |
+      Delete one of the two pods, then list pods again (run the list two or three times).
+    commands:
+      - {cmd: "oc delete pod <one-pod-name> -n academy-deploy", run: "oc delete pod {pod:app=web} -n academy-deploy", meaning: "remove one replica by hand"}
+      - {cmd: "oc get pods -n academy-deploy", meaning: "observe the replacement"}
+    predict:
+      prompt: "What happens after you delete one pod?"
+      choices: ["The Deployment drops to 1 replica", "A new pod with a different name is created", "The same pod restarts with the same name"]
+      answer: 1
+      explain: "The ReplicaSet controller sees 1 matching pod instead of 2 and creates a new pod from the template. Pods are cattle: new name, new IP."
+      feedback:
+        - "Deleting a pod does not change any desired state: the Deployment and its ReplicaSet still say 2, so the gap is refilled."
+        - "Right: the ReplicaSet controller counts 1 pod against 2 desired and creates a brand-new pod (new name, new UID, new IP)."
+        - "Restarts happen to containers inside a pod that still exists. A deleted pod is gone for good; only a replacement with a new name can appear."
+    observe: |
+      The replacement is already listed: a pod with a new suffix, `0/1 ContainerCreating`, a few seconds old, next to the
+      surviving pod. The deleted pod is not listed at all, because `oc delete` waits until the object is gone before it
+      returns. Run the list again and the new pod becomes `1/1 Running` once its readiness probe passes (add `-o wide`
+      to see that it also has a new IP).
+    wait_for: [ready2]
+    why: "Nothing 'restarted' the old pod. The ReplicaSet controller reconciled count(observed) = 1 toward spec.replicas = 2. A Service would only send traffic to the new pod once its readiness probe passes."
+  - id: scale
+    title: "Scale the Deployment"
+    do: "Scale to 3 replicas."
+    commands:
+      - {cmd: "oc scale deploy/web --replicas=3 -n academy-deploy", meaning: "change desired state"}
+      - {cmd: "oc get rs -n academy-deploy", meaning: "which object changed?"}
+    predict:
+      prompt: "After scaling, how many ReplicaSets exist?"
+      choices: ["1, with DESIRED 3", "2", "3"]
+      answer: 0
+      explain: "Scaling does not change the pod template, so no new ReplicaSet. The Deployment controller only updates the existing ReplicaSet's replicas."
+      feedback:
+        - "Right: replicas are not part of the pod template, so the Deployment controller just changes the existing ReplicaSet's DESIRED count."
+        - "A second ReplicaSet appears only when `.spec.template` changes (a rollout). Scaling leaves the template untouched."
+        - "ReplicaSets are not one per pod: one ReplicaSet manages all 3 replicas."
+    observe: "Still one ReplicaSet, now DESIRED 3 and CURRENT 3. READY reaches 3 a few seconds later (the recording caught READY 2 while the third pod was starting)."
+    why: "Only a change to `.spec.template` triggers a rollout. Replicas, paused, strategy changes do not."
+    checks: [ready3]
+    wait_for: [ready3]
+  - id: fight
+    title: "Fight the controller"
+    do: |
+      Try to scale the **ReplicaSet** directly to 5, then look at it again a few seconds later.
+    commands:
+      - {cmd: "oc scale rs/<replicaset-name> --replicas=5 -n academy-deploy", run: "oc scale rs/{rs:app=web} --replicas=5 -n academy-deploy", meaning: "change a child object by hand"}
+      - {cmd: "oc get rs -n academy-deploy", meaning: "who wins?"}
+    predict:
+      prompt: "What does the ReplicaSet show a few seconds later?"
+      choices: ["5 replicas, the RS is the source of truth for pods", "3 replicas, the Deployment controller resets it", "8 replicas"]
+      answer: 1
+      explain: "The Deployment owns the ReplicaSet and keeps its replicas aligned with the Deployment's desired count. Change the owner, not the child."
+      feedback:
+        - "The ReplicaSet does create pods, but it is itself managed: its replicas field is owned by the Deployment controller, which writes it back."
+        - "Right: the Deployment controller notices the ReplicaSet no longer matches the Deployment's 3 replicas and sets it back."
+        - "Scaling the child does not add to the owner: there is one ReplicaSet with one replicas field, and the Deployment controller resets it to 3."
+    observe: |
+      By the time you look, DESIRED is already back to 3 (in the recording, a few seconds later it shows 3/3/3). Any
+      extra pods the ReplicaSet controller started in between are deleted again.
+    wait_for: [ready3]
+    why: "This is a very common operational mistake: editing a managed object. The same rule applies to everything an Operator or Argo CD manages: fix the source of truth."
+  - id: rollout
+    title: "Roll out a template change"
+    do: |
+      Add an environment variable. That changes the pod template, so it starts a rollout.
+    commands:
+      - {cmd: "oc set env deploy/web GREETING=v2 -n academy-deploy", meaning: "template change"}
+      - {cmd: "oc rollout status deploy/web -n academy-deploy --timeout=120s", meaning: "wait for the rollout", timeout: 150}
+      - {cmd: "oc get rs -n academy-deploy", meaning: "old and new"}
+      - {cmd: "oc rollout history deploy/web -n academy-deploy", meaning: "revisions"}
+    predict:
+      prompt: "After the rollout, what do the ReplicaSets look like?"
+      choices: ["One RS, updated in place", "Two RS: the new one with 3 pods, the old one scaled to 0 but kept", "Two RS with 3 pods each"]
+      answer: 1
+      explain: "The old ReplicaSet is kept with 0 replicas, so a rollback needs no new ReplicaSet: the Deployment controller scales the old one back up (its pods still have to start and pass readiness)."
+      feedback:
+        - "A ReplicaSet does not replace its existing pods when a template changes. A template change always produces a new ReplicaSet."
+        - "Right: the new ReplicaSet runs 3 pods; the old one is scaled to 0 and kept as rollout history (up to revisionHistoryLimit)."
+        - "During a RollingUpdate replicas are shifted from old to new, not doubled: once the rollout completes the old ReplicaSet is at 0."
+    observe: "Two ReplicaSets: the old one at 0/0/0, the new one at 3/3/3. The history shows revisions 1 and 2."
+    why: |
+      RollingUpdate (defaults: maxSurge 25%, maxUnavailable 25%) moves pods from old to new in small batches, waiting for
+      readiness at each step. The percentages are converted to pod counts: maxSurge rounds up and maxUnavailable rounds
+      down, so with 3 replicas you get 1 extra pod and 0 unavailable. That is why the status output counts "1 out of 3",
+      then "2 out of 3": one new pod at a time, never fewer than 3 available.
+  - id: undo
+    title: "Roll back"
+    do: "Undo the last rollout, then look at the env var and the revision history."
+    commands:
+      - {cmd: "oc rollout undo deploy/web -n academy-deploy", meaning: "back to the previous template"}
+      - {cmd: "oc set env deploy/web --list -n academy-deploy", meaning: "GREETING is gone"}
+      - {cmd: "oc rollout history deploy/web -n academy-deploy", meaning: "revision numbers after an undo"}
+    observe: "GREETING is gone. The history shows revisions 2 and 3: revision 1 became revision 3."
+    why: "An undo copies the old ReplicaSet's template into the Deployment. The old ReplicaSet is reused (same hash) and gets a new revision number."
+    checks: [undone, revision]
+    wait_for: [undone, revision, ready3]
+hints: []
+checks:
+  - {id: ready2, title: "Deployment web is ready", type: deployment_ready, name: web, expect_text: "all replicas ready and updated"}
+  - {id: ready3, title: "Deployment web runs 3 ready replicas", type: deployment_ready, name: web, replicas: 3, expect_text: "3/3 ready"}
+  - {id: rs-history, title: "A rollout happened (at least 2 ReplicaSets kept)", type: count, kind: replicasets, selector: app=web, op: gte, value: 2, expect_text: ">= 2 ReplicaSets"}
+  - {id: undone, title: "GREETING is no longer in the template", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].env[?name=GREETING]", op: absent, expect_text: "no GREETING env var"}
+  - {id: revision, title: "Deployment revision is at least 3", type: field, kind: deployment, name: web, path: 'metadata.annotations.deployment\.kubernetes\.io/revision', op: gte, value: 3, expect_text: "revision >= 3"}
+variations:
+  - "With 3 replicas the defaults already mean maxSurge 1 / maxUnavailable 0. Set `maxSurge: 0` and `maxUnavailable: 1` with `oc patch`, then roll out again and watch: each old pod is removed before its replacement starts, so READY drops to 2/3 during the rollout."
+  - "Delete the Deployment with `--cascade=orphan` in a variation project of your own: the ReplicaSet and pods survive without an owner. (In this lab, prefer the normal delete and let cleanup remove the project.)"
+  - "Change the image to a tag that does not exist and watch the rollout stall: the old pods keep serving. That is the 'broken rollout' incident."
+troubleshooting:
+  - problem: "Pods stay 0/1 READY."
+    hint: "`oc describe pod` → Events. The readiness probe calls /healthz on 8080, which is a file from the ConfigMap: if the ConfigMap is missing the pod stays in ContainerCreating (FailedMount event); if only the `healthz` key is missing, httpd returns 404 and the pod runs but never becomes ready."
+  - problem: "`oc rollout status` waits forever."
+    hint: "New pods are not becoming ready. Look at the newest ReplicaSet's pods and their events."
+questions:
+  - q: "You `oc edit` a ReplicaSet owned by a Deployment and change its image. What happens, and why is it a bad idea?"
+    a: "Existing pods are not recreated (a ReplicaSet uses its template only for new pods), and the Deployment does not adopt the change: its controller keeps reconciling toward the Deployment's own template, so your edit is overwritten or replaced on the next reconcile or rollout. Changes must go to the owner (the Deployment) or to its source of truth (Git). (`oc edit` opens an interactive editor; the app does not run it.)"
+  - q: "Why does Kubernetes keep old ReplicaSets with 0 replicas?"
+    a: "To roll back quickly and to show history. revisionHistoryLimit bounds how many are kept."
+  - q: "Which component creates the pod object, and which one starts the container?"
+    a: "The ReplicaSet controller (in kube-controller-manager) creates the Pod object via the API server; the scheduler binds it to a node; the kubelet on that node asks the container runtime (CRI-O on OpenShift) to start it."
+enterprise: |
+  In large enterprises the Deployment YAML usually lives in Git and is applied by Argo CD (OpenShift GitOps). A
+  manual `oc scale` or `oc set env` in production is drift: with automated sync and self-heal Argo CD reverts it
+  shortly after detecting it; without self-heal it stays until the next sync, which then reverts it. The habit to build: **find the owner and the source of truth before changing
+  anything**. During incidents, a quick manual change can be acceptable (it buys time) but must be recorded
+  and back-ported to Git, or it silently disappears.
+references:
+  - {title: "Kubernetes: Deployments", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"}
+  - {title: "Kubernetes: Owners and dependents", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/"}
+  - {title: "Kubernetes: Controllers", url: "https://kubernetes.io/docs/concepts/architecture/controller/"}

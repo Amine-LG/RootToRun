@@ -1,0 +1,225 @@
+id: ch.bounded-cleanup
+kind: challenge
+title: "Automate a cleanup safely"
+subtitle: "A CronJob with its own ServiceAccount and the least privilege that works"
+summary: "Forgotten debug pods pile up in a project. Schedule a job that removes them every half hour, and give it exactly the permissions it needs."
+module: r2-admin-challenges
+minutes: 35
+level: 2
+supports: "Graded on OpenShift 4.21.8 (single node). Uses the cluster's own `openshift/cli` image through the internal registry."
+concepts: [k8s.jobs, rbac.roles, rbac.serviceaccounts, rbac.least-privilege]
+prerequisites: [o2.jobs-cronjobs, o2.service-accounts, f.rbac]
+namespace: academy-ch-cleanup
+objective: |
+  Build an administrative CronJob that runs as a dedicated ServiceAccount with a namespaced Role limited to what the
+  task needs, and prove both that it works and that it can do nothing else.
+background: |
+  **Where everything comes from.** The project starts with the Deployment `web` and two forgotten pods, `debug-alice`
+  and `debug-bob`, labelled `debug=true` (all running `sleep` in the UBI 9 minimal image). The `openshift/cli` image
+  is OpenShift's own CLI image, served by the cluster's internal registry from the `openshift` namespace, which every
+  project may pull from. The app creates the project `academy-ch-cleanup` as your learner identity when you start the
+  challenge and applies the starting objects; everything else is yours to create. The images come from Red Hat's
+  public registry `registry.access.redhat.com`, which needs no login. Grading runs on your cluster when you press
+  Grade, as the app's own identities; Clean up deletes the project.
+symptom: |
+  Engineers start throw-away pods labelled `debug=true` in this project and forget them. The application (`web`)
+  must never be touched. The team wants a job, every 30 minutes, that removes the debug pods. The cluster's own
+  CLI image is available to every project as
+  `image-registry.openshift-image-registry.svc:5000/openshift/cli:latest`; inside a pod, `oc` uses the pod's
+  ServiceAccount and its namespace automatically.
+requirements:
+  - "A CronJob `debug-cleaner` runs **every 30 minutes** and uses **`concurrencyPolicy: Forbid`**, so a scheduled run never starts while another scheduled run is still active."
+  - "Its pods run as a dedicated ServiceAccount `debug-cleaner` (not `default`)."
+  - "That ServiceAccount can **list and delete pods** in this project, and **cannot** delete or change Deployments, read Secrets, or change RBAC."
+  - "Prove it works: a Job started from the CronJob has **succeeded**, no pod labelled `debug=true` is left, and `web` still runs. The CronJob stays active (not suspended)."
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: web, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+  - |
+    apiVersion: v1
+    kind: Pod
+    metadata: {name: debug-alice, labels: {debug: "true"}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - {name: shell, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+  - |
+    apiVersion: v1
+    kind: Pod
+    metadata: {name: debug-bob, labels: {debug: "true"}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+      - {name: shell, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 32Mi}}}
+hints:
+  - "Build it in layers: the ServiceAccount, a Role with only the verbs and resource the command needs, a RoleBinding, then the CronJob."
+  - "`oc create cronjob` takes `--image`, `--schedule` and the command after `--`. The ServiceAccount and the concurrency policy are fields of the job template and of the CronJob spec."
+  - "Do not wait 30 minutes: `oc create job <name> --from=cronjob/debug-cleaner` starts a Job from the CronJob's template now."
+  - "Check the permissions before you run it: `oc auth can-i delete pods --as=system:serviceaccount:academy-ch-cleanup:debug-cleaner`."
+fix:
+  - {cmd: "oc create serviceaccount debug-cleaner -n academy-ch-cleanup", meaning: "a dedicated identity for the job"}
+  - {cmd: "oc create role pod-cleaner --verb=list,delete --resource=pods -n academy-ch-cleanup", meaning: "exactly the verbs `oc delete pods -l …` uses: list to find them, delete to remove them"}
+  - {cmd: "oc create rolebinding debug-cleaner --role=pod-cleaner --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup", meaning: "grant it to the ServiceAccount, in this namespace only"}
+  - {cmd: "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true", meaning: "the schedule and the command (quoted, so the shell passes the five fields as one value and does not expand each * into file names)"}
+  - {cmd: "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup", meaning: "run the job's pods as that ServiceAccount"}
+  - cmd: "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'"
+    meaning: "no overlapping scheduled runs (a Job created by hand with --from is not covered)"
+  - {cmd: "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup", meaning: "run it now instead of waiting for the schedule"}
+  - {cmd: "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup", meaning: "the Job succeeded", timeout: 200}
+checks:
+  - {id: schedule, title: "debug-cleaner runs every 30 minutes", type: field, kind: cronjob, name: debug-cleaner, path: spec.schedule, op: cron_every, value: 30, expect_text: "spec.schedule = '*/30 * * * *'"}
+  - {id: active, title: "the CronJob is not suspended", type: field, kind: cronjob, name: debug-cleaner, path: spec.suspend, op: ne, value: true, expect_text: "spec.suspend = None"}
+  - {id: no-overlap, title: "it never runs two jobs at once", type: field, kind: cronjob, name: debug-cleaner, path: spec.concurrencyPolicy, op: eq, value: Forbid, expect_text: "Forbid"}
+  - {id: does-cleanup, title: "its command deletes pods labelled debug=true", type: any, of: [{type: field, kind: cronjob, name: debug-cleaner, path: spec.jobTemplate.spec.template.spec.containers, op: json_contains, value: "debug=true"}], expect_text: "the command names debug=true"}
+  - {id: own-sa, title: "its pods run as the debug-cleaner ServiceAccount", type: field, kind: cronjob, name: debug-cleaner, path: spec.jobTemplate.spec.template.spec.serviceAccountName, op: eq, value: debug-cleaner, expect_text: "debug-cleaner"}
+  - {id: can-list, title: "the ServiceAccount can list pods", type: can_i, as: debug-cleaner, verb: list, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: can-delete, title: "the ServiceAccount can delete pods", type: can_i, as: debug-cleaner, verb: delete, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: no-deployments, title: "it cannot delete, change or scale Deployments", type: rules_deny, as: debug-cleaner, forbid: [{resource: deployments.apps, verbs: [create, update, patch, delete, deletecollection]}, {resource: deployments.apps/scale, verbs: [update, patch]}, {resource: replicasets.apps, verbs: [create, update, patch, delete, deletecollection]}], expect_text: "no rule allows changing them"}
+  - {id: no-secrets, title: "it cannot read Secrets", type: rules_deny, as: debug-cleaner, forbid: [{resource: secrets, verbs: [get, list, watch]}], expect_text: "no rule allows reading secrets"}
+  - {id: no-rbac, title: "it cannot change RBAC", type: rules_deny, as: debug-cleaner, forbid: [{resource: rolebindings.rbac.authorization.k8s.io, verbs: [create, update, patch, delete, deletecollection]}, {resource: roles.rbac.authorization.k8s.io, verbs: [create, update, patch, delete, deletecollection, bind, escalate]}], expect_text: "no rule allows changing roles or bindings"}
+  - {id: ran, title: "a Job from the CronJob succeeded", type: any, of: [{type: count, kind: job, where: [{path: "metadata.ownerReferences[0].name", op: eq, value: debug-cleaner}, {path: status.succeeded, op: gte, value: 1}], op: gte, value: 1}, {type: field, kind: cronjob, name: debug-cleaner, path: status.lastSuccessfulTime, op: exists}], expect_text: "1 matching job"}
+  - {id: cleaned, title: "no debug pod is left", type: count, kind: pod, selector: debug=true, op: lte, value: 0, expect_text: "0 matching pod"}
+  - {id: web-alive, title: "web still runs", type: deployment_ready, name: web, replicas: 1, expect_text: "1/1 ready"}
+trials:
+  - id: default-sa-edit
+    title: "Runs as the default ServiceAccount with the edit role: it works, but it is far too powerful"
+    kind: wrong
+    expect: partial
+    expect_checks: {own-sa: fail, ran: pass, cleaned: pass}
+    commands:
+      - {cmd: "oc policy add-role-to-user edit -z default -n academy-ch-cleanup"}
+      - {cmd: "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true"}
+      - cmd: "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'"
+      - {cmd: "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup", timeout: 200}
+  - id: sa-admin
+    title: "Dedicated ServiceAccount, but bound to the admin role"
+    kind: wrong
+    expect: partial
+    expect_checks: {own-sa: pass, can-delete: pass, no-deployments: fail, no-secrets: fail, no-rbac: fail}
+    commands:
+      - {cmd: "oc create serviceaccount debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc policy add-role-to-user admin -z debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true"}
+      - {cmd: "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup"}
+      - cmd: "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'"
+  - id: delete-only
+    title: "Least privilege taken too far: a Role so narrow that the job cannot do its work"
+    kind: partial
+    expect: partial
+    expect_checks: {can-list: fail, can-delete: pass, ran: fail, cleaned: fail, no-secrets: pass}
+    commands:
+      - {cmd: "oc create serviceaccount debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc create role pod-deleter --verb=delete --resource=pods -n academy-ch-cleanup"}
+      - {cmd: "oc create rolebinding debug-cleaner --role=pod-deleter --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true"}
+      - {cmd: "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup"}
+      - cmd: "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\"}}'"
+      - {cmd: "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup"}
+  - id: g4-suspended
+    title: "Everything right, then suspended: no scheduled run will ever happen"
+    kind: wrong
+    expect: partial
+    expect_checks: {active: fail, ran: pass, schedule: pass}
+    commands:
+      - {cmd: "oc create serviceaccount debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc create role pod-cleaner --verb=list,delete --resource=pods -n academy-ch-cleanup"}
+      - {cmd: "oc create rolebinding debug-cleaner --role=pod-cleaner --serviceaccount=academy-ch-cleanup:debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc create cronjob debug-cleaner --image=image-registry.openshift-image-registry.svc:5000/openshift/cli:latest --schedule=\"*/30 * * * *\" -n academy-ch-cleanup -- oc delete pods -l debug=true"}
+      - {cmd: "oc set serviceaccount cronjob/debug-cleaner debug-cleaner -n academy-ch-cleanup"}
+      - cmd: "oc patch cronjob/debug-cleaner -n academy-ch-cleanup --type=merge -p '{\"spec\":{\"concurrencyPolicy\":\"Forbid\",\"suspend\":true}}'"
+      - {cmd: "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup", timeout: 200}
+  - id: yaml-alternative
+    title: "A correct alternative: one manifest, an equivalent schedule and one harmless extra permission"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -n academy-ch-cleanup -f -"
+        stdin: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata: {name: debug-cleaner}
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata: {name: debug-pod-cleaner}
+          rules:
+          - {apiGroups: [""], resources: [pods], verbs: [get, list, delete]}
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata: {name: debug-pod-cleaner}
+          roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: debug-pod-cleaner}
+          subjects:
+          - {kind: ServiceAccount, name: debug-cleaner}
+          ---
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata: {name: debug-cleaner}
+          spec:
+            schedule: "15,45 * * * *"
+            concurrencyPolicy: Forbid
+            successfulJobsHistoryLimit: 2
+            failedJobsHistoryLimit: 2
+            jobTemplate:
+              spec:
+                backoffLimit: 1
+                template:
+                  spec:
+                    serviceAccountName: debug-cleaner
+                    restartPolicy: Never
+                    containers:
+                    - name: cleaner
+                      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+                      command: [oc, delete, pods, -l, debug=true]
+      - {cmd: "oc create job cleanup-now --from=cronjob/debug-cleaner -n academy-ch-cleanup"}
+      - {cmd: "oc wait job/cleanup-now --for=condition=Complete --timeout=180s -n academy-ch-cleanup", timeout: 200}
+root_cause: |
+  Nothing is broken: this is a design task. Three decisions matter:
+  1. **Identity.** A job that runs as `default` shares its permissions with every pod that does not name a
+     ServiceAccount. A dedicated ServiceAccount makes the grant specific and auditable.
+  2. **Permissions.** `oc delete pods -l debug=true` first **lists** the pods matching the selector, then
+     **deletes** each one. A Role with exactly `list` and `delete` on `pods` is enough. `edit` or `admin` would also
+     let the job change Deployments, read Secrets and, with `admin`, change RBAC.
+  3. **Scheduling behaviour.** `concurrencyPolicy: Forbid` stops the controller starting a scheduled run while one
+     it started is still active. `oc create job --from=cronjob/…` starts a Job from the same template, so you can
+     test without waiting, but it bypasses that decision: the controller does not count a Job created by hand as
+     active, so run the test while no scheduled Job is active. Strict mutual exclusion across every invocation would
+     need a lock in the workload itself.
+alternatives: |
+  Any schedule that runs every 30 minutes passes (`*/30 * * * *`, `0,30 * * * *`, `15,45 * * * *`). Adding `get` to the Role is harmless (the CLI
+  may read a pod after deleting it). Using a ClusterRole bound with a RoleBinding is equivalent: a RoleBinding limits
+  any role to its own namespace. `oc policy add-role-to-user edit -z …` makes the job work but is too broad, and the
+  grade shows it: with `-z default` (the recorded trial) the job runs as `default`, so it fails the
+  own-ServiceAccount check and the `debug-cleaner` permission checks (`can-list`, `can-delete`), while the
+  least-privilege checks pass only because they examine `debug-cleaner`, which does not exist in that trial; with
+  `-z debug-cleaner` it would fail `no-deployments` and `no-secrets` (`edit` grants no RBAC changes).
+sre: |
+  In a change request for an automated job, list the identity it runs as, its exact permissions (`oc auth can-i
+  --list --as=system:serviceaccount:<ns>:<sa>`), how often it runs and what happens if it overlaps or fails (history
+  limits, backoff), and how you tested it (a manual run with `--from=cronjob`). Reviewers can then approve the
+  permissions, not just the schedule.
+questions:
+  - q: "Why does a Role with only `delete` on pods make `oc delete pods -l debug=true` fail?"
+    a: "Deleting by label selector first lists the matching pods, which needs `list`; only then are they deleted one by one."
+  - q: "The job's pod runs `oc` without a kubeconfig. How does it authenticate, and to which namespace does it default?"
+    a: "With the ServiceAccount token projected into the pod; the CLI reads the namespace from the ServiceAccount files mounted in the pod."
+  - q: "What does `concurrencyPolicy: Forbid` do when a run is still active at the next scheduled time?"
+    a: "It does not start another scheduled run while one is active. When the active Job finishes, a missed run may still start if it is within `startingDeadlineSeconds` (with no deadline set, as here, the missed time can remain eligible); otherwise the controller waits for the next eligible scheduled time."
+references:
+  - {title: "Kubernetes: CronJob", url: "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/"}
+  - {title: "Kubernetes: Using RBAC authorization", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"}
+  - {title: "Kubernetes: Configure service accounts for pods", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"}
+  - {title: "OpenShift 4.21: Using service accounts in applications", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-service-accounts"}

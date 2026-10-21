@@ -1,0 +1,48 @@
+.author-page { max-width: 1600px; padding-inline: 24px; }
+.author-layout { display: grid; grid-template-columns: minmax(160px, .7fr) minmax(300px, 1.5fr) minmax(260px, 1.2fr); gap: 18px; align-items: start; }
+.author-layout > * { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px; }
+.author-layout label { display: block; font-weight: 600; }
+.author-layout input:not([type=radio]), .author-layout select { width: 100%; min-width: 0; margin: 6px 0 12px; }
+.author-list { max-height: 80vh; overflow: auto; }
+.author-list ul { list-style: none; padding: 0; margin: 14px 0; }
+.author-list li button { display: block; width: 100%; padding: 9px; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 8px; color: var(--text); overflow-wrap: anywhere; cursor: pointer; }
+.author-list li button:hover, .author-list li button.selected { background: var(--accent-soft); border-color: var(--accent); }
+.author-list small { display: block; color: var(--muted); font-size: .75rem; }
+.author-list h2 { font-size: 1.15rem; }
+.author-path { font-size: .8rem; overflow-wrap: anywhere; }
+.author-source { display: flex; height: 60vh; min-height: 320px; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.author-source pre, .author-source textarea { margin: 0; padding: 12px 8px; font: 12px/1.65 var(--mono); tab-size: 2; border: 0; border-radius: 0; white-space: pre; }
+.author-source pre { flex: none; overflow: hidden; text-align: right; color: var(--muted); background: var(--surface-3); user-select: none; }
+.author-source textarea { flex: 1; min-width: 0; width: 100%; resize: none; background: var(--surface); color: var(--text); overflow: auto; }
+.author-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.author-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.author-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--text); cursor: pointer; padding: 10px; }
+.author-tabs button[aria-selected=true] { border-color: var(--accent); color: var(--accent); }
+.author-inspect [role=tabpanel] { max-height: 75vh; overflow: auto; overflow-wrap: anywhere; }
+.author-inspect h2 { font-size: 1.5rem; }
+.author-inspect h3 { font-size: 1.15rem; }
+.author-error { color: var(--bad); white-space: pre-wrap; overflow-wrap: anywhere; }
+.author-warning { color: var(--warn); }
+.author-question { border: 1px solid var(--line-2); margin: 16px 0; padding: 12px; min-width: 0; border-radius: 8px; }
+.author-question label { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
+.author-question input { flex: none; }
+.author-question .md p { margin-block: 6px; }
+.author-editor details pre { max-height: 300px; overflow: auto; font-size: 12px; }
+.author-create { margin-bottom: 16px; }
+@media (max-width: 1000px) {
+  .author-layout { grid-template-columns: minmax(170px, .55fr) minmax(360px, 1.45fr); }
+  .author-inspect { grid-column: 2; }
+  .author-list { grid-row: span 2; }
+}
+@media (max-width: 700px) {
+  .author-page { padding-inline: 12px; }
+  .author-layout { display: flex; flex-direction: column; }
+  .author-layout > * { width: 100%; }
+  .author-list { max-height: 260px; }
+  .author-source { height: 55vh; }
+}
+
+.author-flow { list-style: none; padding: 0; display: grid; gap: 10px; }
+.author-step { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.author-step-kind { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.author-step.step-ask, .author-step.step-try, .author-step.step-order { border-left: 3px solid var(--accent); }

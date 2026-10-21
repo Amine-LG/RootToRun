@@ -1,0 +1,156 @@
+id: lab.storage
+title: "Keep data across pods"
+subtitle: "A claim that waits, a volume that persists"
+summary: "Watch WaitForFirstConsumer in action, bind a PVC by starting a pod, and prove data survives pod replacement."
+module: a4-config-storage
+mode: REAL_LAB
+minutes: 30
+level: 1
+supports: "Verified on CRC / OpenShift 4.21.8 with StorageClass crc-csi-hostpath-provisioner (WaitForFirstConsumer, Retain). Leaves one Released PV (holding a few bytes) after cleanup, because of Retain; only an admin can delete it (see Clean up in the background)."
+concepts: [storage.pvc, storage.class]
+prerequisites: [e.storage]
+namespace: academy-storage
+objective: |
+  Create a PVC, explain why it is Pending, make it bind by consuming it, write data, replace the pod and read
+  the data back.
+background: |
+  You create everything in this lab yourself, from YAML (`oc apply -f -`). The CRC default storage class
+  provisions hostpath volumes (a directory on the node), so the data really lives on disk. Because the class
+  uses `reclaimPolicy: Retain`, deleting the project deletes the PVC but leaves the PV in `Released` state for an
+  administrator; this is realistic and intentional (no silent data loss), and the data written is tiny. This
+  behaviour comes from this cluster's StorageClass, not from Kubernetes itself: a StorageClass that does not set
+  `reclaimPolicy` defaults to `Delete`, and classes with `volumeBindingMode: Immediate` bind as soon as the claim
+  is created.
+
+  **Where everything comes from.** The project `academy-storage` starts empty; the claim and the Deployment come from
+  the YAML in the steps, and the Deployment runs `registry.access.redhat.com/ubi9/ubi-minimal` (no login needed). The
+  volume is provisioned by OpenShift Local's default StorageClass `crc-csi-hostpath-provisioner`, a directory on the
+  node.
+
+  **Clean up.** Clean up deletes the project, and with it the claim and the Deployment. The PV stays, in `Released`
+  state, and only a cluster administrator (for example kubeadmin) can delete it, because PersistentVolumes are
+  cluster-scoped. These two commands are a documented example, not part of the recording: `oc get pv` (find the
+  volume whose CLAIM is `academy-storage/notes-data` and STATUS `Released`; it is the `pvc-…` name the VOLUME
+  column showed in step 2), then `oc delete pv <pv-name>`. With `Retain`, deleting the PV removes only the API
+  object: the directory holding `note.txt` stays on the node's disk until someone removes it on the node.
+commands:
+  - {cmd: "oc get storageclass", meaning: "the classes you can use: `(default)` marks the default; PROVISIONER, RECLAIMPOLICY (Retain here) and VOLUMEBINDINGMODE (WaitForFirstConsumer here). Readable by any logged-in user"}
+  - {cmd: "oc get pvc -n academy-storage", meaning: "STATUS (Pending/Bound), VOLUME, CAPACITY, STORAGECLASS; before the first step it says `No resources found`"}
+setup: []
+steps:
+  - id: pvc
+    title: "Create the claim"
+    do: |
+      Create a PVC without naming a storage class. The YAML below is loaded into the terminal's YAML box
+      with the command; run it with `oc apply -f -`.
+    commands:
+      - cmd: "oc apply -f - -n academy-storage"
+        meaning: "create the PersistentVolumeClaim from the YAML box"
+        stdin: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: notes-data
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 100Mi
+      - {cmd: "oc get pvc -n academy-storage", meaning: "STATUS Pending, VOLUME empty, STORAGECLASS filled in"}
+      - {cmd: "oc describe pvc notes-data -n academy-storage", meaning: "the event says why it waits; `Used By: <none>`"}
+    predict:
+      prompt: "No storageClassName is given. A minute later, the claim is…"
+      choices: ["Bound to a new volume", "Pending: waiting for first consumer", "Rejected: storageClassName is required"]
+      answer: 1
+      explain: "The default class is filled in at creation (crc-csi-hostpath-provisioner), and its WaitForFirstConsumer mode delays provisioning and binding until a pod that uses the claim is scheduled."
+      feedback:
+        - "That happens with a class whose binding mode is `Immediate`. This class is `WaitForFirstConsumer`: no volume is provisioned until a pod using the claim is scheduled, however long you wait."
+        - "Right. The default class was applied and its WaitForFirstConsumer mode keeps the claim Pending, by design, until a pod consumes it. Pending here is not an error."
+        - "`storageClassName` is optional. When it is omitted and the cluster has a default StorageClass, the API server's admission fills in the default (you can see it in the STORAGECLASS column)."
+    observe: |
+      `Pending` with an empty VOLUME, yet STORAGECLASS shows `crc-csi-hostpath-provisioner` although you did not name
+      one: the default class was filled in. `oc describe` shows `Used By: <none>` and a Normal event
+      `WaitForFirstConsumer ... waiting for first consumer to be created before binding`.
+    checks: [pvc-exists]
+  - id: consumer
+    title: "Consume it"
+    do: "Create a Deployment that mounts the claim at `/data`. It uses the Recreate strategy: the old pod stops before the new one starts, so a rollout never needs the ReadWriteOnce volume on two nodes at once."
+    commands:
+      - cmd: "oc apply -f - -n academy-storage"
+        meaning: "create the Deployment from the YAML box"
+        stdin: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: notes
+            labels: {app: notes}
+          spec:
+            replicas: 1
+            strategy: {type: Recreate}
+            selector: {matchLabels: {app: notes}}
+            template:
+              metadata: {labels: {app: notes}}
+              spec:
+                terminationGracePeriodSeconds: 2
+                containers:
+                - name: app
+                  image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+                  command: ["sleep", "infinity"]
+                  resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+                  volumeMounts: [{name: data, mountPath: /data}]
+                volumes:
+                - name: data
+                  persistentVolumeClaim: {claimName: notes-data}
+      - {cmd: "oc rollout status deploy/notes -n academy-storage --timeout=180s", meaning: "wait for the pod", timeout: 200}
+      - {cmd: "oc get pvc,pods -n academy-storage", meaning: "Bound, Running"}
+    observe: |
+      The claim becomes `Bound` to a new `pvc-…` volume once the pod is scheduled, and the pod is Running. CAPACITY
+      shows tens of gigabytes, not the `100Mi` requested: this hostpath provisioner reports the size of the node filesystem
+      that backs the volume. A request is a minimum; a bound volume may be larger, and a plain directory on the
+      node is not limited to the requested size.
+    why: "With WaitForFirstConsumer the scheduler picks the node first; the volume is then provisioned where the pod will run."
+    checks: [pvc-bound, notes-ready]
+    wait_for: [pvc-bound, notes-ready]
+  - id: write
+    title: "Write, then replace the pod"
+    do: "Write a line into the volume and delete the pod. The Deployment's ReplicaSet creates a new one."
+    commands:
+      - {cmd: "oc exec deploy/notes -n academy-storage -- sh -c 'echo \"persisted by $HOSTNAME\" > /data/note.txt'", meaning: "write a line naming the pod that wrote it (a pod's host name is its name); prints nothing on success"}
+      - {cmd: "oc delete pod -l app=notes -n academy-storage", meaning: "replace the pod: `pod \"notes-…\" deleted from academy-storage namespace`"}
+      - {cmd: "oc rollout status deploy/notes -n academy-storage --timeout=180s", meaning: "the replacement is ready", timeout: 200}
+    observe: "The write prints nothing; the delete names the old pod; the ReplicaSet starts a replacement that mounts the same claim."
+    wait_for: [notes-ready]
+  - id: read
+    title: "Read it back from the new pod"
+    do: "Read the file from the replacement pod."
+    commands:
+      - {cmd: "oc exec deploy/notes -n academy-storage -- cat /data/note.txt", meaning: "read from the new pod"}
+      - {cmd: "oc get pods -l app=notes -n academy-storage", meaning: "a different pod name than before"}
+    observe: "`persisted by notes-…` names the pod that wrote the file, and `oc get pods` lists a pod with a different name (same ReplicaSet hash, different suffix: the pod template did not change). The file outlived the pod that wrote it."
+    why: "The PV outlives pods; the claim mounts it into the replacement. An emptyDir volume is deleted with its pod, so the file would have been lost."
+    checks: [data]
+hints: []
+checks:
+  - {id: pvc-exists, title: "PVC notes-data exists", type: exists, kind: pvc, name: notes-data, expect_text: "exists"}
+  - {id: pvc-bound, title: "PVC notes-data is Bound", type: field, kind: pvc, name: notes-data, path: status.phase, op: eq, value: Bound, expect_text: "Bound"}
+  - {id: pvc-class, title: "It used the default class", type: field, kind: pvc, name: notes-data, path: spec.storageClassName, op: eq, value: crc-csi-hostpath-provisioner, expect_text: "crc-csi-hostpath-provisioner"}
+  - {id: notes-ready, title: "notes is running", type: deployment_ready, name: notes, expect_text: "1/1"}
+  - {id: data, title: "The data survived: the current pod reads a file written by another pod", type: exec, from: app=notes, command: ["sh", "-c", "cat /data/note.txt; echo \"read by $HOSTNAME\""], expect_output: 'persisted by (\S+)\s+read by (?!\1$)\S+$', expect_text: "persisted by <old pod>, read by <new pod>"}
+variations:
+  - "Scale notes to 2 replicas. The second pod can still mount the RWO volume here, because it lands on the same (only) node: ReadWriteOnce means one node, not one pod. With network block storage on a multi-node cluster (a cloud disk, for example), a second pod scheduled on another node would stay ContainerCreating with a Multi-Attach error. With the ReadWriteOncePod access mode (CSI volumes only), the second pod would stay Pending: only one pod may use the claim."
+  - "Create a PVC with `storageClassName: fast-ssd` and read its events (that is the PVC Pending incident)."
+troubleshooting:
+  - problem: "`oc apply -f -` is refused."
+    hint: "Open the terminal's YAML box, paste the manifest there, then run the command with -n academy-storage."
+questions:
+  - q: "Why does WaitForFirstConsumer exist?"
+    a: "To provision the volume where the consuming pod is scheduled (node or zone), avoiding unschedulable pods with volumes in the wrong place."
+  - q: "What happens to the PV when the project is deleted here, and why?"
+    a: "The PVC is deleted with the project; the PV becomes Released and keeps its data, because the class's reclaimPolicy is Retain. It is not reused automatically: an admin must reclaim or delete it."
+enterprise: |
+  Retain versus Delete is a data-protection decision. Retain avoids accidental loss but needs a process to
+  reclaim volumes (and costs storage); Delete keeps clusters clean but makes PVC deletion destructive.
+references:
+  - {title: "Kubernetes: Persistent Volumes", url: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"}
+  - {title: "Kubernetes: Volume binding mode", url: "https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode"}
+  - {title: "OpenShift 4.21: Understanding persistent storage", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/storage/understanding-persistent-storage"}

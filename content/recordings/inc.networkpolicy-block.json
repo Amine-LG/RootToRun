@@ -1,0 +1,140 @@
+{
+ "lab": "inc.networkpolicy-block",
+ "kind": "incident",
+ "lab_hash": "7577bd1de61f1060",
+ "recorded_at": "2026-10-14T17:21:33+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/reporting -n academy-inc-netpol -- curl -sS -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 28,
+   "stdout": "",
+   "stderr": "curl: (28) Connection timed out after 3000 milliseconds\ncommand terminated with exit code 28\n",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nweb-7cqwq   IPv4          8080    10.217.1.120   36s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get networkpolicy -n academy-inc-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    POD-SELECTOR   AGE\nallow-frontend-to-web   app=web        37s\ndefault-deny            <none>         37s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc describe networkpolicy allow-frontend-to-web -n academy-inc-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         allow-frontend-to-web\nNamespace:    academy-inc-netpol\nCreated on:   2026-10-14 17:21:36 +0000 +00\nLabels:       <none>\nAnnotations:  <none>\nSpec:\n  PodSelector:     app=web\n  Allowing ingress traffic:\n    To Port: 8080/TCP\n    From:\n      PodSelector: tier=frontend\n  Not affecting egress traffic\n  Policy Types: Ingress\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get pods --show-labels -n academy-inc-netpol",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         READY   STATUS    RESTARTS   AGE   LABELS\nreporting-6d85dc7949-ql29l   1/1     Running   0          39s   app=reporting,pod-template-hash=6d85dc7949,tier=backoffice\nweb-7ddfddcc56-q45ms         1/1     Running   0          39s   app=web,pod-template-hash=7ddfddcc56\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch networkpolicy allow-frontend-to-web -n academy-inc-netpol --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/ingress/0/from/-\",\"value\":{\"podSelector\":{\"matchLabels\":{\"app\":\"reporting\"}}}}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "networkpolicy.networking.k8s.io/allow-frontend-to-web patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc exec deploy/reporting -n academy-inc-netpol -- curl -sS -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>payments portal</h1>",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "reporting-ok",
+    "title": "reporting can reach web:8080",
+    "expect": "the portal page",
+    "status": "fail",
+    "observed": "curl: (28) Connection timed out after 3000 milliseconds\ncommand terminated with exit code 28"
+   },
+   {
+    "id": "deny-kept",
+    "title": "default-deny is still in place",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "networkpolicy/default-deny exists"
+   }
+  ],
+  "at": 1791998526.6233828
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "reporting-ok",
+    "title": "reporting can reach web:8080",
+    "expect": "the portal page",
+    "status": "pass",
+    "observed": "<h1>payments portal</h1>"
+   },
+   {
+    "id": "deny-kept",
+    "title": "default-deny is still in place",
+    "expect": "exists",
+    "status": "pass",
+    "observed": "networkpolicy/default-deny exists"
+   }
+  ],
+  "at": 1791998539.58063
+ },
+ "seconds": 47,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-netpol: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

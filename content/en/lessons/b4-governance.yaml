@@ -1,0 +1,753 @@
+# OpenShift project governance, written as teaching flows. o2.quotas-limits is recorded on the training cluster as
+# administration (experiment X-SELF-01): the cluster administrator sets the guardrails, the ordinary user developer
+# works inside them.
+- id: o2.quotas-limits
+  title: Quotas and LimitRanges
+  subtitle: "An administrator sets a project's budget and defaults; a developer works inside them"
+  module: b5-governance
+  mode: REAL_LAB
+  minutes: 35
+  level: 2
+  supports: "OpenShift 4.21 (Kubernetes 1.34) ResourceQuota and LimitRange. Every command was run on OpenShift Local 4.21 by the cluster administrator (kubeadmin) and by the ordinary user developer, each with their own credentials, in a project made for the lesson and deleted at the end (experiment X-SELF-01). The workload is a few small pods of the ubi-minimal image running sleep."
+  concepts:
+    - k8s.quota
+    - k8s.requests-limits
+    - ocp.projects
+  prerequisites:
+    - b.resources-qos
+    - f.rbac
+  record_on: cluster-admin
+  objective: |
+    Set a project's budget with a ResourceQuota and its per-container defaults and bounds with a LimitRange, as the
+    cluster administrator; then work inside them as an ordinary user: read why a pod was refused, see the defaults on a
+    real pod, watch the budget fill up, and find out who may change it.
+  flow:
+    - kind: ask
+      id: existing-pods
+      recalls: b.resources-qos
+      prompt: "A pod with no requests was already running when the administrator added a LimitRange with defaults. What happened to that pod?"
+      choices:
+        - text: "Nothing: it kept running as BestEffort"
+          why: "Defaults are written into a pod when it is created. A guardrail added later leaves running pods as they are; only new pods meet it."
+        - text: "It was restarted with the defaults"
+          why: "Nothing restarts a pod for a LimitRange: admission only sees pods being created, and this one already existed."
+        - text: "It was evicted for having no requests"
+          why: "Eviction is the kubelet protecting a node short of memory or disk. A new LimitRange does not evict anything."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: A budget for a team
+      body: |
+        A shared cluster serves many teams. The platform team gives each team a project, and with it a **budget** (how
+        much the project may use in total) and **defaults** (what a container gets when it does not say). Without them,
+        one team's mistake, such as a Deployment scaled to 500, can take the whole cluster's capacity.
+
+        Everything in this lesson was done on a lab cluster (OpenShift Local 4.21) by two people, each with their own
+        login: the cluster administrator `kubeadmin`, and `developer`, an ordinary user who administers the team's
+        project. The prompt in front of each command names who ran it. To repeat the administrator's steps, use a
+        cluster of your own, such as OpenShift Local; never try a guardrail on a shared cluster to see what happens,
+        because it applies to a real team at once.
+    - kind: teach
+      id: two-objects
+      title: A budget and a per-container rule
+      body: |
+        A **ResourceQuota** caps totals in one namespace: counts of pods or objects, summed requests and limits,
+        and storage. A **LimitRange** sets defaults and minimum or maximum values for individual containers,
+        pods or claims.
+
+        [Requests, limits, QoS and quotas](/lesson/b.resources-qos) explained resource declarations. Quota uses those
+        declarations, not measured CPU or memory consumption. A quiet application can still consume its full
+        declared share of the quota. Neither guardrail creates node capacity or guarantees that admitted pods
+        can be scheduled.
+    - kind: ask
+      id: which-object
+      prompt: "A team wants every container that declares no memory limit to get 64Mi. Which object does that?"
+      choices:
+        - text: "A ResourceQuota"
+          why: "A quota sums and caps what pods declare. It never fills in a value."
+        - text: "A LimitRange"
+          why: "Its `default` and `defaultRequest` are written into containers that leave those values out."
+        - text: "The Deployment's pod template"
+          why: "That is the team's own manifest, the place where people forget. The platform default lives in the project."
+      answer: 1
+    - kind: show
+      id: new-project
+      body: "The administrator creates the team's project and makes `developer` its administrator. `oc adm new-project` does it without changing the administrator's own current project:"
+      run: "oc adm new-project lab-shop --admin=developer"
+      notice: "`Created project lab-shop`. developer holds the `admin` role in it: they may manage most objects there and grant access to others. The lesson shows what that role does not allow. Creating a Project directly needs permission to create projects, which ordinary users do not have; they can only request one, as the next lesson shows."
+    - kind: show
+      id: nothing-yet
+      body: "In developer's terminal, the project has no guardrails yet:"
+      run: "oc get resourcequotas,limitranges -n lab-shop"
+      notice: "`No resources found`: for now, pods in lab-shop may ask for anything the node has."
+    - kind: teach
+      id: create-quota
+      title: The administrator sets the budget
+      body: |
+        `oc create quota` (short for `resourcequota`) makes a ResourceQuota from the command line. `--hard` lists the
+        ceilings as `resource=quantity` pairs, separated by commas. This one allows three pods in total, 500m of
+        requested CPU, 256Mi of requested memory and 512Mi of memory limits, summed over every pod in the project.
+
+        The requests ceilings cap what the team reserves on the nodes. The limits ceiling caps how far its containers
+        may grow beyond that reservation, which is what overcommits a node.
+    - kind: try
+      id: try-create-quota
+      body: "As the administrator, create a ResourceQuota named `team-budget` in the project `billing` that allows at most 10 pods and 2 CPU cores of requests."
+      accept:
+        - "oc create quota team-budget --hard=pods=10,requests.cpu=2 -n billing"
+        - "oc create quota team-budget --hard=requests.cpu=2,pods=10 -n billing"
+        - "oc create quota team-budget --hard pods=10,requests.cpu=2 -n billing"
+        - "oc create quota team-budget --hard requests.cpu=2,pods=10 -n billing"
+        - "oc create resourcequota team-budget --hard=pods=10,requests.cpu=2 -n billing"
+        - "oc create resourcequota team-budget --hard=requests.cpu=2,pods=10 -n billing"
+        - "oc create quota team-budget --hard=pods=10,requests.cpu=2 --namespace=billing"
+        - "oc create quota team-budget --hard=pods=10,requests.cpu=2 --namespace billing"
+        - "oc create quota team-budget -n billing --hard=pods=10,requests.cpu=2"
+        - "oc create quota team-budget -n billing --hard=requests.cpu=2,pods=10"
+        - "oc -n billing create quota team-budget --hard=pods=10,requests.cpu=2"
+        - "oc -n billing create quota team-budget --hard=requests.cpu=2,pods=10"
+        - "oc create quota team-budget --hard=pods=10,requests.cpu=2000m -n billing"
+        - "oc create quota team-budget --hard=requests.cpu=2000m,pods=10 -n billing"
+      hints:
+        - match: "--hard[ =][^ ]*, "
+          say: "The `--hard` value is one word: no space after the comma."
+        - match: "(^| |,|=)cpu=2"
+          say: "`cpu` and `requests.cpu` mean the same in a quota, but this task asks for the explicit form: `requests.cpu=2`."
+        - match: "limits\\.cpu"
+          say: "The task caps requested CPU, `requests.cpu`, not the sum of limits."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n billing` the quota lands in your current project. Name the project."
+        - match: "clusterquota|clusterresourcequota"
+          say: "A ClusterResourceQuota spans several projects. The task is one project's ResourceQuota: `oc create quota`."
+      hint: "`oc create quota`, the name, `--hard=` with two `resource=quantity` pairs separated by a comma, and the project."
+      then: "The quota would count pods and requested CPU only. Pods would then have to declare a CPU request, or receive one from a LimitRange default."
+    - kind: show
+      id: quota-created
+      run: "oc create quota compute --hard=pods=3,requests.cpu=500m,requests.memory=256Mi,limits.memory=512Mi -n lab-shop"
+      notice: "`resourcequota/compute created`."
+    - kind: show
+      id: quota-status
+      body: "The quota controller then fills in the quota's status: its ceilings and what the project already uses. Until that first count exists, the API restricts any creation the quota might not allow. `oc wait` returns once the status is there:"
+      run: "oc wait resourcequota/compute -n lab-shop --for=jsonpath='{.status.hard.pods}'=3 --timeout=60s"
+      notice: "`condition met`: the quota is counting."
+    - kind: show
+      id: quota-budget
+      body: "developer reads the budget:"
+      run: "oc describe quota compute -n lab-shop"
+      notice: |
+        One row per tracked resource. **Used** is what the project's pods have declared so far, **Hard** the ceiling.
+        Each row is an independent bound: the first one to be exceeded refuses the pod.
+    - kind: ask
+      id: guess-no-resources
+      guess: true
+      prompt: "developer creates a Deployment whose container declares no requests or limits. What happens?"
+      choices:
+        - text: "The Deployment is created; its pod is refused"
+          why: "The Deployment itself is not a pod and is not checked against these rows. The pod its ReplicaSet tries to create is. The next steps show it."
+        - text: "The pod is created and waits in Pending"
+          why: "Pending is a pod that exists and waits for a node. A pod refused at admission is never stored."
+        - text: "The pod runs, and uses no part of the budget"
+          why: "That is what happens in a project without a compute quota. Here the quota tracks requests and limits, so it needs them declared."
+      answer: 0
+    - kind: show
+      id: deploy-web
+      run: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n lab-shop -- sleep infinity"
+      notice: "`deployment.apps/web created`: the API accepted the Deployment."
+    - kind: show
+      id: wait-failure
+      body: "When its ReplicaSet cannot create a pod, a Deployment gets the condition `ReplicaFailure`. developer waits for it:"
+      run: "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=60s"
+      notice: "`condition met`: the ReplicaSet failed to create the pod."
+    - kind: show
+      id: web-zero
+      run: "oc get deploy web -n lab-shop"
+      notice: "`0/1` ready, and no pod to describe: the refused pod was never stored."
+    - kind: try
+      id: try-failedcreate
+      body: "A refused pod leaves no pod behind, only an event on the controller that tried to create it. List only the events with the reason `FailedCreate` in lab-shop."
+      accept:
+        - "oc get events -n lab-shop --field-selector reason=FailedCreate"
+        - "oc get events -n lab-shop --field-selector=reason=FailedCreate"
+        - "oc get events --field-selector reason=FailedCreate -n lab-shop"
+        - "oc get events --field-selector=reason=FailedCreate -n lab-shop"
+        - "oc get events --namespace lab-shop --field-selector reason=FailedCreate"
+        - "oc get events --namespace=lab-shop --field-selector reason=FailedCreate"
+        - "oc get events --namespace=lab-shop --field-selector=reason=FailedCreate"
+        - "oc -n lab-shop get events --field-selector reason=FailedCreate"
+        - "oc -n lab-shop get events --field-selector=reason=FailedCreate"
+        - "oc get event -n lab-shop --field-selector reason=FailedCreate"
+        - "oc get ev -n lab-shop --field-selector reason=FailedCreate"
+      hints:
+        - match: "describe pod|get pods?( |$)"
+          say: "There is no pod to look at: admission refused it before it was stored. The evidence is an event on the ReplicaSet."
+        - match: "--field-selector[ =]FailedCreate"
+          say: "A field selector names the field and its value: `reason=FailedCreate`."
+        - match: "reason=failedcreate"
+          say: "The value is case-sensitive: `FailedCreate`."
+        - match: "^(?!.*(^| )(-n|--namespace)([ =]|$)).*$"
+          say: "Without `-n lab-shop` the events of your current project are listed. Name the project."
+      hint: "`oc get events`, the project, and `--field-selector` with the field `reason`."
+      run: "oc get events -n lab-shop --field-selector reason=FailedCreate"
+      then: |
+        Seven lines within a second, each `failed quota: compute: must specify limits.memory for: ubi-minimal;
+        requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal`. The budget is not full: the quota tracks
+        three declared values that the container `ubi-minimal` does not declare. Each line is another attempt, with a
+        new pod name: the ReplicaSet keeps retrying.
+    - kind: teach
+      id: missing-values
+      title: A compute quota needs declared values
+      body: |
+        A quota tracking `requests.cpu` or `requests.memory` requires those requests on each container; a missing
+        request can inherit an explicit limit when no admission default supplied it. A quota tracking
+        `limits.cpu` or `limits.memory` requires the corresponding limits.
+
+        Asking every team to declare all three values in every manifest works, but people forget. The administrator's
+        other tool is a LimitRange with **defaults**, filled in when a container leaves them out.
+    - kind: teach
+      id: admission
+      title: Defaults run before quota validation
+      body: |
+        When a ReplicaSet asks the API for a pod, the request passes authentication and authorisation, then admission.
+        **Mutating admission** can add values. LimitRanger supplies missing container defaults and SCC admission
+        supplies security defaults. **Validating admission** then accepts or rejects the result.
+        LimitRanger checks bounds, while ResourceQuota checks and charges the namespace budget.
+
+        All mutation precedes validation, so quota sees defaults already applied to the Pod. The Deployment
+        template can still have `resources: {}`: defaults were applied to the new Pod, not copied back into its owner.
+    - kind: show
+      id: limits-file
+      body: "The administrator writes the LimitRange as a file. There is no `oc create` shortcut for this kind:"
+      code: |
+        apiVersion: v1
+        kind: LimitRange
+        metadata:
+          name: defaults
+        spec:
+          limits:
+          - type: Container
+            defaultRequest:
+              cpu: 50m
+              memory: 32Mi
+            default:
+              memory: 64Mi
+            max:
+              memory: 256Mi
+      caption: "limits.yaml"
+      notice: "`defaultRequest` fills in missing requests, `default` missing limits; `max` refuses any container whose memory limit is above 256Mi."
+    - kind: ask
+      id: predict-defaults
+      prompt: "`web`'s container declares no resources. With this LimitRange, what will its next pod declare?"
+      choices:
+        - text: "50m CPU and 32Mi requests, a 64Mi limit"
+          why: "`defaultRequest` supplies the requests and `default` the memory limit. Nothing sets a CPU limit."
+        - text: "A 256Mi memory limit, the maximum"
+          why: "`max` is a bound that admission checks, not a value it fills in."
+        - text: "Nothing: a LimitRange only refuses"
+          why: "Its defaults are written into the pod by mutating admission, before any check."
+      answer: 0
+    - kind: show
+      id: limits-created
+      run: "oc create -f limits.yaml -n lab-shop"
+      notice: "`limitrange/defaults created`."
+    - kind: show
+      id: default-values
+      body: "developer reads it:"
+      run: "oc describe limitrange defaults -n lab-shop"
+      notice: |
+        Per container: default requests of 50m CPU and 32Mi memory, a default memory limit of 64Mi, and at most 256Mi
+        of memory limit. No CPU limit is set by default, and the quota does not ask for one.
+    - kind: show
+      id: web-recovers
+      body: "Nobody touches `web`. The ReplicaSet is still retrying, with growing pauses between attempts:"
+      run: "oc rollout status deploy/web -n lab-shop --timeout=300s"
+      notice: "`successfully rolled out`: the next attempt after the LimitRange appeared was admitted. Nothing was recreated."
+    - kind: show
+      id: admitted-resources
+      body: "What did the pod receive?"
+      run: "oc get pods -l app=web -n lab-shop -o jsonpath='{.items[0].spec.containers[0].resources}{\"\\n\"}'"
+      notice: "The LimitRange defaults, written into the pod at admission: requests of 50m CPU and 32Mi memory, a 64Mi memory limit."
+    - kind: ask
+      id: default-accounting
+      prompt: Three such pods are admitted. How much requested CPU is charged?
+      choices:
+        - text: 500m because that is the quota limit
+          why: Hard is the ceiling, not an automatic charge for each workload.
+        - text: Only the CPU currently measured by the kubelet
+          why: Quota admission uses declared requests rather than runtime utilisation.
+        - text: 150m
+          why: Each pod requests 50m; three declarations total 150m, regardless of current CPU usage.
+      answer: 2
+    - kind: show
+      id: template-unchanged
+      body: "And the Deployment's own pod template?"
+      run: "oc get deploy web -n lab-shop -o jsonpath='{.spec.template.spec.containers[0].resources}{\"\\n\"}'"
+      notice: "`{}`: unchanged. The defaults exist only on the pods, which is why `oc get deploy -o yaml` never shows them."
+    - kind: show
+      id: quota-one-pod
+      run: "oc describe quota compute -n lab-shop"
+      notice: "One pod charged: its declared 50m CPU, 32Mi memory request and 64Mi memory limit appear in **Used**."
+    - kind: teach
+      id: individual-max
+      title: A per-container bound is a different failure
+      body: |
+        A LimitRange maximum checks one container or pod, not the project's total. Increasing quota cannot make
+        an oversized container fit the LimitRange. Conversely, reducing one container within the maximum may
+        still leave the namespace total full.
+
+        Defaults can also conflict with explicit values: a requested memory amount greater than the defaulted
+        memory limit is invalid. Set a compatible explicit limit, or revise the defaults through the team's process.
+        Changing a LimitRange does not resize or evict pods already running.
+    - kind: show
+      id: big-file
+      body: "developer tries a pod that asks for a 1Gi memory limit, created directly rather than through a Deployment:"
+      code: |
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: big
+        spec:
+          containers:
+          - name: big
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources:
+              limits:
+                memory: 1Gi
+      caption: "big.yaml"
+    - kind: ask
+      id: predict-big
+      guess: true
+      prompt: "developer creates `big.yaml` directly, with no Deployment. Where will a refusal appear?"
+      choices:
+        - text: "In the reply to `oc create`"
+          why: "developer's own request creates the pod, so the API's answer to that request carries the refusal. The next step shows it."
+        - text: "In a FailedCreate event on a ReplicaSet"
+          why: "No ReplicaSet is involved here: nobody else is creating the pod on developer's behalf."
+        - text: "In the pod's status, as Pending"
+          why: "A pod refused at admission is never stored, so it has no status."
+      answer: 0
+    - kind: show
+      id: big-refused
+      run: "oc create -f big.yaml -n lab-shop"
+      notice: |
+        `pods "big" is forbidden: maximum memory usage per Container is 256Mi, but limit is 1Gi`. Created directly,
+        the pod is refused in the reply to `oc create` itself. The quota still has room (one pod of three): this is
+        the per-container bound.
+    - kind: ask
+      id: repair-max
+      prompt: The namespace has spare quota, but this 1Gi container limit exceeds a 256Mi maximum. What should the team do?
+      choices:
+        - text: Lower the limit, or ask to raise the maximum
+          why: The container has to satisfy the per-container maximum as well as the total quota. Change the template, or have the platform team review the bound, after checking that the application works at that size.
+        - text: Raise only the namespace pod-count quota
+          why: A different budget row cannot override a LimitRange maximum.
+        - text: Delete the pod and create it again unchanged
+          why: Admission checks the same values again and refuses them again.
+      answer: 0
+    - kind: ask
+      id: scale-prediction
+      prompt: "`web` has one pod and the quota permits three. What does scaling it to five do?"
+      guess: true
+      choices:
+        - text: Accepts scaling; rejects excess pod creation
+          why: The pod quota is enforced on pod creation. The next steps show where to read those rejections.
+        - text: Creates five pods and leaves two Pending
+          why: A quota-rejected creation stores no pod; Pending describes a pod that exists.
+        - text: Rejects the new Deployment replica count immediately
+          why: A pods quota counts Pod objects, not the desired replica field on a Deployment.
+      answer: 0
+    - kind: show
+      id: scale-five
+      run: "oc scale deploy/web --replicas=5 -n lab-shop"
+      notice: "`scaled`: the API accepted the new replica count."
+    - kind: show
+      id: wait-failure-again
+      run: "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=120s"
+      notice: "The ReplicaSet failed again to create a pod."
+    - kind: show
+      id: web-short
+      run: "oc get deploy web -n lab-shop"
+      notice: "`1/5` ready at that instant and 3 up to date: three pods exist, two of them still starting. The Deployment keeps asking for five."
+    - kind: show
+      id: quota-full
+      run: "oc describe quota compute -n lab-shop"
+      notice: "`pods` is 3 of 3, while the other rows still have room: 150m of 500m CPU, 96Mi of 256Mi and 192Mi of 512Mi of memory."
+    - kind: ask
+      id: first-exhausted
+      prompt: A fourth identical pod would request 50m CPU and 32Mi of memory. Which quota row stops it?
+      choices:
+        - text: limits.memory
+          why: 192Mi plus 64Mi is 256Mi, below the 512Mi memory-limit ceiling.
+        - text: pods
+          why: Three of three pod slots are charged; one more exceeds that hard count.
+        - text: requests.cpu
+          why: 150m plus 50m is 200m, below the 500m CPU-request ceiling.
+      answer: 1
+    - kind: show
+      id: failure-message
+      body: "The Deployment's `ReplicaFailure` condition carries the latest refusal, in one line:"
+      run: "oc get deploy web -n lab-shop -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'"
+      notice: "`exceeded quota: compute, requested: pods=1, used: pods=3, limited: pods=3`: the quota, the row, what was asked, what is used and the ceiling."
+    - kind: teach
+      id: permissions
+      title: Who may change the budget
+      body: |
+        developer is the administrator of lab-shop. Can they raise their own budget? If they could, the budget would
+        protect nothing. The default `admin` role lets a project's administrator read quotas and LimitRanges, but not
+        create, change or delete them.
+    - kind: show
+      id: dev-patch
+      body: "developer tries to raise the pod count:"
+      run: "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'"
+      notice: "Forbidden: developer `cannot patch resource \"resourcequotas\"` in lab-shop."
+    - kind: show
+      id: dev-delete
+      run: "oc delete quota compute -n lab-shop"
+      notice: "Forbidden as well. The boundary is the point: the people who use a budget are not the people who set it."
+    - kind: try
+      id: check-limit-permission
+      body: "Before asking for a change, developer checks whether they may update LimitRanges in lab-shop. Type the check."
+      accept:
+        - oc auth can-i update limitranges -n lab-shop
+        - oc auth can-i update limitranges --namespace=lab-shop
+        - oc auth can-i update limitranges --namespace lab-shop
+        - oc auth can-i update limitrange -n lab-shop
+        - oc auth can-i update limitrange --namespace=lab-shop
+        - oc auth can-i update limitrange --namespace lab-shop
+        - oc -n lab-shop auth can-i update limitranges
+        - oc --namespace lab-shop auth can-i update limitranges
+        - oc -n lab-shop auth can-i update limitrange
+        - oc --namespace lab-shop auth can-i update limitrange
+        - oc -n lab-shop auth can-i update limits
+        - oc auth can-i update limits -n lab-shop
+        - oc --namespace lab-shop auth can-i update limits
+        - oc auth can-i update limits --namespace lab-shop
+        - oc --namespace=lab-shop auth can-i update limits
+      hints:
+        - match: create
+          say: Creation and update are different RBAC verbs; the proposed action updates an existing object.
+        - match: resourcequota|quota
+          say: A quota is a different resource; ask about limitranges.
+        - match: --as
+          say: This task checks your current identity, so it does not need impersonation.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n lab-shop the check is made for your current project. The question is about lab-shop.
+      hint: Use auth can-i update limitranges with the lab-shop project.
+      run: "oc auth can-i update limitranges -n lab-shop"
+      then: |
+        `no`, and `oc` exits with status 1. The answer describes developer's RBAC permission in lab-shop. It changes
+        nothing and approves nothing: a guardrail change goes through the platform team.
+    - kind: teach
+      id: raise-quota
+      title: The administrator raises the budget
+      body: |
+        The team asks; the platform team reviews the request against the cluster's capacity and agrees to six pods.
+        `oc edit quota compute -n lab-shop` would open the object in an editor; a patch makes the same change in one
+        reviewable line.
+    - kind: show
+      id: admin-patch
+      run: "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'"
+      notice: "The same command developer ran, accepted this time: `resourcequota/compute patched`."
+    - kind: show
+      id: web-converges
+      body: "Again nobody touches `web`. The ReplicaSet's next attempts fit:"
+      run: "oc rollout status deploy/web -n lab-shop --timeout=300s"
+      notice: "Three, then four, then five pods available: `successfully rolled out`."
+    - kind: show
+      id: quota-after
+      run: "oc describe quota compute -n lab-shop"
+      notice: "`pods` 5 of 6; 250m CPU, 160Mi and 320Mi of memory: five times one pod's declarations."
+    - kind: try
+      id: inspect-billing-budget
+      body: Quota team-budget exists in billing. Type the command that shows its Used and Hard resource totals.
+      accept:
+        - oc describe quota team-budget -n billing
+        - oc describe quota team-budget --namespace=billing
+        - oc describe quota team-budget --namespace billing
+        - oc describe resourcequota team-budget -n billing
+        - oc describe resourcequota team-budget --namespace=billing
+        - oc describe resourcequota team-budget --namespace billing
+        - oc describe resourcequotas team-budget -n billing
+        - oc describe resourcequotas team-budget --namespace=billing
+        - oc describe resourcequotas team-budget --namespace billing
+        - oc describe quota/team-budget -n billing
+        - oc describe quota/team-budget --namespace=billing
+        - oc describe quota/team-budget --namespace billing
+        - oc describe resourcequota/team-budget -n billing
+        - oc describe resourcequota/team-budget --namespace=billing
+        - oc describe resourcequota/team-budget --namespace billing
+        - oc -n billing describe quota team-budget
+        - oc --namespace billing describe quota team-budget
+        - oc -n billing describe resourcequota team-budget
+        - oc --namespace billing describe resourcequota team-budget
+        - oc -n billing describe resourcequotas team-budget
+        - oc --namespace billing describe resourcequotas team-budget
+        - oc -n billing describe quota/team-budget
+        - oc --namespace billing describe quota/team-budget
+        - oc -n billing describe resourcequota/team-budget
+        - oc --namespace billing describe resourcequota/team-budget
+      hints:
+        - match: ^oc top
+          say: Measured utilisation does not show the declared-resource quota budget.
+        - match: 'limitrange|limits '
+          say: A LimitRange bounds individual objects; the task asks for namespace totals.
+        - match: lab-shop|compute
+          say: Use team-budget in billing, rather than the demonstration’s names.
+        - match: ^(?!.*(^| )(-n|--namespace)([ =]|$)).*$
+          say: Without -n billing the command looks for team-budget in your current project. It exists in billing.
+      hint: Describe quota team-budget in namespace billing.
+      then: |
+        The description would compare current declared usage with each hard ceiling. It would not show spare CPU or memory on nodes.
+    - kind: teach
+      id: live-project
+      title: A budget for a project that is already busy
+      body: |
+        lab-shop was empty when its quota arrived. Most real projects are not. A new quota or LimitRange never touches
+        pods that already exist: they keep running, and the quota's **Used** counts them, even above **Hard**. The next
+        pod creation is where it bites: a rollout, a scale-up, or a pod replaced after a node is drained. If its
+        container lacks a value the quota tracks, or the total would pass a ceiling, that pod is refused, and a release
+        that worked yesterday stalls with `FailedCreate`.
+
+        So the platform team adds LimitRange defaults before or with the quota, compares **Used** with **Hard** in
+        `oc describe quota` before announcing it, and tells the team. The team can declare its own requests with
+        `oc set resources`, which its `admin` role allows.
+    - kind: order
+      id: order-admission
+      prompt: "Put the path of the pod that `web`'s ReplicaSet creates, after the LimitRange exists, in order."
+      items:
+        - "The API server authenticates the ReplicaSet controller"
+        - "RBAC authorises it to create pods in lab-shop"
+        - "LimitRanger fills in the missing requests and limit"
+        - "LimitRanger checks the 256Mi maximum, and the quota checks and charges the budget"
+        - "The pod is stored"
+        - "The scheduler places it on a node"
+      why: "Mutating admission (the defaults) runs before validating admission (bounds and budget), so the quota charges the defaulted values. Only a stored pod reaches the scheduler: a refusal stops it before it exists."
+    - kind: teach
+      id: quota-scopes
+      title: Quotas for some pods only
+      body: |
+        A quota can count only some pods. Its **scopes** select them: `BestEffort` matches pods with no CPU or memory
+        requests or limits in any container (the QoS class from [Requests, limits, QoS and quotas](/lesson/b.resources-qos));
+        such a quota can only count `pods`; `NotBestEffort` matches every other pod and can track their CPU and memory.
+        `Terminating` and `NotTerminating` select pods with or without `activeDeadlineSeconds`. A pod outside a
+        quota's scope is neither counted nor checked by that quota.
+    - kind: show
+      id: cleanup
+      body: "The lesson is over; the administrator removes the project, and with it the quota, the LimitRange and the Deployment:"
+      run: "oc delete project lab-shop"
+      notice: "`deleted`: the project and everything inside it are removed in the background."
+    - kind: ask
+      id: scope-not-besteffort
+      prompt: A project has only a quota with the scope NotBestEffort, and no LimitRange. A pod arrives with no requests or limits at all.
+        What happens?
+      choices:
+      - text: It is admitted and not counted
+        why: A pod without requests or limits is BestEffort, outside this quota's scope. Only an unscoped requests or limits quota, or LimitRange
+          defaults, make declarations compulsory.
+      - text: It is refused for missing requests
+        why: That happens with an unscoped quota on requests; a scope selects which pods a quota counts.
+      - text: It is admitted and counted as zero
+        why: 'It is not counted at all: the scope excludes BestEffort pods.'
+      answer: 0
+    - kind: reflect
+      id: explain-defaulting
+      prompt: Explain why a LimitRange can make an initially rejected workload fit a compute quota without raising
+        the quota.
+      model: |
+        The quota needs declared requests or limits, not necessarily a larger budget. LimitRanger can supply missing defaults during mutating admission; quota validation then sees and charges those values. The resulting totals and individual bounds must still fit, and existing pods are not changed by adding the defaults.
+    - kind: teach
+      id: what-next
+      title: What you can do now
+      body: |
+        You can set a project's budget and container defaults as an administrator, read a refusal where it is
+        reported (an event, a Deployment condition, or the reply itself), separate a missing declaration from a
+        per-container bound and from a full budget, and check who may change a guardrail.
+
+        [Live inside a quota](/lab/lab.quotas-limits) practises these distinctions. Next,
+        [Project templates and self-provisioning](/lesson/n.project-templates) gives every new project its guardrails
+        automatically, and decides who may request projects at all.
+  sections:
+    - id: guardrail-reference
+      title: Choose the right guardrail
+      depth: true
+      body: |
+        | Goal | Object and field |
+        |---|---|
+        | total requested CPU or memory | ResourceQuota requests.cpu, requests.memory |
+        | total limits | ResourceQuota limits.cpu, limits.memory |
+        | object counts | ResourceQuota pods, services, count/deployments.apps or other supported count resource |
+        | default container sizes | LimitRange type Container, defaultRequest and default |
+        | per-container or per-pod bounds | LimitRange min, max |
+        | limit-to-request ratio | LimitRange maxLimitRequestRatio |
+        | individual PVC size | LimitRange type PersistentVolumeClaim, min/max storage |
+        | total claims or storage | ResourceQuota persistentvolumeclaims, requests.storage |
+        | storage in one class | ResourceQuota <class>.storageclass.storage.k8s.io/requests.storage |
+        | several projects' combined budget | OpenShift ClusterResourceQuota |
+        | future project defaults | project request template |
+
+        OpenShift LimitRange types openshift.io/Image and openshift.io/ImageStream can bound image size and
+        image-stream tag/image counts. Per-class storage quotas can set an expensive class to zero without
+        forbidding other classes.
+
+        CPU/memory quotas require the tracked declarations; ephemeral-storage quota, by contrast, does not
+        force every pod to declare a request/limit and can miss undeclared consumption.
+        A limit without a request supplies that request only when no admission mechanism has already defaulted it.
+        Multiple LimitRanges supplying defaults can produce nondeterministic default selection; prefer one coherent set.
+    - id: scopes-and-owners
+      title: Quota scopes
+      depth: true
+      body: |
+        | Feature | Meaning |
+        |---|---|
+        | BestEffort / NotBestEffort scopes | count only pods in the matching resource-declaration class |
+        | Terminating / NotTerminating scopes | distinguish pods with or without activeDeadlineSeconds, not deletion in progress |
+        | PriorityClass scope selector | count pods matching the specified priority class criteria |
+
+        A quota scoped to BestEffort with pods: "0" rejects pods with no CPU or memory requests/limits;
+        a pod with a CPU request is outside that scope and is not charged by this quota.
+        Every applicable quota must be satisfied; quota does not reserve actual node capacity.
+        Budgets that span several projects (ClusterResourceQuota) and guardrails that every new project receives
+        (the project request template) are the subject of the next lessons.
+    - id: failure-reference
+      title: Guardrail rejection or scheduling problem?
+      depth: true
+      body: |
+        | Evidence | Interpretation | Next action |
+        |---|---|---|
+        | FailedCreate: exceeded quota | an applicable total would be exceeded | free budget or request a reviewed quota increase |
+        | FailedCreate: failed quota, must specify | tracked declaration missing | explicit resources or compatible LimitRange defaults |
+        | FailedCreate or Forbidden: maximum per Container | per-object bound exceeded | fix the template or review the bound |
+        | request greater than limit | explicit/default values conflict | set compatible values |
+        | existing Pending pod, insufficient CPU event | admission succeeded; scheduler cannot place it | inspect node capacity and requests |
+        | fewer visible pods than charged quota | other workloads, nonterminal/terminating pods, or accounting delay | inspect all namespace pods and allow recalculation |
+
+        Quota charges accepted creation and releases usage after deletion/accounting recalculation; a freed slot
+        can take a short time to reappear. Both old and new rollout pods can count while nonterminal.
+        Admission rejections of a controller's pods are events on the creating controller (and the Deployment's
+        `ReplicaFailure` condition), rather than Pending pods; a pod you create yourself is refused in the reply.
+        [Pending forever](/lab/inc.pending-resources) practises the distinct scheduling case.
+  review:
+    - q: A scale-up stops at 3 pods out of 5. Where is the reason?
+      a: 'FailedCreate events of the ReplicaSet, or the Deployment''s ReplicaFailure condition: exceeded quota.'
+    - q: Which runs first at admission, LimitRange defaulting or the quota check?
+      a: LimitRange defaulting (mutating phase); ResourceQuota validates afterwards, so it sees the defaults.
+    - q: 'What does `failed quota: compute: must specify requests.cpu` mean?'
+      a: The quota tracks CPU requests and a container declares none; add requests or a LimitRange defaultRequest.
+    - q: Can a project's admin raise its own quota?
+      a: No. The default admin role can read ResourceQuotas and LimitRanges but not create, change or delete them; a cluster administrator does.
+    - q: Where do LimitRange defaults appear?
+      a: In the pods, written at admission. The Deployment's pod template keeps resources {}.
+  labs:
+    - lab.quotas-limits
+  limits: |
+    OpenShift Local has one node, so the lesson uses small pods and shows refusals at admission only; a pod that is
+    admitted but cannot be scheduled is practised in [Pending forever](/lab/inc.pending-resources). The recording shows
+    the ReplicaSet's retries converging on their own; the pause between attempts grows with each failure, so a real
+    cluster may take longer.
+  references:
+    - title: 'OpenShift 4.21: Quotas (including across multiple projects)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/quotas
+    - title: 'OpenShift 4.21: Restricting resource consumption with limit ranges'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/nodes/working-with-clusters#nodes-cluster-limit-ranges
+    - title: 'Kubernetes: Resource quotas (scopes, storage)'
+      url: https://kubernetes.io/docs/concepts/policy/resource-quotas/
+    - title: 'Kubernetes: Limit Ranges'
+      url: https://kubernetes.io/docs/concepts/policy/limit-range/
+    - title: 'Kubernetes: Admission control (phases, LimitRanger, ResourceQuota)'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/
+    - title: 'Kubernetes 1.34: Resource management for pods and containers (a missing request defaults to the limit)'
+      url: https://v1-34.docs.kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    - title: 'Kubernetes: Configure default memory requests and limits for a namespace'
+      url: https://kubernetes.io/docs/tasks/administer-cluster/manage-resources/memory-default-namespace/
+    - title: 'OpenShift 4.21: Default cluster roles (admin may modify any resource in the project except quota)'
+      url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac#default-roles_using-rbac
+    - title: 'Kubernetes: Deployment status conditions (ReplicaFailure)'
+      url: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#deployment-status
+    - title: 'Kubernetes: Using RBAC authorization'
+      url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+  files:
+    limits.yaml: |
+      apiVersion: v1
+      kind: LimitRange
+      metadata:
+        name: defaults
+      spec:
+        limits:
+        - type: Container
+          defaultRequest:
+            cpu: 50m
+            memory: 32Mi
+          default:
+            memory: 64Mi
+          max:
+            memory: 256Mi
+    big.yaml: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: big
+      spec:
+        containers:
+        - name: big
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          command: ["sleep", "infinity"]
+          resources:
+            limits:
+              memory: 1Gi
+  commands:
+    - {cmd: "oc adm new-project lab-shop --admin=developer", as: admin, meaning: "a project for the team, with developer as its administrator"}
+    - {cmd: "oc get resourcequotas,limitranges -n lab-shop", as: developer, meaning: "no guardrails yet"}
+    - {cmd: "oc create quota compute --hard=pods=3,requests.cpu=500m,requests.memory=256Mi,limits.memory=512Mi -n lab-shop", as: admin, meaning: "the project's budget: 3 pods, 500m CPU requests, 256Mi memory requests, 512Mi memory limits"}
+    - {cmd: "oc wait resourcequota/compute -n lab-shop --for=jsonpath='{.status.hard.pods}'=3 --timeout=60s", as: admin, meaning: "wait until the quota controller has filled in the status"}
+    - {cmd: "oc describe quota compute -n lab-shop", as: developer, meaning: "Used and Hard, per resource"}
+    - {cmd: "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n lab-shop -- sleep infinity", as: developer, meaning: "a Deployment whose container declares no resources"}
+    - {cmd: "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=60s", as: developer, meaning: "the ReplicaSet could not create the pod"}
+    - {cmd: "oc get deploy web -n lab-shop", as: developer, meaning: "0/1 ready"}
+    - {cmd: "oc get events -n lab-shop --field-selector reason=FailedCreate", as: developer, meaning: "the admission refusals, as events on the ReplicaSet"}
+    - {cmd: "oc create -f limits.yaml -n lab-shop", as: admin, meaning: "defaults and a per-container maximum"}
+    - {cmd: "oc describe limitrange defaults -n lab-shop", as: developer, meaning: "default requests and limit, maximum"}
+    - {cmd: "oc rollout status deploy/web -n lab-shop --timeout=300s", as: developer, timeout: 330, meaning: "the ReplicaSet's next attempt is admitted"}
+    - {cmd: "oc get pods -l app=web -n lab-shop -o jsonpath='{.items[0].spec.containers[0].resources}{\"\\n\"}'", as: developer, meaning: "the defaults written into the pod"}
+    - {cmd: "oc get deploy web -n lab-shop -o jsonpath='{.spec.template.spec.containers[0].resources}{\"\\n\"}'", as: developer, meaning: "the Deployment's template is unchanged"}
+    - {cmd: "oc describe quota compute -n lab-shop", as: developer, meaning: "one pod charged"}
+    - {cmd: "oc create -f big.yaml -n lab-shop", as: developer, expect: fail, meaning: "Forbidden: above the per-container maximum"}
+    - {cmd: "oc scale deploy/web --replicas=5 -n lab-shop", as: developer, meaning: "more pods than the quota allows"}
+    - {cmd: "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=120s", as: developer, meaning: "a pod creation was refused again"}
+    - {cmd: "oc get deploy web -n lab-shop", as: developer, meaning: "fewer than 5 ready"}
+    - {cmd: "oc describe quota compute -n lab-shop", as: developer, meaning: "pods 3 of 3"}
+    - {cmd: "oc get deploy web -n lab-shop -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'", as: developer, meaning: "the latest refusal: exceeded quota"}
+    - {cmd: "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'", as: developer, expect: fail, meaning: "Forbidden: a project admin cannot change its quota"}
+    - {cmd: "oc delete quota compute -n lab-shop", as: developer, expect: fail, meaning: "Forbidden: nor delete it"}
+    - {cmd: "oc auth can-i update limitranges -n lab-shop", as: developer, expect: fail, meaning: "no"}
+    - {cmd: "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'", as: admin, meaning: "the administrator raises the pod count to 6"}
+    - {cmd: "oc rollout status deploy/web -n lab-shop --timeout=300s", as: developer, timeout: 330, meaning: "the ReplicaSet reaches 5 pods"}
+    - {cmd: "oc describe quota compute -n lab-shop", as: developer, meaning: "pods 5 of 6"}
+    - {cmd: "oc delete project lab-shop", as: admin, meaning: "remove the project and everything in it"}
+  experiment:
+    id: X-SELF-01
+    objective: "A cluster administrator sets a ResourceQuota and a LimitRange in a project administered by developer; developer meets each guardrail (missing declarations, defaults, a per-container maximum, a full pod count), cannot change them, and the workload converges when the administrator raises the quota. Everything is removed with the project."
+    changes:
+      - "Project lab-shop, created by the administrator with developer as its admin, then deleted"
+      - "ResourceQuota compute and LimitRange defaults in lab-shop (deleted with the project)"
+      - "Deployment web, up to five small ubi-minimal pods (50m CPU and 32Mi memory requested each), in lab-shop (deleted with the project)"
+    preflight:
+      - cmd: |-
+          found=$(oc get namespace lab-shop --ignore-not-found -o name) || exit 1
+          test -z "$found"
+    snapshot:
+      - "oc get namespace lab-shop -o name --ignore-not-found"
+      - "oc get clusterresourcequotas -o name"
+      - "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'"
+    rollback:
+      - "oc delete project lab-shop --ignore-not-found --wait=false"
+    settle:
+      - |-
+        for i in $(seq 60); do
+          found=$(oc get namespace lab-shop --ignore-not-found -o name) && test -z "$found" && exit 0
+          sleep 5
+        done
+        exit 1
+    verify:
+      - cmd: |-
+          found=$(oc get namespace lab-shop --ignore-not-found -o name) || exit 1
+          test -z "$found"

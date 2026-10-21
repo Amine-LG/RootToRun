@@ -1,0 +1,368 @@
+/* Questions and exercises: choices, check, feedback, retry, typed commands, ordering (tokens: tokens.css). Loaded last. */
+
+/* Activity identity is a quiet instruction, shared by the exercise types. */
+.act-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2);
+  margin: 0 0 var(--s3); min-width: 0;
+  color: var(--muted); font: 600 var(--fs-sm)/1.5 var(--sans);
+}
+.act-mark {
+  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px;
+  border-radius: 0; background: transparent; color: var(--muted);
+}
+.act-label { font: inherit; letter-spacing: normal; text-transform: none; color: var(--muted); }
+.act-verb { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.act-verb::before { content: none; }
+/* the separator belongs to the label, so a verb that wraps onto its own line (a phone) never starts with it */
+.act-label::after { content: '·'; margin-left: var(--s2); color: var(--muted); }
+
+.check-q, .guess, .explain, .recall,
+.flow-step.act-try, .flow-step.act-order, .flow-step.act-reflect,
+.pg-diag .dgq, .pg-review .flashcard {
+  box-sizing: border-box; min-width: 0; max-width: 100%; padding: var(--s5);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+.check-q, .guess, .explain { max-width: var(--w-text); margin: var(--s4) 0 var(--s5); }
+.check-q + .check-q { margin-top: var(--s4); }
+.check-q-top {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s2) var(--s3);
+  color: var(--muted); font: 400 var(--fs-sm)/1.5 var(--sans);
+}
+.check-q-top:empty { display: none; }
+.check-q:is(.is-right, .is-wrong) .check-prior { visibility: hidden; }
+.check-prompt { margin: var(--s1) 0 var(--s4); font: 600 var(--fs-read)/1.5 var(--sans); }
+.check-prompt p { margin: 0 0 var(--s2); color: var(--text); }
+.check-choices, .guess-choices { display: grid; gap: var(--s2); min-width: 0; }
+.check-choice, .pg-diag .check-choice, .guess-choice {
+  box-sizing: border-box; display: flex; align-items: flex-start; gap: var(--s3);
+  width: 100%; max-width: 100%; min-height: 52px; padding: var(--s3) var(--s4);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); text-align: left;
+  font: 400 var(--fs-base)/1.5 var(--sans); cursor: pointer; opacity: 1;
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease), opacity var(--dur-2) var(--ease);
+}
+.check-choice:hover:not(:disabled), .pg-diag .check-choice:hover:not(:disabled), .guess-choice:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--surface-2);
+}
+.check-choice.on, .pg-diag .check-choice.on, .guess-choice.on,
+.check-choice.on:hover:not(:disabled), .pg-diag .check-choice.on:hover:not(:disabled), .guess-choice.on:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--accent-soft);
+}
+.check-choice:disabled, .guess-choice:disabled { cursor: default; }
+.check-choice:disabled:not(.on):not(.answer), .guess-choice:disabled:not(.on):not(.answer) { opacity: .7; }
+.guess-choice:disabled:not(.on):not(.answer):hover { border-color: var(--line-2); }
+.check-choice.answer, .guess-choice.answer { border-color: var(--ok); background: var(--ok-soft); }
+.check-choice.wrong, .guess-choice.wrong { border-color: var(--bad); background: var(--surface-2); }
+.check-choice.idk { border-style: dashed; color: var(--text-2); }
+.choice-radio {
+  display: inline-grid; place-items: center; flex: none; box-sizing: border-box;
+  width: 22px; height: 22px; margin-top: var(--s1); border: 2px solid var(--muted);
+  border-radius: 50%; background: var(--surface); color: var(--accent-ink);
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.on .choice-radio { background: var(--accent); border-color: var(--accent); }
+.answer .choice-radio { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.wrong .choice-radio { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+.check-choice .choice-radio .icon, .guess-choice .choice-radio .icon { color: inherit; margin: 0; flex: none; }
+.choice-k {
+  display: inline-grid; place-items: center; flex: none; width: 24px; height: 28px;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted);
+  font: 500 var(--fs-sm)/1.5 var(--mono);
+}
+.choice-t { flex: 1; min-width: 0; padding-top: 0; overflow-wrap: anywhere; }
+.choice-t code { white-space: normal; overflow-wrap: anywhere; }
+/* Reserve the answer caption before checking, keeping every choice in its original position. */
+.choice-answer-label {
+  display: block; visibility: hidden; margin-top: var(--s1);
+  color: var(--ok); font: 600 var(--fs-xs)/1.4 var(--sans);
+}
+.answer .choice-answer-label { visibility: visible; }
+
+/* Check stays in the same place. Feedback only fills the region beneath it. */
+.check-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin-top: var(--s4); }
+.check-feedback-slot { min-height: 112px; }
+.check-after { display: grid; gap: var(--s3); margin-top: var(--s4); }
+.check-after .check-actions { margin-top: 0; }
+.check-after .check-actions:empty { display: none; }
+.verdict, .flow-try .verdict.ok, .flow-try p.verdict, .guess-res, .explain .predict-res {
+  margin: 0; padding: var(--s4); border: 1px solid var(--line); border-left: 3px solid var(--line-2);
+  border-radius: var(--radius); background: var(--surface-2); color: var(--text-2);
+  font: 400 var(--fs-base)/1.6 var(--sans); overflow-wrap: anywhere; animation: none;
+}
+.verdict.ok, .flow-try .verdict.ok, .guess-res.ok, .explain .predict-res.ok {
+  background: var(--ok-soft); border-color: transparent; border-left-color: var(--ok);
+}
+.verdict.bad { background: var(--surface-2); border-left-color: var(--bad); }
+.verdict strong, .verdict.bad strong { color: var(--text); }
+.feedback-heading { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s1); font-weight: 600; }
+.feedback-heading .icon { flex: none; }
+.verdict.ok .feedback-heading .icon, .guess-res.ok .feedback-heading .icon,
+.explain .feedback-heading .icon, .try-live .verdict.ok > .icon { color: var(--ok); }
+.verdict.bad .feedback-heading .icon, .try-live .verdict.bad > .icon { color: var(--bad); }
+.verdict p, .guess-res p { margin: var(--s1) 0 0; }
+.check-answer, .check-key {
+  margin-top: var(--s3); padding: var(--s3) 0 0; border-top: 1px solid var(--line);
+  border-radius: 0; background: transparent;
+}
+.check-answer p, .check-key p { margin: var(--s1) 0 0; }
+:is(.check-answer, .check-key, .model-answer) .lbl {
+  color: var(--text); font: 600 var(--fs-sm)/1.5 var(--sans); letter-spacing: normal; text-transform: none;
+}
+.guess-h, .explain-h {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2);
+  color: var(--muted); font: 600 var(--fs-sm)/1.5 var(--sans); letter-spacing: normal; text-transform: none;
+}
+.guess-note { color: var(--muted); font-weight: 400; }
+.guess-prompt { margin: var(--s3) 0 var(--s4); }
+.guess-prompt p { margin: 0; color: var(--text); }
+.guess-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-top: var(--s3); min-height: 44px; }
+.guess.done :is(.guess-actions, .guess-prior) { visibility: hidden; }
+.guess-feedback-slot { min-height: 96px; padding-top: var(--s3); }
+.guess-res strong.ok { color: var(--ok); }
+.guess-res strong.off { color: var(--text); }
+
+/* Only exercise controls are overridden; application-wide buttons remain owned by the shared theme. */
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq, .flashcard) .btn {
+  min-height: 44px; font-family: var(--sans); border-radius: var(--radius); box-shadow: none;
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq, .flashcard) .btn:disabled {
+  opacity: 1; color: var(--muted); background: var(--surface-3); border: 1px solid var(--line-2); box-shadow: none; cursor: not-allowed;
+}
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq) .linkish {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  min-height: 44px; padding: var(--s2) var(--s1); margin: 0;
+  color: var(--text-2); font: 600 var(--fs-sm)/1.5 var(--sans);
+  border: 0; border-radius: var(--radius-sm); background: transparent;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq) .linkish:hover {
+  color: var(--accent-strong); background: var(--accent-soft);
+}
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq, .flashcard-wrap) :is(button, textarea, input, summary):focus-visible,
+.pg-review .fc-a:focus-visible, .pg-review .fc-q:focus-visible,
+.verdict:focus-visible, .guess-res:focus-visible, .try-result:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: none;
+}
+:is(.check-choice, .guess-choice, .pg-review .grade):active:not(:disabled),
+:is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq, .flashcard) button:active:not(:disabled) {
+  transform: scale(.99);
+}
+
+/* A command field for comparison. Its explanatory label is visible before typing. */
+.try-expectation { display: flex; align-items: flex-start; gap: var(--s2); color: var(--muted); font-size: var(--fs-sm); }
+.try-expectation > .icon { flex: none; margin-top: var(--s1); }
+.try-line {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--s3);
+  min-width: 0; margin: var(--s3) 0; padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--surface-2);
+}
+.try-line .demo-ps { color: var(--muted); font: 500 var(--fs-base)/1.5 var(--mono); }
+.try-line input {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: var(--s2) var(--s1);
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text);
+  font: 400 var(--fs-base)/1.5 var(--mono); box-shadow: none;
+}
+.try-line input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-radius: var(--radius-sm); box-shadow: none; }
+.try-note { margin: var(--s2) 0 0; }
+.try-live { min-height: 88px; }
+.try-live .verdict { position: relative; padding-left: var(--s7); }
+.try-live .verdict > .icon { position: absolute; left: var(--s4); top: var(--s4); }
+.try-live .verdict code { white-space: normal; overflow-wrap: anywhere; }
+.try-result { margin-top: var(--s4); min-width: 0; }
+.try-status { display: flex; align-items: center; gap: var(--s2); color: var(--text-2); font: 600 var(--fs-sm)/1.5 var(--sans); }
+.try-status .icon { flex: none; color: var(--ok); }
+.try-result > .verdict { margin-bottom: var(--s4); }
+.flow-show > .notice, .flow-try .notice, .model-answer {
+  margin-top: var(--s4); padding: var(--s4); border: 1px solid var(--line); border-left: 3px solid var(--accent-line);
+  border-radius: var(--radius); background: var(--surface-2);
+}
+
+/* Existing move buttons remain the way to order tiles, including on touch and with a keyboard. */
+.order-list { display: grid; gap: var(--s2); list-style: none; margin: var(--s4) 0; padding: 0; }
+.order-list li {
+  display: flex; align-items: center; gap: var(--s3); min-width: 0; min-height: 64px; padding: var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--surface-2);
+  transition: border-color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease);
+}
+.order-list li:focus-within { border-color: var(--accent); background: var(--accent-soft); }
+.order-list li.ok { border-color: var(--ok); background: var(--ok-soft); }
+.order-list li.bad { border-color: var(--line-2); }
+.order-handle { flex: none; color: var(--muted); }
+.order-n {
+  display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px;
+  border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface);
+  color: var(--text-2); font: 600 var(--fs-sm)/1 var(--sans); text-align: center;
+}
+.order-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.order-t p { margin: 0; }
+.order-state { flex: none; color: var(--bad); }
+.order-state.pending { visibility: hidden; }
+.ok .order-state { color: var(--ok); }
+.order-btns { display: flex; flex: none; gap: var(--s1); }
+.order-btns .icon-btn { width: 44px; height: 44px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-2); }
+.order-btns .icon-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.order-btns .icon-btn:disabled { opacity: 1; color: var(--muted); background: var(--surface-3); cursor: not-allowed; }
+.order-btns .icon-btn svg { transform: rotate(-90deg); }
+.order-btns .icon-btn.down svg { transform: rotate(90deg); }
+.order-feedback-slot { min-height: 112px; padding-top: var(--s4); }
+
+.flow-reflect textarea, .explain textarea {
+  box-sizing: border-box; width: 100%; margin: var(--s2) 0 var(--s3); padding: var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--surface-2); color: var(--text);
+  font: 400 var(--fs-base)/1.6 var(--sans); resize: vertical;
+}
+.flow-reflect textarea::placeholder, .explain textarea::placeholder { color: var(--muted); opacity: 1; }
+.flow-reflect .mine, .explain .mine {
+  margin: var(--s3) 0; padding: var(--s4); border-left: 3px solid var(--accent-line);
+  border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.explain .rubric { display: grid; gap: var(--s2); margin: var(--s4) 0; }
+.explain .check {
+  display: flex; align-items: flex-start; gap: var(--s3); min-height: 44px; padding: var(--s3);
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2);
+}
+.explain .check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.explain .check input { flex: none; width: 20px; height: 20px; margin-top: var(--s1); accent-color: var(--accent); }
+.explain details { margin-top: var(--s3); padding: var(--s3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.explain summary { min-height: 44px; display: list-item; align-content: center; font-size: var(--fs-sm); }
+.confidence .conf-dots { gap: var(--s1); }
+.confidence .conf-dots .dot {
+  position: relative; width: 44px; height: 44px; border: 0; border-radius: var(--radius-sm); background: transparent; transform: none;
+}
+.confidence .conf-dots .dot::before { content: ''; position: absolute; inset: var(--s3); border: 2px solid var(--muted); border-radius: 50%; }
+.confidence .conf-dots .dot.on::before { background: var(--accent); border-color: var(--accent); }
+.confidence .conf-dots .dot[aria-checked='true']::after { content: ''; position: absolute; inset: var(--s2); border: 1px solid var(--accent); border-radius: 50%; }
+.confidence .conf-dots .dot:hover { background: var(--accent-soft); transform: none; }
+
+.pg-diag .dgq-top {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s1) var(--s3);
+  border-radius: var(--radius-sm); color: var(--text-2); font: 600 var(--fs-sm)/1.5 var(--sans);
+  letter-spacing: normal; text-transform: none;
+}
+.pg-diag .dgq-body, .pg-diag .diag-conf, .pg-diag .dgq-idk { animation: none; }
+.pg-diag .dgq .dgq-bar > span { transition-duration: var(--dur-2); }
+.pg-diag .dgq-conf-slot { min-height: 72px; margin-top: var(--s4); }
+.pg-diag .diag-conf .chip { min-height: 44px; }
+.pg-diag .diag-conf .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); box-shadow: inset 0 -3px var(--accent); }
+.pg-diag .check-choice:focus-visible { border-radius: var(--radius); }
+.pg-diag .diag-evidence { max-width: 100%; box-sizing: border-box; background: var(--surface-2); font-size: var(--fs-sm); }
+
+/* Review and recall share the same quiet reveal treatment. */
+.recall { margin: var(--s5) 0 var(--s2); }
+.recall h3 { display: flex; align-items: center; gap: var(--s2); margin: 0 0 var(--s2); font: 600 var(--fs-base)/1.5 var(--sans); }
+.recall-list { display: grid; gap: var(--s4); margin: var(--s4) 0 0; padding-left: var(--s5); }
+.recall-list li { min-width: 0; padding-left: var(--s1); }
+.recall-list li.done { opacity: 1; }
+.recall-q { margin: 0 0 var(--s2); font-weight: 600; overflow-wrap: anywhere; }
+.recall-a { margin: var(--s2) 0 var(--s3); padding: var(--s4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); overflow-wrap: anywhere; }
+.recall-grade { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.pg-review .flashcard { min-height: 250px; display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: var(--s4); text-align: left; animation: none; }
+.pg-review .fc-src { display: flex; align-items: center; gap: var(--s2); color: var(--muted); font-size: var(--fs-sm); }
+.pg-review .fc-src .icon { flex: none; }
+.pg-review .fc-src a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.pg-review .fc-q { border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.pg-review .fc-q .md p { margin: 0; color: var(--text); font: 600 var(--fs-lg)/1.5 var(--sans); letter-spacing: normal; }
+.pg-review .fc-a { padding: var(--s4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); animation: none; overflow-wrap: anywhere; }
+.pg-review .fc-a .md p { margin: 0 0 var(--s2); font-size: var(--fs-read); }
+.pg-review .fc-a .md p:last-child { margin-bottom: 0; }
+.pg-review .flashcard .btn.lg { align-self: flex-start; margin-top: auto; }
+.pg-review .grades { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s2); margin-top: var(--s4); animation: none; }
+.pg-review .grade {
+  display: flex; flex-direction: column; align-items: center; gap: var(--s1); min-height: 88px; padding: var(--s3) var(--s2);
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  font: 600 var(--fs-base)/1.4 var(--sans); cursor: pointer;
+  transition: transform var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.pg-review .grade small { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
+.pg-review .grade.again > .icon { color: var(--muted); }
+.pg-review .grade.hard > .icon { color: var(--warn); }
+.pg-review .grade.good > .icon, .pg-review .grade.easy > .icon { color: var(--ok); }
+.pg-review .grade:hover { transform: none; background: var(--surface-2); border-color: var(--accent); }
+.pg-review .grade:focus-visible { border-radius: var(--radius); }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes exercise-feedback { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes exercise-confirm { from { transform: scale(.8); } to { transform: scale(1); } }
+  .check-after, .guess-res, .try-live .verdict, .flow-order .verdict,
+  .model-answer, .explain .predict-res, .recall-a, .pg-review .fc-a {
+    animation: exercise-feedback var(--dur-2) var(--ease) both;
+  }
+  .answer .choice-radio, .try-live .verdict.ok > .icon { animation: exercise-confirm var(--dur-2) var(--ease) both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.check-q, .guess, .flow-try, .flow-order, .flow-reflect, .explain, .recall, .dgq, .flashcard-wrap) *,
+  .flow-step.act-try, .flow-step.act-order, .flow-step.act-reflect { animation: none; transition-duration: 0s; }
+}
+@media (max-width: 540px) {
+  .check-q, .guess, .explain, .recall,
+  .flow-step.act-try, .flow-step.act-order, .flow-step.act-reflect,
+  .pg-diag .dgq, .pg-review .flashcard { padding: var(--s4); }
+  .check-choice, .pg-diag .check-choice, .guess-choice { padding: var(--s3); gap: var(--s2); }
+  .choice-k { width: 18px; }
+  .check-actions > .btn, .guess-actions > .btn, .flow-reflect .row > button,
+  .explain .row > .btn, .dgq-actions > .btn { width: 100%; justify-content: center; }
+  .try-line { grid-template-columns: auto minmax(0, 1fr); }
+  .try-line .btn { grid-column: 1 / -1; width: 100%; justify-content: center; }
+  .order-list li { gap: var(--s2); flex-wrap: wrap; }
+  .order-handle { display: none; }
+  .order-t { flex-basis: calc(100% - 72px); }
+  .order-state { margin-left: auto; }
+  .order-btns { width: 100%; justify-content: flex-end; }
+  .recall-grade > .btn { flex: 1; justify-content: center; }
+  .pg-review .grades { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pg-review .flashcard .btn.lg { align-self: stretch; justify-content: center; }
+}
+
+/* Superseded legacy rules (delete the listed selector rules, not neighbouring/shared rules):
+   styles.css:
+   .act-head; .act-mark; .act-label; .act-verb; .act-verb::before;
+   .check-q; .check-q + .check-q; .check-q-top; .check-prompt; .check-prompt p; .check-choices;
+   .check-choice; .check-choice:hover:not(:disabled); .check-choice.on; .check-choice:disabled;
+   .check-choice.answer; .check-choice.wrong; .check-choice.answer .icon; .check-choice.wrong .icon;
+   .check-choice .icon (the former trailing icons are now inside .choice-radio);
+   .choice-k; .choice-t; .verdict; .verdict.ok; .verdict.bad; .verdict strong; .verdict.bad strong; .verdict p;
+   .check-after; .check-answer; .check-key; .check-answer p; .check-key p; .check-actions;
+   .guess; .guess-h; .guess-note; .guess-prompt; .guess-prompt p; .guess-choices; .guess-choice;
+   .guess-choice:hover; .guess-actions; .guess-res; .guess-res strong.ok; .guess-res strong.off; .guess-res p;
+   .flow-step.act-try; .flow-step.act-order; .flow-step.act-reflect;
+   .try-line; .try-line input; .try-line input:focus; .try-note;
+   .flow-try .verdict.ok; .flow-try p.verdict;
+   .order-list; .order-list li; .order-list li.ok; .order-list li.bad; .order-n; .order-t; .order-t p;
+   .order-btns; .order-btns .icon-btn svg; .order-btns .icon-btn.down svg; .flow-reflect textarea; .model-answer;
+   .check-choice.idk; mobile .check-q and .verdict margin-left rules.
+   pages.css:
+   .pg-diag .dgq; .pg-diag .dgq-top; .pg-diag .dgq-body; .pg-diag .check-choice;
+   .pg-diag .check-choice:hover; .pg-diag .check-choice.on; .pg-diag .check-choice:focus-visible;
+   .pg-diag .dgq-conf-slot; .pg-diag .diag-conf .chip;
+   .pg-review .flashcard; .pg-review .fc-src; .pg-review .fc-src a; .pg-review .fc-q; .pg-review .fc-q .md p;
+   .pg-review .fc-a; .pg-review .fc-a .md p; .pg-review .fc-a .md p:last-child; .pg-review .flashcard .btn.lg;
+   .pg-review .grades; .pg-review .grade; .pg-review .grade small; .pg-review .grade.again;
+   .pg-review .grade.hard; .pg-review .grade.good; .pg-review .grade:hover; .pg-review .grade:focus-visible;
+   mobile .pg-review .flashcard, .pg-review .flashcard .btn.lg and .pg-review .grades rules.
+   Partially shared rules (.predict/.explain, .predict-h/.explain-h, .mine, .rubric, .check,
+   .conf-dots .dot, .notice) must keep their non-exercise use; scoped overrides above replace them here only.
+*/
+
+/* integration review: the answer caption is a pill at the row's end (no reserved empty line), rows centre their content,
+   and feedback slots take no space until there is feedback (a shift caused by the learner's own click is expected) */
+.check-choice, .pg-diag .check-choice, .guess-choice { position: relative; align-items: center; }
+.choice-radio { margin-top: 0; }
+.choice-answer-label { display: none; }
+.answer .choice-answer-label {
+  display: inline-flex; visibility: visible; margin: 0 0 0 10px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); font: 600 var(--fs-xs)/1.5 var(--sans); white-space: nowrap;
+}
+.check-feedback-slot, .guess-feedback-slot, .order-feedback-slot, .try-live { min-height: 0; }
+.guess-feedback-slot:empty { padding-top: 0; }
+.codebar + pre.code { border-radius: 0 0 var(--radius) var(--radius); border-top: 0; }
+
+/* Repeatable exercises. "Try again" is the same control everywhere; a result from an earlier visit says so. */
+.ex-earlier { margin: 0 0 var(--s2); color: var(--text-2); font: 500 var(--fs-xs)/1.5 var(--sans); }
+.guess-again-row { margin-top: var(--s3); }
+.try-again-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.order-feedback-slot .verdict:not(.ok):not(.bad) { border-left-color: var(--line-2); }
+.lab-restart { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2) var(--s3); margin: var(--s3) 0; }
+.lab-restart .muted { margin: 0; }

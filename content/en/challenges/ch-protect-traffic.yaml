@@ -1,0 +1,255 @@
+id: ch.protect-traffic
+kind: challenge
+title: "Protect application traffic"
+summary: "Only the frontend may call the API. Prove it with real connections, not by reading YAML."
+module: r2-admin-challenges
+minutes: 30
+level: 2
+supports: "Graded on OpenShift 4.21.8 with OVN-Kubernetes, single node. On CRC the router shares the node with your pods, so its traffic is never filtered (see the debrief)."
+concepts: [net.policy, sec.segmentation, net.ovn]
+prerequisites: [d.networkpolicy-ovn]
+namespace: academy-ch-traffic
+objective: |
+  Restrict who can open connections to the `api` pods, keep the public Route working, and show with connection tests
+  that the restriction holds.
+background: |
+  **Where everything comes from.** The project starts with the `api` (a Deployment on Red Hat's UBI 9 Apache httpd
+  image with its page in a ConfigMap, a Service and a Route) and the two clients `frontend` and `batch` (`sleep` in
+  the UBI 9 minimal image, so that curl can be started from them). The app creates the project `academy-ch-traffic` as
+  your learner identity when you start the challenge and applies the starting objects; everything else is yours to
+  create. The images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login. Grading
+  runs on your cluster when you press Grade, as the app's own identities; Clean up deletes the project.
+symptom: |
+  The project runs three workloads: `api` (port 8080, exposed by a Route), `frontend` and `batch`. Today every pod
+  can call every other pod. A security review requires that the API accepts connections only from the frontend and
+  from the platform's router. The `batch` job must not reach the API directly.
+requirements:
+  - "From a `frontend` pod, `http://api:8080/` still answers."
+  - "From a `batch` pod, connections to `http://api:8080/` are **blocked** (they time out)."
+  - "The Route `api` still answers from outside the cluster."
+  - "`frontend` and `batch` keep working as clients: you only restrict traffic **into** the `api` pods."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: api-content}
+    data: {index.html: "<h1>orders api</h1>"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: api, labels: {app: api}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: api}}
+      template:
+        metadata: {labels: {app: api, tier: backend}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: api-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: api}
+    spec:
+      selector: {app: api}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: api}
+    spec:
+      to: {kind: Service, name: api}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: frontend, labels: {app: frontend}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: frontend}}
+      template:
+        metadata: {labels: {app: frontend, tier: web}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: batch, labels: {app: batch}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: batch}}
+      template:
+        metadata: {labels: {app: batch, tier: web}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+hints:
+  - "A NetworkPolicy is an allow list for the pods it selects. Which pods should your policy select: the callers or the API?"
+  - "Look at the labels with `oc get pods --show-labels`. `frontend` and `batch` share `tier: web`; only one label tells them apart."
+  - "Test from both clients with `oc exec deploy/<name> -- curl -s -m 3 http://api:8080/`. A blocked connection times out (curl exit code 28)."
+fix:
+  - cmd: "oc apply -f - -n academy-ch-traffic"
+    meaning: "select the api pods; allow only frontend pods, and the router's namespace"
+    stdin: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: {name: api-ingress}
+      spec:
+        podSelector: {matchLabels: {app: api}}
+        policyTypes: [Ingress]
+        ingress:
+        - from:
+          - podSelector: {matchLabels: {app: frontend}}
+          ports: [{port: 8080, protocol: TCP}]
+        - from:
+          - namespaceSelector: {matchLabels: {policy-group.network.openshift.io/ingress: ""}}
+  - {cmd: "oc exec deploy/batch -n academy-ch-traffic -- curl -s -m 3 http://api:8080/", meaning: "blocked: exit code 28", expect: fail}
+checks:
+  - {id: frontend-ok, title: "frontend reaches the api", type: exec, from: app=frontend, command: ["/usr/bin/curl", "-s", "-m", "3", "http://api:8080/"], trusted: true, expect_output: "orders api", expect_text: "the api page"}
+  - {id: batch-blocked, title: "batch is blocked", type: exec, from: app=batch, command: ["/usr/bin/curl", "-s", "-m", "3", "http://api:8080/"], trusted: true, expect_code: 28, expect_text: "curl exit 28 (timeout)"}
+  - {id: route-ok, title: "The Route still answers", type: route_http, route: api, expect_status: 200, contains: "orders api", expect_text: "HTTP 200"}
+  - {id: batch-egress, title: "batch can still open outbound connections (the API server's health endpoint)", type: exec, from: app=batch, command: ["/usr/bin/curl", "-sk", "-m", "5", "https://kubernetes.default.svc/healthz"], trusted: true, expect_output: "^ok$", expect_text: "ok (egress and DNS still work)"}
+  - {id: no-egress, title: "No policy restricts outgoing traffic (the brief restricts traffic into api only)", type: count, kind: networkpolicies, where: [{path: spec.policyTypes, op: contains, value: Egress}, {path: spec.egress, op: ne, value: [{}]}], op: eq, value: 0, expect_text: "no policy that limits egress"}
+trials:
+  - id: wrong-selector
+    title: "A policy that selects the callers instead of the api"
+    kind: wrong
+    expect: partial
+    expect_checks: {batch-blocked: fail}
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-traffic"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: frontend-only}
+          spec:
+            podSelector: {matchLabels: {app: frontend}}
+            policyTypes: [Ingress]
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {app: frontend}}
+  - id: tier-label
+    title: "Allows a label that batch also carries"
+    kind: wrong
+    expect: partial
+    expect_checks: {frontend-ok: pass, batch-blocked: fail}
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-traffic"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: api-from-web}
+          spec:
+            podSelector: {matchLabels: {app: api}}
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {tier: web}}
+  - id: deny-all
+    title: "Default deny for the whole project, nothing allowed"
+    kind: partial
+    expect: partial
+    expect_checks: {frontend-ok: fail, batch-blocked: pass}
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-traffic"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: deny-all}
+          spec:
+            podSelector: {}
+            policyTypes: [Ingress]
+  - id: two-policies
+    title: "A correct alternative: default deny plus two separate allow policies"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -f - -n academy-ch-traffic"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: deny-all-ingress}
+          spec:
+            podSelector: {}
+            policyTypes: [Ingress]
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: allow-frontend-to-api}
+          spec:
+            podSelector: {matchLabels: {app: api}}
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {app: frontend}}
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: allow-router}
+          spec:
+            podSelector: {}
+            ingress:
+            - from:
+              - namespaceSelector: {matchLabels: {policy-group.network.openshift.io/ingress: ""}}
+  - id: v2-06-egress-shortcut
+    title: "The api left open; batch's outgoing traffic restricted instead"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc apply -f - -n academy-ch-traffic
+      stdin: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: {name: batch-egress-shortcut}\nspec:\n  podSelector: {matchLabels: {app: batch}}\n  policyTypes: [Egress]\n  egress:\n  - ports:\
+        \ [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]\n  - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]\n"
+    expect_checks:
+      no-egress: fail
+  - id: v2-07-fake-client
+    title: "A fake batch pod whose curl always reports a timeout"
+    kind: wrong
+    expect: partial
+    commands:
+    - cmd: oc apply -f - -n academy-ch-traffic
+      stdin: "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: fake-curl}\ndata:\n  curl: |\n    #!/bin/sh\n    case \"$*\" in\n      *healthz*) echo ok ;;\n      *) exit 28 ;;\n    esac\n---\napiVersion:\
+        \ v1\nkind: Pod\nmetadata: {name: aaa-fake-batch, labels: {app: batch}}\nspec:\n  containers:\n  - name: curl\n    image: registry.access.redhat.com/ubi9/ubi-minimal:latest\n    command: [sleep, infinity]\n\
+        \    env: [{name: PATH, value: \"/fake:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"}]\n    resources: {requests: {memory: 16Mi}, limits: {memory: 64Mi}}\n    volumeMounts: [{name:\
+        \ fake, mountPath: /fake}]\n  volumes:\n  - name: fake\n    configMap: {name: fake-curl, defaultMode: 365}\n"
+    - cmd: oc wait pod/aaa-fake-batch --for=condition=Ready --timeout=180s -n academy-ch-traffic
+      timeout: 200
+    expect_checks:
+      batch-blocked: fail
+root_cause: |
+  A NetworkPolicy selects the pods it **protects** (`podSelector`) and lists who may connect to them. Once any
+  ingress policy selects a pod, only the listed sources are allowed; all other new connections to it are dropped,
+  which clients see as a timeout. The protection belongs on the `api` pods, and the allowed source must be a label
+  only the frontend has: `tier: web` also matches `batch`.
+alternatives: |
+  One policy with two `from` entries, or a default deny plus separate allow policies: both pass, because policies add
+  up. A `namespaceSelector` for the router uses the OpenShift label `policy-group.network.openshift.io/ingress`, which
+  keeps working whichever way the router is published. The grader tests real connections from both clients and
+  through the Route, so YAML that looks right but selects the wrong pods fails.
+
+  Restricting batch's outgoing traffic instead of protecting the api fails the `no-egress` check. In the recorded
+  trial of that shortcut, the two batch checks did not pass or fail: the grader reported an error, "timed out",
+  because the test command in the batch pod ran longer than the grader's 20-second limit. The likely cause is name
+  resolution: that policy allows port 53, but cluster DNS lookups reach the DNS pods on another port (5353 on
+  OpenShift), so batch cannot resolve `api` and curl waits for the lookup well past its own `-m` limit. If you see
+  such an error, look for an egress policy on the client.
+sre: |
+  On this single-node cluster the router runs on the host network of the same node, and OVN-Kubernetes always
+  admits traffic from a pod's own node, so the Route keeps working even without a router rule. On a multi-node
+  cluster the same policy without the router rule breaks the Route. Test policies on a cluster shaped like
+  production, and keep a baseline set (deny, allow-same-project, allow-router, allow-monitoring) in the project
+  template.
+questions:
+  - q: "Why does a blocked connection time out instead of being refused?"
+    a: "The network plugin drops the packets. Nothing answers with a reset, so the client waits until its own timeout (curl exit code 28)."
+  - q: "Your policy allows `tier: web`. Why does batch still get through?"
+    a: "batch's pods also carry `tier: web`. A selector matches every pod with those labels, so the allow rule covers both clients."
+references:
+  - {title: "Kubernetes: Network policies", url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"}
+  - {title: "Kubernetes: Declare network policy", url: "https://kubernetes.io/docs/tasks/administer-cluster/declare-network-policy/"}

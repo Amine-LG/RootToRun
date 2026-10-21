@@ -1,0 +1,715 @@
+# The OpenShift web console, shown with real screenshots of OpenShift Local 4.21.8 (content/media/<lesson id>/).
+# Every image was captured from the official console of the course cluster on 2026-10-20, signed in as kubeadmin, with
+# the demo project console-demo (created as developer for the screenshots). The cluster ID is blurred.
+- id: n.console-tour
+  title: "Find your way around the web console"
+  subtitle: "Signing in, one console for everyone, the menus, projects, search and where oc comes from"
+  module: a1-cli
+  mode: GUIDED_INVESTIGATION
+  minutes: 20
+  level: 1
+  supports: "OpenShift 4.21.8 web console on OpenShift Local. Every screenshot is real, captured from the course cluster's console on 2026-10-20, signed in as kubeadmin, with a demo project created as developer. The cluster ID is blurred. Nothing was changed through the console."
+  concepts: [ocp.console, ocp.projects]
+  prerequisites: [n.console-clis]
+  objective: |
+    Sign in to the web console and recognise who you are in it; find any object through the menus, the project
+    selector and Search; read the Overview page; and get an `oc` that matches the cluster from the console itself.
+  flow:
+    - kind: ask
+      id: recall-token
+      recalls: n.console-clis
+      prompt: "A look back. When you use the web console, whose permissions does each request use?"
+      choices:
+        - text: "Yours: it sends your token"
+          why: "The console is a client of the API like `oc`: it sends your token, so it shows and does only what you may."
+        - text: "The console's own account"
+          why: "It has no powers of its own. A page you may not see is a list the API refuses you."
+        - text: "The cluster administrator's"
+          why: "Nobody borrows the administrator's rights: every request carries the signed-in user's token."
+      answer: 0
+    - kind: teach
+      id: where
+      title: "Where the console is, and signing in"
+      body: |
+        [Console and CLI tools](/lesson/n.console-clis) showed that `oc whoami --show-console` prints the
+        console's address. On OpenShift Local it is `https://console-openshift-console.apps-crc.testing`.
+
+        Opening it sends you to the cluster's sign-in page. OpenShift Local has one identity provider, an
+        htpasswd file, so the page asks for a user name and password straight away. A cluster with several
+        providers first lets you choose one. Two users exist here: `developer`, an ordinary user, and
+        `kubeadmin`, the cluster administrator. `crc console --credentials` prints both passwords on your machine.
+    - kind: show
+      id: sign-in
+      image:
+        src: sign-in.png
+        alt: "The OpenShift sign-in page: a Log in to your account form with a Username and a Password field and a Log in button, next to the Red Hat OpenShift logo."
+        captured: "OpenShift Local 4.21.8, the sign-in page before signing in, 2026-10-20"
+      caption: "The sign-in page"
+      notice: "The page is served by the cluster's OAuth server (on OpenShift Local, at `oauth-openshift.apps-crc.testing`), not by the console: the console never sees your password, only the token the OAuth server gives it."
+    - kind: teach
+      id: one-console
+      title: "One console for everyone"
+      body: |
+        Older versions had two **perspectives**, Administrator and Developer. Since OpenShift 4.19 there is
+        one console, and the Developer perspective is turned off by default. A cluster administrator can turn
+        it back on in the Console operator's configuration (`console.operator.openshift.io/cluster`, field
+        `spec.customization.perspectives`); reading or changing that object needs a cluster administrator.
+
+        What changes from one user to another is what the API lets them see. `kubeadmin` sees every project
+        and every cluster setting; `developer` sees its own projects, and the cluster-wide pages stay empty
+        or refuse it.
+    - kind: show
+      id: overview
+      image:
+        src: overview.png
+        alt: "The Overview page as kubeadmin: a red banner saying the cluster is for development and testing, the side menu, the top bar with icons and the user name kubeadmin, and cards for Details, Status and Activity."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Home > Overview, 2026-10-20"
+      caption: "Home > Overview, the first page after signing in"
+      notice: |
+        From the top: OpenShift Local's banner; the **top bar**, with its icons and the **user menu** under
+        your name (the **Help** menu is shown further on); the **side menu**; and the
+        cluster's cards. The **Details** card describes the cluster; in 4.21 it includes the API address that
+        `oc whoami --show-server` prints. **Status** reports the cluster and its operators, and **Activity**
+        recent events. Monitoring is disabled by default on OpenShift Local, and it is off on the course
+        cluster, so the console's alert areas report *Alerts could not be loaded*.
+    - kind: ask
+      id: why-no-alerts
+      prompt: "The Overview says *Alerts could not be loaded*. What is the reason on OpenShift Local?"
+      choices:
+        - text: "Monitoring is not installed"
+          why: "In effect, yes: OpenShift Local disables the monitoring stack by default to save memory, and it is off on the course cluster, so there are no alerts to show. It can be enabled, with more memory."
+        - text: "kubeadmin may not read alerts"
+          why: "kubeadmin is the cluster administrator: it may read everything. The data itself is missing."
+        - text: "The cluster is broken"
+          why: "Nothing points to that: the console signs you in and lists the cluster's objects. Only the monitoring data is missing."
+      answer: 0
+    - kind: show
+      id: menu
+      image:
+        src: nav-workloads.png
+        alt: "The Deployments page of console-demo, with the Workloads section of the side menu open: Topology, Pods, Deployments, DeploymentConfigs, StatefulSets, Secrets, ConfigMaps, CronJobs, Jobs, DaemonSets, ReplicaSets and more."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Workloads > Deployments in console-demo, 2026-10-20"
+      caption: "The side menu, with Workloads open"
+      notice: "Each entry is a list of one kind of object, in the project chosen at the top of the page. The list is what `oc get deployments` prints, as a table you can click."
+    - kind: teach
+      id: menu-map
+      title: "What each menu holds"
+      body: |
+        | Menu | Holds | With `oc` |
+        |---|---|---|
+        | Home | Overview, Projects, Search, API Explorer, Events | `oc get projects`, `oc api-resources`, `oc get events` |
+        | Ecosystem | Software Catalog, Installed Operators, Helm | Operator subscriptions and `ClusterServiceVersion`s |
+        | Workloads | Topology, Pods, Deployments, Secrets, ConfigMaps, Jobs, autoscalers | `oc get pods,deploy,cm,secret,job,hpa` |
+        | Networking | Services, Routes, Ingresses, NetworkPolicies | `oc get svc,route,networkpolicy` |
+        | Storage | PersistentVolumes, claims, StorageClasses, snapshots | `oc get pv,pvc,storageclass` |
+        | Builds | BuildConfigs, Builds, ImageStreams | `oc get bc,build,is` |
+        | Compute | Nodes, Machines, MachineConfigs | `oc get nodes,machines,mc` |
+        | User Management | Users, Groups, ServiceAccounts, Roles, RoleBindings | `oc get users,groups,sa,role,rolebinding` |
+        | Administration | Cluster Settings, Namespaces, quotas, LimitRanges, CRDs | `oc get clusterversion,quota,limitrange,crd` |
+
+        In 4.21 the Operator catalog is **Ecosystem > Software Catalog**; older versions called it OperatorHub.
+    - kind: ask
+      id: where-catalog
+      prompt: "On this 4.21 console, where do you browse Operators to install?"
+      choices:
+        - text: "Ecosystem > Software Catalog"
+          why: "4.21 groups the catalog, the installed Operators and Helm under Ecosystem."
+        - text: "Operators > OperatorHub"
+          why: "That is the older layout; this console has no Operators menu."
+        - text: "Administration > Cluster Settings"
+          why: "Cluster Settings is about the cluster's version and configuration, not the catalog."
+      answer: 0
+    - kind: show
+      id: projects
+      image:
+        src: projects.png
+        alt: "The Projects list: console-demo with display name Console demo (disposable), status Active and requester developer, followed by default, hostpath-provisioner, kube-system, openshift and other system projects with no requester."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Home > Projects, 2026-10-20"
+      caption: "Home > Projects, seen by kubeadmin"
+      notice: "kubeadmin sees every project, most of them the platform's own. **Requester** says who asked for a project: `console-demo` was requested by `developer`, the way `oc new-project` does. Signed in as developer, this list would show only the projects developer may see, such as console-demo."
+    - kind: show
+      id: project-details
+      image:
+        src: project-details.png
+        alt: "The console-demo project's page, with tabs Overview, Details, YAML, Workloads and RoleBindings, a Getting started card, and cards for Details (requester developer), Status Active and recent Activity."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the console-demo project, 2026-10-20"
+      caption: "One project's page"
+      notice: "Its tabs are `oc describe project` (Details), `oc get project -o yaml` (YAML), `oc get all` (Workloads) and `oc get rolebindings` (RoleBindings)."
+    - kind: show
+      id: search
+      image:
+        src: search.png
+        alt: "The Search page in console-demo with the Deployment kind selected, listing the Deployments api, crash, notes, not-ready and web with their labels."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Home > Search in console-demo, 2026-10-20"
+      caption: "Home > Search: every object of one kind, optionally by label"
+      notice: "Search finds objects of any kind, filtered by name or label, the console's form of `oc get <kind> -l <label>`."
+    - kind: try
+      id: try-search
+      body: "On the command line, list the Deployments of `console-demo` that Search shows."
+      accept: ["oc get deployments -n console-demo", "oc get deployment -n console-demo", "oc get deploy -n console-demo", "oc get deployments.apps -n console-demo", "oc get deployments --namespace console-demo", "oc get deployments --namespace=console-demo", "kubectl get deployments -n console-demo", "kubectl get deployment -n console-demo", "kubectl get deploy -n console-demo"]
+      hints:
+        - match: "^oc get deployments?$"
+          say: "That lists the Deployments of your current project. Name the project with `-n console-demo`."
+        - match: "^oc get pods"
+          say: "Search listed Deployments, the objects that own the pods."
+      hint: "`oc get deployments`, then the project with `-n`."
+    - kind: show
+      id: api-explorer
+      image:
+        src: api-explorer.png
+        alt: "The API Explorer: a searchable table of every resource kind the cluster serves, with its group, version and whether it is namespaced."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Home > API Explorer, 2026-10-20"
+      caption: "Home > API Explorer"
+      notice: "Every kind the API serves, as `oc api-resources` lists them. Opening one shows its fields, the same documentation `oc explain` prints."
+    - kind: show
+      id: user-menu
+      image:
+        src: user-menu.png
+        alt: "The user menu opened from kubeadmin at the top right, with Copy login command, Impersonate User, User Preferences and Log out."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the user menu, 2026-10-20"
+      caption: "The user menu"
+      notice: |
+        **Copy login command** leads to an `oc login --token=… --server=…` command for the user you are signed
+        in as: a quick way to give `oc` your console session. The token in it is a password: never paste it
+        in a chat or a ticket. **Impersonate User** lets an administrator see the console as someone else.
+    - kind: show
+      id: help-menu
+      image:
+        src: help-menu.png
+        alt: "The Help menu opened from the question-mark icon, with Guided Tour, Quick Starts, Documentation, Command Line Tools, Share Feedback, Learning Portal, OpenShift Blog and About."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Help menu, 2026-10-20"
+      caption: "The Help menu"
+      notice: "**Documentation** opens the product documentation for this version; **Command Line Tools** gives you the clients."
+    - kind: show
+      id: cli-tools
+      image:
+        src: command-line-tools.png
+        alt: "The Command Line Tools page: a Copy login command link, then oc downloads for Linux, Mac and Windows on several architectures, and further down a Helm download."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Help > Command Line Tools, 2026-10-20"
+      caption: "Help > Command Line Tools"
+      notice: "The cluster serves `oc` itself, built for its own version: the simplest way to get a client that matches the cluster, as [Console and CLI tools](/lesson/n.console-clis) recommends."
+    - kind: ask
+      id: get-oc
+      prompt: "You need an `oc` that matches this cluster's version. What is the quickest place to get it?"
+      choices:
+        - text: "Help > Command Line Tools"
+          why: "The cluster serves downloads of `oc` built for its own version."
+        - text: "Your Linux distribution's packages"
+          why: "A distribution's package may be any version; the cluster's own download matches it."
+        - text: "Copy login command"
+          why: "That gives a login command for an `oc` you already have, not the program."
+      answer: 0
+    - kind: teach
+      id: next
+      title: "What you can do now"
+      body: |
+        You can sign in, read the Overview, find any object through the menus, the project selector and
+        Search, and get a matching `oc`. Next, [Working with the oc CLI](/lesson/o1.cli) goes deeper into the
+        command line. The console comes back with an application to read and repair in
+        [Read and repair an application in the console](/lesson/o1.console-apps), and with the administrator's
+        pages in [Administer the cluster from the console](/lesson/n.console-admin).
+  review:
+    - q: "Where is the Operator catalog in the 4.21 console?"
+      a: "Ecosystem > Software Catalog (older versions: Operators > OperatorHub)."
+    - q: "Why does the console show developer fewer projects than kubeadmin?"
+      a: "The console sends the signed-in user's token: it shows only what the API lets that user see."
+    - q: "Where does the console give you an oc that matches the cluster?"
+      a: "Help > Command Line Tools."
+  limits: |
+    The screenshots come from the course cluster's console, signed in as kubeadmin. The demo project
+    `console-demo` and its objects exist only on the course cluster: they were prepared for the screenshots and
+    are not provided, so your own cluster will not have them ([Read and repair an application in the
+    console](/lesson/o1.console-apps) shows the commands for two of them). The try steps compare what you type
+    with accepted answers; nothing runs. Monitoring is disabled by default on OpenShift Local and was off on the
+    course cluster, so alerts have no data here.
+  references:
+    - title: "Web console overview (OpenShift 4.21)"
+      url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/web_console/web-console-overview"
+    - title: "Accessing the web console on OpenShift Local"
+      url: "https://crc.dev/docs/using/"
+
+- id: o1.console-apps
+  title: "Read and repair an application in the console"
+  subtitle: "Deployments, pods, logs, events, a terminal, YAML, Services and Routes, each beside its oc command"
+  module: a3-troubleshoot
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 2
+  supports: "OpenShift 4.21.8 web console on OpenShift Local. Every screenshot is real, captured from the course cluster's console on 2026-10-20, signed in as kubeadmin, in a demo project created as developer for them. Nothing was changed through the console."
+  concepts: [ocp.console, k8s.deployment, k8s.pod-lifecycle, container.debugging]
+  prerequisites: [o1.troubleshooting, n.console-tour]
+  objective: |
+    Read a project's applications in the console, tell a running pod from a failing one, find the reason in
+    its events and logs, open a terminal in a container, and know which `oc` command each page and action is.
+  flow:
+    - kind: ask
+      id: recall-loop
+      recalls: o1.troubleshooting
+      prompt: "A look back. A pod will not start. What do you read before changing anything?"
+      choices:
+        - text: "Its status and events"
+          why: "Observe first: the status names the problem and the events say why, before you act."
+        - text: "Nothing: delete the pod"
+          why: "A Deployment replaces it with the same broken pod, and the evidence is gone."
+        - text: "The node's disk"
+          why: "Start from the pod's own status; the node comes later if the evidence points there."
+      answer: 0
+    - kind: teach
+      id: the-project
+      title: "The project in these pictures"
+      body: |
+        Every screenshot here comes from one project, `console-demo`, requested by `developer`. `web` and
+        `api` were made with the commands below: `web` is a working web server with two replicas, a Service
+        and a Route; `api` uses an image tag that does not exist, on purpose. The rest came from manifests
+        that are not provided with this lesson; each object is the subject of its own lesson:
+
+        | Object | What it shows | Taught in |
+        |---|---|---|
+        | probes and resources on `web`, and an autoscaler for it | health checks; 2 to 4 replicas | [Health probes](/lesson/b.health-probes), [Deploying, exposing and scaling applications](/lesson/o1.deploy-apps) |
+        | `not-ready` | a readiness probe that always fails | [Health probes](/lesson/b.health-probes) |
+        | `crash` | a container that exits with an error | [Life of a pod](/lesson/b.pod-lifecycle) |
+        | `notes`, the claim `data`, the ConfigMap `web-config` | a volume and settings | [Configuration with ConfigMaps and Secrets](/lesson/o1.config-secrets), [Volumes, claims, StorageClasses and CSI](/lesson/e.storage) |
+        | `report-once`, `nightly-report` | a Job that ran, a CronJob for 02:00 | [Jobs and CronJobs for administrative tasks](/lesson/o2.jobs-cronjobs) |
+    - kind: show
+      id: made-with
+      code: |
+        oc new-project console-demo
+        oc create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=2
+        oc expose deployment web --port=8080
+        oc expose service web
+        oc create deployment api --image=registry.access.redhat.com/ubi9/httpd-24:no-such-tag
+      caption: "The commands that created web and api (as developer), used to prepare the screenshots; not recorded"
+    - kind: show
+      id: deployments
+      image:
+        src: deployments.png
+        alt: "The Deployments list of console-demo: api, crash, notes and not-ready each with 1 of 1 pods, and web with 2 of 2 pods, with their labels and pod selectors."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Workloads > Deployments in console-demo, 2026-10-20"
+      caption: "Workloads > Deployments"
+      notice: "The **Status** column counts pods, not ready pods: `api`, `crash` and `not-ready` all have their one pod, and none of them works."
+    - kind: ask
+      id: one-of-one
+      prompt: "The list says `api` has *1 of 1 pods*. Does that mean `api` is working?"
+      choices:
+        - text: "No: it counts pods, ready or not"
+          why: "The pod exists; whether it runs and is ready is on the Pods page."
+        - text: "Yes: every pod is there"
+          why: "A pod that cannot pull its image is still a pod: it is counted."
+        - text: "Only once its Route exists"
+          why: "A Route does not make a pod work; it only sends traffic to ready ones."
+      answer: 0
+    - kind: show
+      id: topology
+      image:
+        src: topology.png
+        alt: "The Topology view of console-demo: one circle per workload, labelled crash, api, notes, not-ready, nightly-report, web and report-once; crash has a red ring, api a pale blue ring, not-ready a mid-blue ring, web and notes dark blue rings, report-once a green ring, nightly-report an empty ring, and web an arrow icon at the top right."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Workloads > Topology in console-demo, 2026-10-20"
+      caption: "Workloads > Topology: every workload's state at a glance"
+      notice: |
+        The ring is the pods' state: dark blue *Running*, mid-blue *Not Ready* (running, but its readiness
+        probe fails: `not-ready`), pale blue *Pending* (its container has not started: `api` cannot pull its
+        image), red failing (`crash`), green *Succeeded* (the Job `report-once`). `nightly-report`'s ring is
+        empty: the CronJob has not run yet. The arrow on `web` opens its Route. Clicking a circle opens a side
+        panel with the same details, pods and actions as the Deployment's page.
+    - kind: show
+      id: web
+      image:
+        src: deployment-web.png
+        alt: "The details of the Deployment web: a blue ring reading Autoscaled to 2 Pods, its labels app=web, the pod selector app=web, the update strategy RollingUpdate with max unavailable and max surge 25 percent, and tabs Details, Metrics, YAML, ReplicaSets, Pods, Environment and Events."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Deployment web, 2026-10-20"
+      caption: "A Deployment's page"
+      notice: "*Autoscaled to 2 Pods*: a HorizontalPodAutoscaler manages the count, so there are no buttons to change it. On the course cluster nothing serves the resource metrics API (monitoring is off), so this autoscaler cannot read CPU use: it does not scale on load and keeps 2 pods, its minimum. A Deployment without one has **Increase the Pod count** and **Decrease the Pod count** arrows beside the ring, which is `oc scale`. The tabs are `oc describe`, `oc get -o yaml`, `oc get rs`, `oc get pods -l app=web`, `oc set env --list` and `oc get events`."
+    - kind: show
+      id: actions
+      image:
+        src: deployment-web-actions.png
+        alt: "The Actions menu of the Deployment web: Remove and Edit HorizontalPodAutoscaler, Add PodDisruptionBudget, Pause rollouts, Restart rollout, Add storage, Edit update strategy, Edit resource limits, Edit Health Checks, Edit labels, Edit annotations, Edit Deployment and Delete Deployment."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Actions menu of the Deployment web, 2026-10-20"
+      caption: "Actions: every change you can make to the Deployment"
+      notice: |
+        Each action is a command you know: **Restart rollout** is `oc rollout restart`, **Pause rollouts** is
+        `oc rollout pause`, **Edit resource limits** is `oc set resources`, **Edit Health Checks** is
+        `oc set probe`, **Add storage** is `oc set volume`, **Edit labels** is `oc label`, **Delete** is `oc delete`.
+    - kind: try
+      id: try-restart
+      body: "On the command line, do what **Restart rollout** does for `web` in `console-demo`."
+      accept: ["oc rollout restart deployment/web -n console-demo", "oc rollout restart deployment web -n console-demo", "oc rollout restart deploy/web -n console-demo", "oc rollout restart deploy web -n console-demo", "oc rollout restart deployments web -n console-demo", "oc rollout restart deployments/web -n console-demo", "oc rollout restart deployment.apps/web -n console-demo", "oc -n console-demo rollout restart deployment/web", "oc rollout restart deployment/web --namespace console-demo", "kubectl rollout restart deployment/web -n console-demo", "kubectl rollout restart deployment web -n console-demo", "kubectl rollout restart deploy/web -n console-demo"]
+      hints:
+        - match: "^oc delete pod"
+          say: "Deleting a pod replaces only that pod, and asks the Deployment for nothing. A restart changes the pod template, so the Deployment rolls out new pods by its update strategy."
+        - match: "rollout restart (web|pods?)"
+          say: "Name the kind with the name: `deployment/web`."
+        - match: "^oc rollout restart deployment/web$"
+          say: "Add the project: `-n console-demo`."
+      hint: "`oc rollout restart`, then `deployment/web` and the project."
+    - kind: show
+      id: pods
+      image:
+        src: pods.png
+        alt: "The Pods list of console-demo: api ErrImagePull and 0/1 ready, crash CrashLoopBackOff with 6 restarts, notes Running 1/1, not-ready Running but 0/1 ready, report-once Completed, and two web pods Running 1/1, each with its owner ReplicaSet or Job."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Workloads > Pods in console-demo, 2026-10-20"
+      caption: "Workloads > Pods: where the truth is"
+      notice: "The **Status**, **Ready** and **Restarts** columns are those of `oc get pods`. This page tells `api` (ErrImagePull, alternating with ImagePullBackOff while the kubelet waits between attempts) and `crash` (CrashLoopBackOff, 6 restarts) from the working pods. `not-ready` is *Running* yet 0/1 ready: the probes lesson explains why."
+    - kind: show
+      id: pod-api
+      image:
+        src: pod-api.png
+        alt: "The pod of api with an ImagePullBackOff badge next to its name and as its Status, its labels app=api and pod-template-hash, restart policy Always, its pod IP, the node crc and the image pull secret default-dockercfg."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the pod of api, 2026-10-20"
+      caption: "The failing pod's page"
+    - kind: show
+      id: pod-api-events
+      image:
+        src: pod-api-events.png
+        alt: "The Events tab of the pod api, streaming: Back-off pulling image registry.access.redhat.com/ubi9/httpd-24:no-such-tag, Error ImagePullBackOff, and Failed to pull image with the reason manifest unknown, reading manifest no-such-tag."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Events tab of the pod of api, 2026-10-20"
+      caption: "The Events tab names the cause"
+      notice: "*reading manifest no-such-tag … manifest unknown*: the registry has no image with that tag. These are the events `oc describe pod` lists at the end."
+    - kind: ask
+      id: where-fix
+      prompt: "The tag `no-such-tag` does not exist. Where do you correct the image so it stays corrected?"
+      choices:
+        - text: "In the Deployment"
+          why: "The Deployment's pod template is what the ReplicaSet copies into every new pod."
+        - text: "In the pod's YAML"
+          why: "A pod's image cannot be changed for good: the Deployment would bring back its own template."
+        - text: "In the Route"
+          why: "The Route only sends traffic; it does not say which image runs."
+      answer: 0
+    - kind: show
+      id: yaml
+      image:
+        src: deployment-web-yaml.png
+        alt: "The YAML tab of the Deployment web: an editor with the top of the manifest, kind Deployment, apiVersion apps/v1, metadata with the name, namespace and labels, and spec with replicas 2 and the selector, above Save, Reload, Cancel and Download buttons."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the YAML tab of the Deployment web, 2026-10-20"
+      caption: "The YAML tab: the object itself"
+      notice: "The editor holds what `oc get deployment web -o yaml` prints. Changing it and choosing **Save** is `oc edit`: for `api`, the repair is the image line of the Deployment, the same change as `oc set image deployment/api …`."
+    - kind: show
+      id: pod-logs
+      image:
+        src: pod-web-logs.png
+        alt: "The Logs tab of a web pod, streaming the httpd server's start-up messages."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Logs tab of a web pod, 2026-10-20"
+      caption: "The Logs tab"
+      notice: "The container's output, followed live, as `oc logs -f`. A pod with several containers has a selector for each."
+    - kind: show
+      id: terminal
+      image:
+        src: pod-web-terminal.png
+        alt: "The Terminal tab of a web pod connected to the httpd-24 container: the command id and hostname was typed, and the output shows uid=1000680000, gid=0(root), groups=0(root),1000680000, and the pod's name as host name."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Terminal tab of a web pod (the command id && hostname typed for this picture), 2026-10-20"
+      caption: "The Terminal tab: a shell in the container"
+      notice: "A shell inside the running container, as `oc exec -it <pod> -- sh` gives you. It runs with the container's identity: here uid `1000680000` with group 0."
+    - kind: ask
+      id: why-uid
+      prompt: "In the terminal, `id` prints `uid=1000680000`. Why not root, or the image's own user?"
+      choices:
+        - text: "The SCC assigned it"
+          why: "The default `restricted-v2` SCC runs pods as a user ID chosen from the project's range."
+        - text: "kubeadmin signed in to the console"
+          why: "The console user does not decide the container's user; the security context does."
+        - text: "The image's own instructions set it"
+          why: "The image's user is replaced by one from the project's range under `restricted-v2`."
+      answer: 0
+    - kind: show
+      id: events
+      image:
+        src: events.png
+        alt: "The Events page of console-demo, listing recent events of every object in the project: image pull back-offs, readiness probe failures, back-off restarting a failed container and scheduling messages."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Home > Events in console-demo, 2026-10-20"
+      caption: "Home > Events: everything that happened in the project"
+      notice: "All the project's events in one place, as `oc get events`: the quickest way to see that several things are failing at once."
+    - kind: show
+      id: service
+      image:
+        src: service-web.png
+        alt: "The details of the Service web: pod selector app=web, the host name web.console-demo.svc.cluster.local accessible within the cluster only, type Cluster IP with its address, and the port mapping 8080 TCP to pod port 8080."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Service web, 2026-10-20"
+      caption: "Networking > Services > web"
+      notice: "The selector, the cluster DNS name `web.console-demo.svc.cluster.local` and the ports, as `oc describe service web` shows. The Pods tab lists the pods it sends traffic to."
+    - kind: show
+      id: route
+      image:
+        src: route-web.png
+        alt: "The details of the Route web: location http://web-console-demo.apps-crc.testing, status Accepted, host web-console-demo.apps-crc.testing, the Service web, target port 8080 and the router canonical host name router-default.apps-crc.testing."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Route web, 2026-10-20"
+      caption: "Networking > Routes > web"
+      notice: "The **Location** is the address from outside. This httpd image has no start page of its own: httpd answers such a request with its test page and the status 403 Forbidden, so a 403 here comes from the application, not from the router."
+    - kind: ask
+      id: route-403
+      prompt: "The Route answers 403 from httpd (its `server` header says Apache). What does that tell you about the Route?"
+      choices:
+        - text: "It delivers requests to a ready pod"
+          why: "The router found the Route, the Service and a ready pod, and httpd answered: the path in front of the application works."
+        - text: "It has no Service behind it"
+          why: "Without a Service, or without ready pods behind it, the router itself answers 503; here httpd answered."
+        - text: "It needs TLS before it works"
+          why: "This Route is plain HTTP and the request arrived: httpd answered it."
+      answer: 0
+    - kind: show
+      id: quick-create
+      image:
+        src: quick-create.png
+        alt: "The Quick create menu opened from the plus icon in the top bar, with Import YAML, Import from Git and Container images."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the Quick create menu, 2026-10-20"
+      caption: "Quick create (+): adding objects"
+      notice: "**Import YAML** takes a manifest, as `oc apply -f`; **Container images** deploys an image, as `oc new-app --image` or `oc create deployment`."
+    - kind: teach
+      id: map
+      title: "The console beside oc"
+      body: |
+        | In the console | With `oc` |
+        |---|---|
+        | Topology, Deployments, Pods | `oc get deploy,pods` |
+        | A pod's Events tab, Home > Events | `oc describe pod …`, `oc get events` |
+        | Logs tab | `oc logs -f …` |
+        | Terminal tab | `oc exec -it … -- sh` |
+        | YAML tab, Save | `oc get -o yaml`, `oc edit` |
+        | Actions > Restart rollout | `oc rollout restart` |
+        | Quick create > Import YAML | `oc apply -f` |
+
+        The console is quicker to read across many objects; `oc` is quicker to repeat, script and paste into
+        a ticket. Both read the same objects with the same permissions.
+    - kind: try
+      id: try-events
+      body: "List the events of `console-demo` on the command line, as **Home > Events** shows them."
+      accept: ["oc get events -n console-demo", "oc get event -n console-demo", "oc get ev -n console-demo", "oc -n console-demo get events", "oc get events --namespace console-demo", "oc events -n console-demo", "kubectl get events -n console-demo", "kubectl get ev -n console-demo", "kubectl events -n console-demo"]
+      hints:
+        - match: "^oc describe"
+          say: "`describe` shows one object's events; the page lists every event of the project."
+        - match: "^oc get events$"
+          say: "Add the project: `-n console-demo`."
+      hint: "`oc get events`, then the project."
+    - kind: teach
+      id: next
+      title: "What you can do now"
+      body: |
+        You can read a project in Topology, tell running pods from failing ones, find the cause in events and
+        logs, open a shell in a container, and name the `oc` command behind each page and action. The incident
+        [ImagePullBackOff on a new deployment](/lab/inc.imagepull) is the same fault to repair yourself, with
+        the console or `oc`. The administrator's pages are in
+        [Administer the cluster from the console](/lesson/n.console-admin).
+  labs: [inc.imagepull, inc.crashloop-config]
+  review:
+    - q: "The Deployments list says 1 of 1 pods. Is the application working?"
+      a: "Not necessarily: it counts pods, not ready pods. Check the Pods page or Topology."
+    - q: "Which console tab gives the same as oc exec -it <pod> -- sh?"
+      a: "The pod's Terminal tab."
+    - q: "Where do you correct a wrong image so that it stays corrected?"
+      a: "In the Deployment (its pod template), for example in its YAML tab, not in a pod."
+  limits: |
+    The project `console-demo` and its objects exist only on the course cluster. The commands for `web` and `api`
+    are shown as they were used to prepare the screenshots, not recorded; the manifests for the other objects are
+    not provided, so you cannot rebuild the project exactly from this lesson. The try steps compare what you type
+    with accepted answers; nothing runs.
+
+    The screenshots were taken signed in as kubeadmin. `developer`, which requested the project and holds `admin`
+    in it, would see the same project pages, but not cluster-wide pages such as the node a pod runs on; that view
+    was not captured. The user ID in the terminal comes from this project's range: on your cluster it will most likely differ.
+    Without the resource metrics API the autoscaler on `web` never scales; scaling on load needs monitoring.
+  references:
+    - title: "Viewing application details in the web console (OpenShift 4.21)"
+      url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/odc-viewing-application-composition-using-topology-view"
+    - title: "oc commands for troubleshooting pods"
+      url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting"
+
+- id: n.console-admin
+  title: "Administer the cluster from the console"
+  subtitle: "Cluster settings, operators, nodes, the catalog, quotas, access and users, and what OpenShift Local leaves out"
+  module: b0-cluster-admin
+  mode: GUIDED_INVESTIGATION
+  minutes: 20
+  level: 2
+  supports: "OpenShift 4.21.8 web console on OpenShift Local. Every screenshot is real, captured from the course cluster's console on 2026-10-20, signed in as kubeadmin. The cluster ID is blurred. Nothing was changed through the console."
+  concepts: [ocp.console, ocp.clusteroperators, ocp.olm, sec.rbac, k8s.quota]
+  prerequisites: [n.cluster-admin-health, n.console-tour]
+  objective: |
+    Read the cluster's version, update channel and operators, its nodes, the installed Operators and the
+    catalog, a project's quota and role bindings, and the users and groups in the console, and say which
+    administrator pages OpenShift Local leaves empty and why.
+  flow:
+    - kind: ask
+      id: recall-health
+      recalls: n.cluster-admin-health
+      prompt: "A look back. Which objects say whether each part of the platform is healthy?"
+      choices:
+        - text: "The ClusterOperators"
+          why: "Each platform component reports Available, Progressing and Degraded through its ClusterOperator."
+        - text: "The nodes' labels"
+          why: "Labels describe nodes; they do not report the platform's health."
+        - text: "The projects"
+          why: "Projects hold applications; the platform's own state is in ClusterOperators."
+      answer: 0
+    - kind: show
+      id: settings
+      image:
+        src: cluster-settings.png
+        alt: "Administration > Cluster Settings: a warning that the cluster should not be updated to the next minor version because cluster version overrides disable ownership, the current version 4.21.8, update status Available updates, the channel stable-4.21 with versions up to 4.21.36, a Select a version button, and the cluster ID blurred."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Administration > Cluster Settings, 2026-10-20"
+      caption: "Administration > Cluster Settings"
+      notice: |
+        The version (`oc get clusterversion`), the **channel** `stable-4.21` and the releases it offers, and
+        **Select a version** to start one, which is `oc adm upgrade --to`. The warning at the top is OpenShift
+        Local's: it switches some components off with cluster version overrides. The warning names the next
+        minor version, and the page still lists 4.21 patch releases, but while an override is set the CVO
+        refuses patch updates too, as [Plan a cluster update](/lesson/n.cluster-updates) explains. Do not
+        update OpenShift Local this way; install a newer OpenShift Local instead.
+    - kind: ask
+      id: why-no-update
+      prompt: "Why does Cluster Settings warn against updating this cluster to the next minor version?"
+      choices:
+        - text: "Cluster version overrides are set"
+          why: "OpenShift Local turns some components off with overrides, and the page names them as what prevents upgrading."
+        - text: "The channel is wrong"
+          why: "`stable-4.21` is a valid channel; the warning names the overrides."
+        - text: "kubeadmin may not update"
+          why: "kubeadmin may. The page itself explains the reason: the overrides."
+      answer: 0
+    - kind: show
+      id: operators
+      image:
+        src: cluster-operators.png
+        alt: "The ClusterOperators tab of Cluster Settings: a table of the platform's operators such as authentication, console, dns, ingress and network, with their status, version and message."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Cluster Settings > ClusterOperators, 2026-10-20"
+      caption: "Cluster Settings > ClusterOperators"
+      notice: "The table `oc get clusteroperators` prints: one row per platform component and its status. This is the first page to open when the cluster misbehaves."
+    - kind: try
+      id: try-co
+      body: "Show the same table of platform operators on the command line."
+      accept: ["oc get clusteroperators", "oc get clusteroperator", "oc get co", "oc get clusteroperators.config.openshift.io", "kubectl get clusteroperators", "kubectl get co"]
+      hints:
+        - match: "^oc get operators?$"
+          say: "That lists OLM Operators. The platform's own components are `clusteroperators`."
+        - match: "^oc get (csv|clusterserviceversions?)"
+          say: "ClusterServiceVersions are installed Operators. The platform's components are `clusteroperators`."
+      hint: "`oc get`, then `clusteroperators` (short name `co`)."
+    - kind: show
+      id: nodes
+      image:
+        src: nodes.png
+        alt: "Compute > Nodes: one node named crc, status Ready, roles control-plane, master and worker; the Pods, Memory, CPU and Filesystem columns show a dash."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Compute > Nodes, 2026-10-20"
+      caption: "Compute > Nodes"
+      notice: "OpenShift Local has a single node, `crc`, which is control plane and worker at once: `oc get nodes`. The usage columns are empty because monitoring, which measures them, is off on the course cluster. A typical highly available cluster lists several control-plane and worker nodes."
+    - kind: show
+      id: node
+      image:
+        src: node-details.png
+        alt: "The page of the node crc, Ready, with tabs Overview, Details, YAML, Pods, Logs, Events and Terminal, its roles, its internal IP, Alerts could not be loaded, and recent node events."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the node crc, 2026-10-20"
+      caption: "One node's page"
+      notice: "The node's details and events, as `oc describe node crc`; **Logs** and **Terminal** reach the node itself, which `oc adm node-logs` and `oc debug node/crc` do from the command line."
+    - kind: show
+      id: installed
+      image:
+        src: installed-operators.png
+        alt: "Ecosystem > Installed Operators in all projects: one entry, Package Server provided by Red Hat in openshift-operator-lifecycle-manager, status Succeeded, providing the PackageManifest API."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Ecosystem > Installed Operators, 2026-10-20"
+      caption: "Ecosystem > Installed Operators"
+      notice: "One row per `ClusterServiceVersion`, as `oc get csv -A`. Only OLM's own Package Server is here: OpenShift Local comes with no add-on Operators. Each installed Operator's page lists the APIs it adds and lets you create its objects."
+    - kind: show
+      id: catalog
+      image:
+        src: software-catalog.png
+        alt: "Ecosystem > Software Catalog: 862 items in categories such as AI and Machine Learning, Database and Monitoring, with tiles for Helm charts and Operators, each marked Red Hat, Community or Certified."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, Ecosystem > Software Catalog, 2026-10-20"
+      caption: "Ecosystem > Software Catalog"
+      notice: |
+        Operators and Helm charts to add. Installing an Operator from a tile creates the
+        `Subscription` that [Installing, updating and removing operators](/lesson/n.operators-lifecycle) writes
+        by hand. Nothing was installed for this picture: an install changes the whole cluster.
+    - kind: ask
+      id: catalog-what
+      prompt: "Installing an Operator from the Software Catalog records your package, channel and approval choice. In which object?"
+      choices:
+        - text: "A Subscription"
+          why: "The install form fills in a Subscription: the package, channel and approval OLM then acts on."
+        - text: "A ClusterOperator"
+          why: "ClusterOperators belong to the platform's own components, not to catalog Operators."
+        - text: "The Operator's Deployment"
+          why: "OLM creates that Deployment later, from the Subscription; it does not hold your choice of channel or approval."
+      answer: 0
+    - kind: show
+      id: quota
+      image:
+        src: quota.png
+        alt: "The ResourceQuota demo-quota in console-demo, with four gauges: configmaps 3 of 20 used, pods 6 of 10, secrets 4 of 20 and services 1 of 5."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, the ResourceQuota demo-quota in console-demo, 2026-10-20"
+      caption: "A project's ResourceQuota"
+      notice: "Used against allowed, as `oc describe quota demo-quota -n console-demo`. A quota is set by an administrator; the project's users can read it and meet it."
+    - kind: show
+      id: rolebindings
+      image:
+        src: rolebindings.png
+        alt: "User Management > RoleBindings with console-demo chosen: 210 rows, first the RoleBinding admin for the user developer, then ClusterRoleBindings such as basic-users, cluster-admin for the group system:masters and cluster-admins for system:admin."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, User Management > RoleBindings in console-demo, 2026-10-20"
+      caption: "Who may do what in console-demo"
+      notice: "**RB** rows are the project's own bindings: `developer` has `admin` in the project it requested. **CRB** rows are ClusterRoleBindings, which apply in every project, so the page lists them too. **Create binding** writes what `oc adm policy add-role-to-user` does."
+    - kind: try
+      id: try-grant
+      body: "Give the user `alice` the `view` role in `console-demo`, as **Create binding** would. (If you write the RoleBinding yourself, name it `alice-view`.)"
+      accept: ["oc adm policy add-role-to-user view alice -n console-demo", "oc policy add-role-to-user view alice -n console-demo", "oc -n console-demo adm policy add-role-to-user view alice", "oc create rolebinding alice-view --clusterrole=view --user=alice -n console-demo", "kubectl create rolebinding alice-view --clusterrole=view --user=alice -n console-demo"]
+      hints:
+        - match: "add-cluster-role-to-user"
+          say: "That grants the role in every project. Here it is one project: `add-role-to-user` with `-n`."
+        - match: "add-role-to-user alice view"
+          say: "The role comes first, then the user: `add-role-to-user view alice`."
+        - match: "add-role-to-user view alice$"
+          say: "Name the project: `-n console-demo`."
+      hint: "`oc adm policy add-role-to-user`, the role, the user and the project."
+    - kind: show
+      id: users
+      image:
+        src: users.png
+        alt: "User Management > Users: Users are automatically added the first time they log in; two users, developer with identity developer:developer and kubeadmin with identity developer:kubeadmin."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, User Management > Users, 2026-10-20"
+      caption: "User Management > Users"
+      notice: "*Users are automatically added the first time they log in*: `oc get users`. The **Identities** column shows where each comes from: OpenShift Local's htpasswd identity provider is named `developer`, so its identities are `developer:developer` and `developer:kubeadmin`."
+    - kind: show
+      id: groups
+      image:
+        src: groups.png
+        alt: "User Management > Groups: No Groups found, with a Create Group button."
+        captured: "OpenShift Local 4.21.8 console as kubeadmin, User Management > Groups, 2026-10-20"
+      caption: "User Management > Groups"
+      notice: "Groups are empty here: `oc adm groups new` or a group sync would fill them, as [Groups](/lesson/o2.groups) shows."
+    - kind: teach
+      id: local-limits
+      title: "What OpenShift Local leaves out"
+      body: |
+        OpenShift Local is one virtual machine with parts switched off to fit in memory. In the console that
+        shows as:
+
+        - *Alerts could not be loaded* and empty usage columns: the monitoring stack is disabled by default
+          on OpenShift Local (it can be enabled, with more memory) and is off on the course cluster, so the
+          console has no metrics or alerts to show;
+        - one node, control plane and worker at once: you can drain it, but no other node takes its pods;
+        - no updates: the cluster version overrides on Cluster Settings refuse them.
+
+        On a production cluster these pages are full; the pages you learned here look and work the same.
+    - kind: teach
+      id: next
+      title: "What you can do now"
+      body: |
+        You can read the cluster's version, channel and operators, its nodes, the installed Operators and the
+        catalog, a project's quota and access, and the users, and say what OpenShift Local leaves out. To
+        practise, [Installing, updating and removing operators](/lesson/n.operators-lifecycle) and
+        [Quotas and LimitRanges](/lesson/o2.quotas-limits) do with `oc` what these pages show.
+  review:
+    - q: "Which console page is oc get clusteroperators?"
+      a: "Administration > Cluster Settings > ClusterOperators."
+    - q: "Why does OpenShift Local's console show no alerts or node usage?"
+      a: "Its monitoring stack is disabled by default (and off on the course cluster), so nothing collects metrics or alerts. It can be enabled, with more memory."
+    - q: "Installing an Operator from the Software Catalog creates which object?"
+      a: "A Subscription, which OLM acts on."
+  limits: |
+    The screenshots come from the course cluster, signed in as kubeadmin; most of these pages need a cluster
+    administrator. The project `console-demo` and its quota `demo-quota` exist only on the course cluster: they
+    were prepared for the screenshots and are not provided. The try steps compare what you type with accepted
+    answers; nothing runs, and nothing was installed or changed for these pictures. Monitoring is disabled by
+    default on OpenShift Local and was off on the course cluster.
+  references:
+    - title: "Updating a cluster using the web console (OpenShift 4.21)"
+      url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/updating_clusters/performing-a-cluster-update"
+    - title: "Adding Operators to a cluster (OpenShift 4.21)"
+      url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/operators/administrator-tasks"

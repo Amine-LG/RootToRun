@@ -1,0 +1,287 @@
+id: ch.production-ready
+kind: challenge
+title: "Launch a production-ready service"
+subtitle: "Capstone: workload, identity, health, exposure, TLS and network isolation, all graded together"
+summary: "Start from a ConfigMap and two test clients. Build and expose a service the way a production platform expects it, and prove each control works."
+module: r4-capstone
+minutes: 60
+level: 3
+supports: "Graded on OpenShift 4.21.8 (single node). On this cluster the router runs on the host network of the only node, so Route traffic reaches the pods even without a router rule (the recording of the Protect application traffic challenge shows it; this challenge's trials that are expected to pass include the rule; those without it fail the router check); the challenge still expects the rule a multi-node cluster needs."
+concepts: [k8s.deployment, k8s.probes, k8s.requests-limits, rbac.serviceaccounts, sec.scc, net.services, net.routes, net.tls, net.policy]
+prerequisites: [o1.deploy-apps, b.pod-lifecycle, f.scc, d.routes-tls, d.networkpolicy-ovn]
+namespace: academy-ch-prod
+objective: |
+  Combine what the application and platform tracks teach into one service that is sized, health-checked, runs with
+  its own identity under the default security constraints, is reachable only over HTTPS from outside, accepts
+  in-cluster traffic only from the clients that need it, and updates without dropping capacity.
+background: |
+  **Where everything comes from.** The project starts with the ConfigMap `store-content` and the two test clients
+  `frontend` and `batch`, both running `sleep` in the UBI 9 minimal image so that curl can be started from them. The
+  router's namespace label `policy-group.network.openshift.io/ingress` is set by OpenShift itself. The app creates the
+  project `academy-ch-prod` as your learner identity when you start the challenge and applies the starting objects;
+  everything else is yours to create. The images come from Red Hat's public registry `registry.access.redhat.com`,
+  which needs no login. Grading runs on your cluster when you press Grade, as the app's own identities; Clean up
+  deletes the project.
+symptom: |
+  The project contains the page to serve (ConfigMap `store-content`, key `index.html`) and two test clients:
+  `frontend`, which must be able to call the service, and `batch`, which must not. Nothing else exists. The image is
+  `registry.access.redhat.com/ubi9/httpd-24:latest`; httpd serves `/var/www/html` on port 8080.
+requirements:
+  - "A Deployment `store` runs **3 Ready replicas** of the httpd image, serving `index.html` from the ConfigMap `store-content`."
+  - "Every `store` container has an **HTTP readiness probe** on 8080, a **liveness probe that checks httpd on 8080** (HTTP or TCP), a **CPU request**, a **memory request** and a **memory limit**."
+  - "The pods run as the ServiceAccount **`store`** and are admitted by the default **`restricted-v2`** constraint (no exception granted)."
+  - "Updates never remove a Ready replica before its replacement is Ready (`maxUnavailable: 0`)."
+  - "A Route **`store`** serves the page over **HTTPS with edge termination**, and plain HTTP requests are **redirected** to HTTPS."
+  - "Inside the cluster, `http://store:8080/` answers from a `frontend` pod and **times out** from a `batch` pod. Restrict traffic **into** the store pods: the clients keep their own outbound access."
+  - "The store's policy **admits the router** explicitly (namespaces labelled `policy-group.network.openshift.io/ingress`), as a multi-node cluster needs, even though this single-node cluster would deliver Route traffic without it."
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: store-content}
+    data: {index.html: "store ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: frontend, labels: {app: frontend}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: frontend}}
+      template:
+        metadata: {labels: {app: frontend}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: batch, labels: {app: batch}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: batch}}
+      template:
+        metadata: {labels: {app: batch}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - {name: curl, image: "registry.access.redhat.com/ubi9/ubi-minimal:latest", command: ["sleep", "infinity"], resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}}
+hints:
+  - "Work in layers and check each one before the next: the ServiceAccount and Deployment, then health and resources, then the Service and Route, then the NetworkPolicy."
+  - "`oc set` has subcommands for most of this: `serviceaccount`, `volume`, `resources`, `probe`. The rolling-update strategy needs a patch or an edited manifest."
+  - "`oc create route edge` takes `--service` and `--insecure-policy`. Test the redirect with a plain `http://` request."
+  - "A NetworkPolicy that selects the `store` pods isolates them for ingress. Allow `frontend` by pod label, and the router by the namespace label OpenShift puts on router namespaces (`policy-group.network.openshift.io/ingress`)."
+  - "Which SCC admitted a pod? Read its `openshift.io/scc` annotation."
+fix:
+  - {cmd: "oc create serviceaccount store -n academy-ch-prod", meaning: "the workload's own identity"}
+  - {cmd: "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod", meaning: "three replicas of httpd"}
+  - {cmd: "oc set serviceaccount deploy/store store -n academy-ch-prod", meaning: "run as store, not default"}
+  - {cmd: "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod", meaning: "serve the page from the ConfigMap"}
+  - {cmd: "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod", meaning: "reserve and cap"}
+  - {cmd: "oc set probe deploy/store --readiness --get-url=http://:8080/ --period-seconds=5 -n academy-ch-prod", meaning: "traffic only when the page is served"}
+  - {cmd: "oc set probe deploy/store --liveness --get-url=http://:8080/ --initial-delay-seconds=10 --period-seconds=10 -n academy-ch-prod", meaning: "restart a hung httpd"}
+  - cmd: "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0,\"maxSurge\":1}}}}'"
+    meaning: "never below three Ready pods during an update"
+  - {cmd: "oc expose deploy/store --port=8080 -n academy-ch-prod", meaning: "a Service named store"}
+  - {cmd: "oc create route edge store --service=store --insecure-policy=Redirect -n academy-ch-prod", meaning: "TLS at the router, HTTP redirected"}
+  - cmd: "oc apply -n academy-ch-prod -f -"
+    meaning: "store accepts frontend and the router, nothing else"
+    stdin: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: {name: store-ingress}
+      spec:
+        podSelector: {matchLabels: {app: store}}
+        policyTypes: [Ingress]
+        ingress:
+        - from:
+          - podSelector: {matchLabels: {app: frontend}}
+          - namespaceSelector:
+              matchLabels: {policy-group.network.openshift.io/ingress: ""}
+          ports:
+          - {protocol: TCP, port: 8080}
+  - {cmd: "oc rollout status deploy/store -n academy-ch-prod --timeout=240s", meaning: "three Ready pods", timeout: 260}
+checks:
+  - {id: ready, title: "store wants 3 replicas and has 3 Ready", type: deployment_ready, name: store, replicas: 3, expect_text: "3/3 ready"}
+  - {id: content, title: "the page comes from ConfigMap store-content", type: container, name: store, image_prefix: "registry.access.redhat.com/ubi9/httpd-24", configmap_mount: {name: store-content, path: /var/www/html}, expect_text: "ok"}
+  - {id: health, title: "HTTP readiness probe on 8080 and a liveness probe that checks httpd on 8080", type: container, name: store, all: true, probe: [httpGet], port: 8080, liveness: [httpGet, tcpSocket], liveness_port: 8080, expect_text: "ok"}
+  - {id: resources, title: "CPU request, memory request and memory limit on every container", type: container, name: store, all: true, requires: [resources.requests.cpu, resources.requests.memory, resources.limits.memory], expect_text: "ok"}
+  - {id: identity, title: "pods run as the ServiceAccount store", type: field, kind: deployment, name: store, path: spec.template.spec.serviceAccountName, op: eq, value: store, expect_text: "store"}
+  - {id: scc, title: "pods admitted by restricted-v2", type: pods, selector: app=store, owner: store, annotation: "openshift.io/scc=restricted-v2", min: 3, expect_text: "3 of 3 match"}
+  - {id: surge, title: "updates keep every replica available", type: field, kind: deployment, name: store, path: spec.strategy.rollingUpdate.maxUnavailable, op: matches, value: "^0%?$", expect_text: "maxUnavailable = 0"}
+  - {id: edge, title: "the Route terminates TLS at the edge", type: field, kind: route, name: store, path: spec.tls.termination, op: eq, value: edge, expect_text: "edge"}
+  - {id: https, title: "https:// answers with the page", type: route_http, route: store, path: /, expect_status: 200, contains: "store ok", expect_text: "HTTP 200 store ok"}
+  - {id: redirect, title: "http:// is redirected to https://", type: route_http, route: store, path: /, scheme: http, expect_status: 302, location_prefix: "https://", expect_text: "HTTP 302 → https://"}
+  - {id: isolated, title: "a NetworkPolicy isolates the store pods for ingress", type: netpol_ingress, labels: {app: store}, isolated: true, expect_text: "isolated"}
+  - {id: router-rule, title: "that policy admits the router (namespaces labelled policy-group.network.openshift.io/ingress)", type: netpol_ingress, labels: {app: store}, isolated: true, peer_ns_labels: {policy-group.network.openshift.io/ingress: ""}, allows: true, port: 8080, port_name: http, expect_text: "router admitted on port 8080"}
+  - {id: frontend-ok, title: "frontend reaches store inside the cluster", type: exec, from: app=frontend, trusted: true, command: ["/usr/bin/curl", "-s", "-m", "3", "http://store:8080/"], expect_output: "store ok", expect_text: "store ok"}
+  - {id: batch-blocked, title: "batch is blocked (connection times out)", type: exec, from: app=batch, trusted: true, command: ["/usr/bin/curl", "-s", "-m", "3", "http://store:8080/"], expect_code: 28, expect_text: "curl exit 28 (timeout)"}
+  - {id: batch-egress, title: "batch keeps its outbound access (the API server's health endpoint)", type: exec, from: app=batch, trusted: true, command: ["/usr/bin/curl", "-sk", "-m", "5", "https://kubernetes.default.svc/healthz"], expect_output: "^ok$", expect_text: "ok"}
+trials:
+  - id: works-but-open
+    title: "Deployed, healthy and exposed, but plain HTTP, default ServiceAccount and no NetworkPolicy"
+    kind: wrong
+    expect: partial
+    expect_checks: {ready: pass, health: pass, identity: fail, edge: fail, redirect: fail, batch-blocked: fail, frontend-ok: pass}
+    commands:
+      - {cmd: "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod"}
+      - {cmd: "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod"}
+      - {cmd: "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod"}
+      - {cmd: "oc expose deploy/store --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc expose svc/store -n academy-ch-prod"}
+  - id: edge-no-redirect
+    title: "Everything right except the Route: edge TLS, but HTTP still served (graded while still rolling out, so readiness fails too)"
+    kind: partial
+    expect: partial
+    expect_checks: {edge: pass, https: pass, redirect: fail, batch-blocked: pass, identity: pass}
+    commands:
+      - {cmd: "oc create serviceaccount store -n academy-ch-prod"}
+      - {cmd: "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc set serviceaccount deploy/store store -n academy-ch-prod"}
+      - {cmd: "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod"}
+      - {cmd: "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod"}
+      - {cmd: "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod"}
+      - cmd: "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0}}}}'"
+      - {cmd: "oc expose deploy/store --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc create route edge store --service=store --insecure-policy=Allow -n academy-ch-prod"}
+      - cmd: "oc apply -n academy-ch-prod -f -"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: store-ingress}
+          spec:
+            podSelector: {matchLabels: {app: store}}
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {app: frontend}}
+              - namespaceSelector:
+                  matchLabels: {policy-group.network.openshift.io/ingress: ""}
+  - id: g4-egress-substitute
+    title: "batch blocked by an egress policy on batch, store left open"
+    kind: wrong
+    expect: partial
+    expect_checks: {isolated: fail, batch-egress: fail, frontend-ok: pass}
+    commands:
+      - {cmd: "oc create serviceaccount store -n academy-ch-prod"}
+      - {cmd: "oc create deployment store --image=registry.access.redhat.com/ubi9/httpd-24:latest --replicas=3 --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc set serviceaccount deploy/store store -n academy-ch-prod"}
+      - {cmd: "oc set volume deploy/store --add --name=content --type=configmap --configmap-name=store-content --mount-path=/var/www/html -n academy-ch-prod"}
+      - {cmd: "oc set resources deploy/store --requests=cpu=10m,memory=32Mi --limits=memory=128Mi -n academy-ch-prod"}
+      - {cmd: "oc set probe deploy/store --readiness --liveness --get-url=http://:8080/ --initial-delay-seconds=5 -n academy-ch-prod"}
+      - cmd: "oc patch deploy/store -n academy-ch-prod --type=merge -p '{\"spec\":{\"strategy\":{\"rollingUpdate\":{\"maxUnavailable\":0}}}}'"
+      - {cmd: "oc expose deploy/store --port=8080 -n academy-ch-prod"}
+      - {cmd: "oc create route edge store --service=store --insecure-policy=Redirect -n academy-ch-prod"}
+      - cmd: "oc apply -n academy-ch-prod -f -"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: batch-dns-only}
+          spec:
+            podSelector: {matchLabels: {app: batch}}
+            policyTypes: [Egress]
+            egress:
+            - ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}, {protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  - id: one-manifest
+    title: "A correct alternative: one manifest, TCP liveness, two policies (deny all, then allow)"
+    kind: alternative
+    expect: verified
+    commands:
+      - cmd: "oc apply -n academy-ch-prod -f -"
+        stdin: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata: {name: store}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: store, labels: {app: store}}
+          spec:
+            replicas: 3
+            strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+            selector: {matchLabels: {app: store}}
+            template:
+              metadata: {labels: {app: store}}
+              spec:
+                serviceAccountName: store
+                containers:
+                - name: web
+                  image: registry.access.redhat.com/ubi9/httpd-24:latest
+                  ports: [{containerPort: 8080, name: http}]
+                  readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 5}
+                  livenessProbe: {tcpSocket: {port: 8080}, initialDelaySeconds: 10, periodSeconds: 10}
+                  resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {cpu: 200m, memory: 160Mi}}
+                  volumeMounts: [{name: page, mountPath: /var/www/html, readOnly: true}]
+                volumes:
+                - {name: page, configMap: {name: store-content}}
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: {name: store}
+          spec:
+            selector: {app: store}
+            ports: [{name: http, port: 8080, targetPort: http}]
+          ---
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata: {name: store}
+          spec:
+            to: {kind: Service, name: store}
+            port: {targetPort: http}
+            tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: deny-all}
+          spec:
+            podSelector: {}
+            policyTypes: [Ingress]
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata: {name: allow-store-clients}
+          spec:
+            podSelector: {matchLabels: {app: store}}
+            policyTypes: [Ingress]
+            ingress:
+            - from:
+              - podSelector: {matchLabels: {app: frontend}}
+              ports: [{protocol: TCP, port: 8080}]
+            - from:
+              - namespaceSelector:
+                  matchLabels: {policy-group.network.openshift.io/ingress: ""}
+root_cause: |
+  Nothing is broken: this is a build-it task, graded by effect. Each requirement maps to one control:
+  - **3 Ready replicas from a ConfigMap page**: a Deployment, a ConfigMap volume at the document root.
+  - **Health and resources**: a readiness probe decides traffic, a liveness probe restarts hangs, requests reserve
+    capacity, a memory limit caps it.
+  - **Own identity, default constraints**: `serviceAccountName: store`; with nothing granted, SCC admission picks
+    `restricted-v2`, recorded in each pod's `openshift.io/scc` annotation.
+  - **Safe updates**: `maxUnavailable: 0` with `maxSurge: 1`.
+  - **HTTPS only**: an edge Route uses the router's default certificate; `insecureEdgeTerminationPolicy: Redirect`
+    answers plain HTTP with a 302 to HTTPS (the default, `None`, refuses plain HTTP instead).
+  - **Isolation**: a NetworkPolicy selecting the store pods admits `frontend` by pod label and the router by
+    namespace label; `batch` matches nothing and its packets are dropped, so curl times out (exit code 28).
+alternatives: |
+  The grader checks results, not commands: a single manifest, `oc set` one field at a time, or the console all pass.
+  A TCP liveness probe is accepted as a port-availability check, but it cannot detect every hang: a stuck httpd can
+  keep a listening socket whose handshake the kernel still completes. An HTTP or application-specific check catches
+  those; keep it cheap and choose it for the failure you want to detect. The readiness probe must be HTTP, because an
+  open port does not prove the page is served. A default-deny policy plus an allow policy is equivalent
+  to one policy that selects the store pods. Limits on CPU are allowed but not required.
+sre: |
+  Treat this as a production-readiness review you can show a colleague: for each control, the command that proves
+  it (`oc get pod -o jsonpath` for the SCC annotation, `curl -I http://…` for the redirect, a curl from each client
+  for the policy, `oc get deploy -o jsonpath='{.spec.strategy}'` for the rollout). Evidence, not intentions.
+questions:
+  - q: "On this single-node cluster the Route works even without the router rule. Why must the policy still allow the router?"
+    a: "Here the router runs on the host network of the same node, and traffic from a pod's own node is always admitted. On a multi-node cluster router pods run elsewhere and their traffic is filtered like any other."
+  - q: "What does an edge Route without `insecureEdgeTerminationPolicy` do with plain HTTP?"
+    a: "The default is None: plain HTTP is not served for that host. Redirect answers with a 302 to HTTPS; Allow serves both."
+  - q: "Why does the readiness probe have to be HTTP while a TCP liveness probe is acceptable?"
+    a: "Readiness decides whether a pod gets traffic, so it should prove the page is served. The grader accepts TCP liveness as a basic port check, but it only proves the port accepts connections: a hang that leaves the socket open needs an HTTP or application-specific check. Whatever you choose, keep liveness cheap and tolerant, because restarting on a merely slow page would make outages worse."
+references:
+  - {title: "OpenShift 4.21: Secured routes", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/ingress_and_load_balancing/routes"}
+  - {title: "OpenShift 4.21: Network policy", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy"}
+  - {title: "OpenShift 4.21: Managing security context constraints", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/managing-pod-security-policies"}
+  - {title: "Kubernetes: Configure liveness, readiness and startup probes", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"}

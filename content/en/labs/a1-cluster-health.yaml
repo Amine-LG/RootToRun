@@ -1,0 +1,93 @@
+id: lab.cluster-health
+title: "Cluster health in five minutes"
+summary: "A repeatable, read-only health check: version, operators, nodes, machine pools, leader leases, warnings. Includes what CRC cannot show."
+module: a1-cli
+mode: GUIDED_INVESTIGATION
+minutes: 20
+level: 1
+supports: "Recorded on OpenShift 4.21.8 with the read-only academy-reader identity (cluster-reader role)."
+concepts: [ocp.clusteroperators, k8s.architecture, ocp.mco]
+namespace: academy-health
+objective: |
+  Build the habit of a fast, read-only health check before any change, and know how to read each answer.
+background: |
+  Everything here runs as the **reader** identity: a ServiceAccount bound to `cluster-reader`, which can read
+  most objects in every namespace and at cluster scope, but not Secrets, and cannot change anything. That is the identity you want for
+  inspection. Nothing in this lab is verified: it is an investigation; the questions at the end check
+  understanding.
+
+  **Where everything comes from.** Nothing is created: the project `academy-health` only gives the lab a place in the
+  app. The reader identity is a ServiceAccount, `academy-reader` in the project `academy-system`, that the app creates
+  once from the Connections page (that one time it needs the administrator identity) and binds to the built-in
+  `cluster-reader` role; its token lasts 24 hours. On your own cluster, any account with `cluster-reader` can run the
+  same commands.
+commands:
+  - {cmd: "oc get clusterversion", as: reader, meaning: "version and whether an update is in progress"}
+  - {cmd: "oc get clusteroperators", as: reader, meaning: "Available / Progressing / Degraded per platform component"}
+steps:
+  - id: version
+    title: "Version and update status"
+    do: "Read the cluster version and the update status."
+    commands:
+      - {cmd: "oc get clusterversion", as: reader, meaning: "VERSION, AVAILABLE, PROGRESSING"}
+      - {cmd: "oc adm upgrade", as: reader, meaning: "channel and available updates (read-only)"}
+    observe: "4.21.8, AVAILABLE True, PROGRESSING False. `oc adm upgrade` shows the channel (`stable-4.21`), a list of recommended 4.21.z updates, and `Upgradeable=False` with reason `ClusterVersionOverridesSet` (\"Disabling ownership via cluster version overrides prevents upgrades\"): CRC disables some components through cluster version overrides."
+    why: "Upgradeable=False is a condition every administrator should read before planning an update: the reason and message name what blocks it. For most reasons it blocks only minor-version updates (4.21 to 4.22), so read the message to know the scope. The reason here is the exception: while cluster version overrides are set, the cluster version operator refuses patch updates too, so none of the recommended 4.21.z updates listed could be applied on this cluster. Without arguments, `oc adm upgrade` only reads; `oc adm upgrade channel …` and `--to` change the cluster and belong in a planned change."
+  - id: operators
+    title: "Platform operators"
+    do: "List ClusterOperators and read one in detail."
+    commands:
+      - {cmd: "oc get clusteroperators", as: reader, meaning: "the platform's health board"}
+      - {cmd: "oc describe clusteroperator kube-scheduler", as: reader, meaning: "conditions, versions, related objects"}
+    predict:
+      prompt: "Which condition combination means healthy?"
+      choices: ["Available=True, Progressing=True, Degraded=True", "Available=True, Progressing=False, Degraded=False", "Available=False, Progressing=False, Degraded=False"]
+      answer: 1
+      explain: "Serving, not rolling anything out, not failing."
+      feedback:
+        - "No: Degraded=True means the operator has persistently failed to reach its desired state, and Progressing=True means it is still changing something. Neither is a steady healthy state."
+        - "Right: Available (it works), not Progressing (no rollout or config change in flight) and not Degraded (no persistent failure). That is the steady state to see before any change."
+        - "No: Available=False means at least part of the component is not working and needs an administrator, even if nothing is progressing or degraded."
+    observe: "24 operators, all Available=True, Progressing=False, Degraded=False. Several components are missing from the list, monitoring among them: CRC disables them through the cluster version overrides seen in the previous step, to save memory. `describe` shows the kube-scheduler operator's conditions with their messages (\"1 node is at revision 6\"), the related objects it manages and the versions it runs."
+    why: "ClusterOperators are the platform's own health reports: one line per component, in the same Available, Progressing and Degraded vocabulary. Any line that is not True, False, False is the short list to open first; `describe` then gives the reason, message and related objects that say where to look next."
+  - id: nodes
+    title: "Nodes and pools"
+    do: "Read the node and the MachineConfigPools."
+    commands:
+      - {cmd: "oc get nodes -o wide", as: reader, meaning: "status, roles, version, OS, runtime"}
+      - {cmd: "oc get mcp", as: reader, meaning: "machine config rollout state per pool"}
+      - {cmd: "oc adm top nodes", as: reader, meaning: "live usage (needs the metrics API)", expect: fail}
+    observe: "One node `crc`, Ready, with roles control-plane,master,worker, Red Hat Enterprise Linux CoreOS and cri-o. `oc get mcp`: pool `master` UPDATED=True, UPDATING=False, DEGRADED=False with one machine; pool `worker` has zero machines because the single node belongs to the master pool. `oc adm top nodes` fails with `error: Metrics API not available`: the metrics API is served by the monitoring stack, which CRC disables."
+    why: "A failing command is evidence too: knowing *why* `top` fails here (no metrics API) avoids wrong conclusions on a real cluster. On clusters that roll out node configuration, the pools line is the check that a rollout has finished: UPDATED True, UPDATING False, DEGRADED False and READYMACHINECOUNT equal to MACHINECOUNT."
+  - id: leaders
+    title: "Who leads? Leases"
+    do: "Read the leader-election lease of the scheduler and the node heartbeat lease."
+    commands:
+      - {cmd: "oc get lease -n openshift-kube-scheduler", as: reader, meaning: "the active scheduler instance"}
+      - {cmd: "oc get lease -n kube-node-lease", as: reader, meaning: "node heartbeats: one Lease per node, renewed by its kubelet (every 10 seconds by default)"}
+    observe: "Two leases in openshift-kube-scheduler: `kube-scheduler` (the scheduler's leader election) and `cert-recovery-controller-lock`, each with exactly one HOLDER (`crc_<id>`), the instance currently leading. In kube-node-lease, one Lease per node: `crc`, held by the node itself."
+    why: "Leader election lets several replicas of a control-plane component run while only one acts. On a multi-node control plane the holder tells you which instance's logs to read."
+  - id: warnings
+    title: "Warnings anywhere"
+    do: "List warning events across all namespaces, newest last."
+    commands:
+      - {cmd: "oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp", as: reader, meaning: "recent problems cluster-wide"}
+    observe: "In the recording (which keeps only the end of this long output, so its first line is cut): a large burst of `Unhealthy` / `ProbeError` liveness and readiness timeouts from many openshift-* pods about 2 h 45 min earlier (LAST SEEN `168m` to `164m`), a smaller one about 110 minutes earlier (`110m` to `107m`), and three `FailedToCreateEndpoint` warnings in the namespace `default` (`endpoints \"shop\" already exists`, and the same for `api`), which name Services of earlier lab projects. The last two minutes add new warnings: probe timeouts from openshift-config-operator, the router, packageserver and package-server-manager, and `Startup probe failed` or `container process not found` from catalog pods in openshift-marketplace. A burst across many unrelated components at the same moment points to a node-wide cause (the single CRC node busy or resuming), not to each component failing; the recent warnings are the ones to look at again a few minutes later."
+    why: "Read the LAST SEEN column and look for patterns before reading single lines: old, clustered warnings that stopped are history; warnings that keep repeating now are the ones to chase."
+hints: []
+checks: []
+questions:
+  - q: "Why use a read-only identity for health checks?"
+    a: "Least privilege: inspection must never be able to change the cluster, even by mistake or through a compromised tool."
+  - q: "`oc adm top nodes` fails with 'Metrics API not available'. What does that tell you?"
+    a: "The metrics pipeline (monitoring stack / metrics API) is not serving; it says nothing about node health itself."
+enterprise: |
+  Every change ticket in a regulated environment starts with this evidence: version, operators healthy, nodes
+  Ready, pools not updating, no unexplained warnings. Automate it and attach the output.
+references:
+  - {title: "OpenShift 4.21: Verifying node health", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting#verifying-node-health"}
+  - {title: "OpenShift 4.21: Cluster Operator and cluster version condition types", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/updating_clusters/understanding-openshift-updates-1#understanding_clusteroperator_conditiontypes_understanding-openshift-updates"}
+  - {title: "Kubernetes: Leases", url: "https://kubernetes.io/docs/concepts/architecture/leases/"}
+variations:
+  - "On your own: turn the five steps into one script you could attach to a change ticket, one command per question (version and update, operators, nodes, machine config pools, recent warnings). Check: it runs with a read-only identity and needs no write permission; on a healthy cluster no line needs explaining."
+  - "As the reader, read the cluster version's `spec.overrides` and list which platform components OpenShift Local leaves unmanaged. Check: you can connect one of them to the `Metrics API not available` answer of step 3."

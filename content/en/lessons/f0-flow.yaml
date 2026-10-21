@@ -1,0 +1,344 @@
+# The first lesson of the Kubernetes path, written as a teaching flow. Recorded on the workstation: no cluster.
+- id: f0.linux-essentials
+  title: "Linux you will use"
+  subtitle: "Four Linux facts behind the cluster's error messages"
+  module: f0-prereqs
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "Any Linux system with bash and curl; the timeout demo also needs nft, iproute and unprivileged user namespaces (present on RHEL 9). Recorded on a RHEL 9 workstation, with no cluster involved."
+  concepts: [linux.process, linux.permissions, linux.networking, container.security]
+  prerequisites: []
+  files:
+    firewalled.sh: |
+      # A private network for this script only, with a firewall rule that drops every packet sent to port 8080
+      unshare -rn sh -c '
+        ip link set lo up
+        nft add table inet demo
+        nft add chain inet demo input "{ type filter hook input priority 0; }"
+        nft add rule inet demo input tcp dport 8080 drop
+        curl -sS --connect-timeout 3 http://127.0.0.1:8080/; echo "curl exit status: $?"
+      '
+  objective: |
+    Read four Linux facts that explain most failures you will later meet in a cluster: how a process ended
+    (its exit status, and 128 plus a signal number), who owns a file (numbers, not names), what a shell
+    pipeline reports, and how a network connection failed (not resolved, refused, or timed out).
+  flow:
+    - kind: teach
+      id: why
+      title: "Why Linux, before Kubernetes"
+      body: |
+        A cluster reports problems in its own words: a container "keeps restarting", a request "fails". Those
+        words say *that* something went wrong. *Why* is almost always a plain Linux fact underneath: how a
+        program ended, who owns a file, what a command returned, how a connection failed.
+
+        This lesson covers four of those facts, with real output from a Linux machine. If you have done the
+        Linux track, it is a short review; if you skipped it, it is the minimum the next lessons build on.
+        Each fact comes back later, when the same numbers appear in a cluster.
+    - kind: teach
+      id: exit-status
+      title: "1. Every program ends with a number"
+      body: |
+        When a program finishes, it leaves a small number, its **exit status**, for whoever started it. `0`
+        means success. Anything else means failure, and the program chooses which number. The shell keeps the
+        exit status of the last command in a variable called `$?`.
+    - kind: show
+      id: show-exit
+      body: "Here a tiny program, `sh -c 'exit 3'`, ends with status 3, and `echo` prints it:"
+      run: "sh -c 'exit 3'; echo \"exit status: $?\""
+    - kind: try
+      id: try-status
+      body: "You run `ls /no-such-dir`, which fails. Show its exit status."
+      accept: ["echo $?", "echo \"$?\""]
+      hints:
+        - match: "^\\$\\?$"
+          say: "Typed alone, `$?` would be run as a command. Ask the shell to print it: `echo`, then `$?`."
+        - match: "^echo \\?$|^echo \\$$"
+          say: "The variable's name is `?`, and you read a variable with `$` in front: `$?`."
+        - match: "^ls"
+          say: "The command has already run. The task is the next line: print the status it left behind."
+      hint: "`echo`, then the variable that holds the last exit status."
+      run: "ls /no-such-dir; echo $?"
+      then: |
+        `ls` printed its error, then `echo $?` printed `2`. Here `ls` returned 2 because it could not access the
+        path you named; read the error message for the cause, because `ls` uses the same number for other
+        serious failures too. Other programs use other numbers: only `0` means the same thing everywhere.
+    - kind: teach
+      id: signals
+      title: "Ended from outside: 128 plus a signal"
+      body: |
+        A program can also be stopped by someone else, with a **signal**. Two matter most:
+
+        - **SIGTERM** (number 15) asks the program to stop. It can clean up first, or ignore the request.
+          It is what `kill` sends when you give it no option.
+        - **SIGKILL** (number 9) cannot be caught or ignored: the kernel removes the program at once.
+
+        When a signal ends a program, the shell reports **128 + the signal's number** as its exit status.
+    - kind: ask
+      id: guess-kill
+      guess: true
+      prompt: "A program is ended by SIGKILL, signal 9. Which exit status will the shell report?"
+      choices:
+        - text: "`9`"
+          why: "That is the signal's number. The shell adds 128 to it, which separates a signal death from the small numbers programs usually choose."
+        - text: "`137`"
+          why: "See the next step."
+        - text: "`1`"
+          why: "`1` is a common choice for a program's own errors. A program killed by a signal never chose anything: the shell reports 128 plus the signal."
+      answer: 1
+    - kind: show
+      id: show-signals
+      body: "`sleep 300` waits five minutes. Each line below starts it in the background, stops it with a signal, then prints its exit status:"
+      run: "sleep 300 & kill $!; wait $!; echo \"after SIGTERM: $?\"; sleep 300 & kill -9 $!; wait $!; echo \"after SIGKILL: $?\""
+      highlight: ["143", "137"]
+      notice: |
+        `143` is 128 + 15 (SIGTERM), and `137` is 128 + 9 (SIGKILL). The shell also noted that the second
+        `sleep` was `Killed`. `$!` is the process number of the last program started in the background.
+        The recording ran in a non-interactive shell. Typed at a prompt, bash also prints job numbers such as
+        `[1] 12345`, and a `Terminated` line for the first `sleep`.
+    - kind: teach
+      id: exit-in-cluster
+      body: |
+        You will meet these numbers again. When a cluster stops a container, it sends SIGTERM first, waits a
+        grace period (30 seconds by default), then sends SIGKILL. And when a container uses more memory than it
+        is allowed, the kernel kills it with SIGKILL. In both cases, the cluster reports the container's exit
+        status. A `137` is a strong hint that the container was killed rather than that it chose to fail. It is
+        a convention, not proof: a program can also exit with 137 by itself, so the next step is to read the
+        termination reason and the events.
+    - kind: ask
+      id: read-137
+      prompt: "A container stopped with exit status 137. What do you investigate first?"
+      choices:
+        - text: "A possible SIGKILL, in the events"
+          why: "137 is 128 + 9, so a SIGKILL is the likeliest cause, but a program can exit with 137 by itself. The termination reason and the events tell the two apart."
+        - text: "A bug that returns 137 on purpose"
+          why: "A program can choose 137, but almost none do. Start from the likelier cause, a signal, and fall back to this only when the events show no kill."
+        - text: "Nothing: the work finished fine"
+          why: "Only `0` means success. Any other status, including 137, means the program did not end on its own terms."
+      answer: 0
+    - kind: teach
+      id: numbers
+      title: "2. Files are owned by numbers"
+      body: |
+        Every file has an owner, a group and permissions. `ls -l` shows the owner and group as names, but the
+        kernel does not store names. It stores numbers: a **UID** for the user and a **GID** for the group.
+        Tools look names up through the system's configured user and group databases, commonly the local
+        files `/etc/passwd` and `/etc/group`. The kernel still checks only the numbers. `ls -n` shows them.
+    - kind: show
+      id: show-numbers
+      run: "touch report.txt; ls -l report.txt; ls -n report.txt; id -u; id -g"
+      notice: |
+        The same file twice: first with names, then with the numbers the kernel really checks. `id -u` and
+        `id -g` print your own UID and GID, which match the file's, because you created it.
+    - kind: teach
+      id: numbers-matter
+      body: |
+        When the kernel decides whether a program may write a file, it compares numbers: the program's UID with
+        the file's owner, the program's groups with the file's group. It uses the **first** set that applies,
+        owner, then group, then everyone else.
+
+        This matters because a container can run as a UID that has no name at all. OpenShift, by default, runs
+        each container as a large UID picked for the project, such as `1000680000`, in group `0`. That UID owns
+        nothing in the image. For a directory it must create files in, a usual image pattern is group `0`
+        ownership with `w` and `x` for the group (`x` lets it enter the directory), and every parent directory
+        must be searchable too. Other arrangements exist; this is the one OpenShift images are told to use.
+    - kind: ask
+      id: which-set
+      prompt: "A program runs as UID `1000680000`, group `0`. With only ordinary permission bits, can it create files here?"
+      evidence: |
+        $ ls -nd /var/cache/app
+        drwxrwxr-x. 2 1001 0 6 Oct 15 09:12 /var/cache/app
+      choices:
+        - text: "Yes, through the group set"
+          why: "It does not own the directory (UID 1001 does), but it is in group 0, the directory's group, and the group set is `rwx`."
+        - text: "No, only UID 1001 may write"
+          why: "The owner set is only the first one checked. The program is in the directory's group, and the group set allows writing."
+        - text: "No, because the UID has no name"
+          why: "The kernel never looks at names. It compares numbers, and group 0 matches."
+      answer: 0
+    - kind: teach
+      id: shell
+      title: "3. What a pipeline reports"
+      body: |
+        A **pipeline**, `a | b`, sends the output of `a` into `b`. Its exit status is the status of the
+        **last** command only. If `a` fails and `b` succeeds, the whole line reports success. Scripts that
+        must notice the first failure set `set -o pipefail`, which makes the pipeline report the last non-zero
+        status instead.
+
+        `false` and `true` are two tiny commands that only fail and only succeed, which shows the rule
+        clearly:
+    - kind: show
+      id: show-pipefail
+      run: "false | true; echo \"without pipefail: $?\"; set -o pipefail; false | true; echo \"with pipefail: $?\""
+      notice: "Same pipeline, two answers. Without `pipefail`, the failure of `false` disappears."
+    - kind: teach
+      id: health-terms
+      body: |
+        Two more tools appear in the next question. `curl -f` makes `curl` exit with a failure when the server
+        answers with an HTTP error. `tee` copies its input to a file and to the screen.
+    - kind: ask
+      id: health-check
+      prompt: "In a Bash shell with `pipefail` off, a check runs `curl -sf http://localhost:8080/health | tee /tmp/last-check`. The page answers with an error. What status does it report?"
+      choices:
+        - text: "Success, from `tee`"
+          why: "The pipeline reports its last command, `tee`, which saved the (empty) output without trouble, provided the file can be written. The failed request is hidden."
+        - text: "Failure, from `curl -f`"
+          why: "`curl -f` does exit with a failure, but it is not the last command. Without `pipefail`, only `tee`'s status counts."
+        - text: "Failure, because the output is empty"
+          why: "Exit statuses do not depend on how much a command printed. `tee` succeeded, so the pipeline did."
+      answer: 0
+    - kind: teach
+      id: no-shell
+      body: |
+        One more shell fact for later. Expansions such as `$HOME`, pipes `|` and `&&` are done by the
+        **shell**. A program started directly, without a shell, receives `$HOME` as five plain characters. When
+        a cluster starts a container's command, it starts it directly, so these only work if the command is
+        itself `sh -c '…'`.
+    - kind: teach
+      id: network
+      title: "4. Three ways a connection fails"
+      body: |
+        To reach a server, a client turns a name into an IP address (**DNS**), then connects to a **port** at
+        that address, where a program must be **listening**. Each stage fails differently, and `curl` says
+        which one, with its own exit status:
+    - kind: show
+      id: show-dns
+      body: "A name that does not exist:"
+      run: "curl -sS http://no-such-host.invalid/; echo \"curl exit status: $?\""
+      notice: "Status `6`: the name never became an address, so no HTTP connection to a destination was made. The lookup itself may have sent packets to a DNS server."
+    - kind: show
+      id: show-refused
+      body: "An address that exists, on a port where nothing listens:"
+      run: "curl -sS http://127.0.0.1:9/; echo \"curl exit status: $?\""
+      notice: "Status `7`, at once: the machine answered, and said that no program listens on that port. (A firewall can also be set to reject actively with the same answer.)"
+    - kind: ask
+      id: guess-timeout
+      guess: true
+      prompt: "Now a firewall silently drops everything sent to the port. What will `curl` do?"
+      choices:
+        - text: "Wait, then give up"
+          why: "See the next step."
+        - text: "Fail at once with `Connection refused`"
+          why: "A refusal is an answer. A dropped packet gets none, so `curl` can only wait. See the next step."
+        - text: "Report that the name is unknown"
+          why: "There is no name to look up: the address is given as numbers. See the next step."
+      answer: 0
+    - kind: show
+      id: show-timeout
+      body: |
+        A real timeout needs packets that disappear. The script `firewalled.sh`, this lesson's source file
+        (**Before you start**), gives itself a private network (no administrator rights needed), adds a firewall
+        rule that silently drops everything sent to port 8080, then runs the same `curl`, with a three-second
+        limit. It needs the `nft` firewall tool and user namespaces for ordinary users, both present on RHEL 9
+        (some distributions turn user namespaces off for ordinary users):
+      run: "bash firewalled.sh"
+      notice: "Status `28`: the connection timeout of three seconds expired. In this script nobody said no: the packets were dropped on the way. A timeout can also happen later, while a connected program stalls."
+    - kind: ask
+      id: which-failure
+      prompt: "A request fails at once with `Connection refused`. Where do you look first?"
+      choices:
+        - text: "At the program and its port"
+          why: "Refused usually means the address answered and nothing listens on that port: a wrong port, or a program not started or listening only on `127.0.0.1`. An active firewall rejection is the other possibility."
+        - text: "At a firewall dropping traffic"
+          why: "Dropped packets give no answer, so the client waits and times out (status 28). A refusal is an answer."
+        - text: "At the DNS name"
+          why: "A name problem stops before any connection (status 6). Here the connection reached the address."
+      answer: 0
+    - kind: order
+      id: order-stages
+      prompt: "Put the stages of a request in the order they happen."
+      items:
+        - "The name becomes an IP address (DNS)"
+        - "The client connects to a port at that address"
+        - "A listening program accepts the connection"
+        - "The program answers the request"
+      why: "Each stage needs the one before it, which is why the error tells you where it stopped: not resolved (6), refused (7), timed out (28), or an answer such as an HTTP error from the program itself."
+    - kind: reflect
+      id: explain-two
+      prompt: "A colleague says \"the service is down\" for both a `Connection refused` and a timeout. Why do they need different fixes?"
+      model: |
+        For a refusal, check the listener and the port number first: the address answered and nothing listens
+        there (an active firewall rejection is another possibility). A connection timeout is no answer at all:
+        something on the way may be dropping the packets, such as a firewall or a network policy, or nobody
+        owns the address, so the network is the first place to look. A timeout after the connection was made
+        is different again: the program stalled.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read how a program ended (its own status, or 128 plus a signal: `143` for SIGTERM, `137` for
+        SIGKILL), explain a permission problem with numbers rather than names, know what a pipeline really
+        reports, and tell apart a name that does not resolve, a refused connection and a timeout.
+
+        Next: what Kubernetes does, and why it exists. These four facts come back each time something in a
+        cluster fails.
+  sections:
+    - id: in-a-cluster
+      title: "Where each fact shows up in a cluster"
+      depth: true
+      body: |
+        You will learn the commands in the next lessons; this table is for later reference.
+
+        | What the cluster says | The Linux fact underneath | Practice |
+        |---|---|---|
+        | a container restarts, last exit status `137`, reason `OOMKilled` | the kernel killed it (SIGKILL) for using more memory than its limit | [OOMKilled at start-up](/lab/inc.oomkilled) |
+        | last exit status `137` without `OOMKilled` | most often it was asked to stop (SIGTERM), did not, and was killed after the grace period; check the events | [Restarts, but no errors](/lab/inc.liveness-restarts) |
+        | last exit status `1` | the program's own error: read its previous logs | [CrashLoopBackOff after a configuration change](/lab/inc.crashloop-config) |
+        | `Permission denied` in the logs | the container's UID owns nothing, and the group has no `w` or `x` | [Anatomy of a container](/lab/lab.container-anatomy) |
+        | callers log `Could not resolve host` | a name with no DNS record | [Could not resolve host](/lab/inc.dns-typo) |
+        | `Connection refused` | nothing listens on that IP and port | [Endpoints exist, connections are refused](/lab/inc.wrong-targetport) |
+        | requests hang, then time out | packets are dropped on the way | [Timeouts after security hardening](/lab/inc.networkpolicy-block) |
+
+        **PID 1 and signals.** Inside a container, the main program has process number 1, and the kernel
+        delivers a signal to PID 1 only if the program has said how to handle it (SIGKILL excepted). A PID 1
+        that does not handle SIGTERM therefore ignores it, and ends with `137` after the grace period instead
+        of `143`.
+
+        **Other shell statuses.** `127` means "command not found" and `126` "found, but not executable".
+    - id: shell-more
+      title: "Quoting and environment variables"
+      depth: true
+      body: |
+        Single quotes are literal: `'$HOME'` stays as five characters. Double quotes expand variables but keep
+        spaces: `"$DIR"` is one argument even if the value contains a space, while an unquoted `$DIR` becomes
+        two, the classic cause of "No such file or directory" for a path that exists.
+
+        Environment variables are copied into a program when it starts. Changing them later, from anywhere,
+        does not reach a program that is already running: it needs to be restarted.
+  review:
+    - q: "What does exit status 143 mean? And 137?"
+      a: "Usually a signal: 143 is 128 + 15 (SIGTERM), 137 is 128 + 9 (SIGKILL). A program can also exit with these numbers itself, so check the events."
+    - q: "Which IDs does the kernel compare when it checks file permissions?"
+      a: "Numbers: the program's UID and groups against the file's owner UID and group GID. Names are only for display."
+    - q: "What exit status does a pipeline report without `set -o pipefail`?"
+      a: "The status of its last command only, so an earlier failure is hidden."
+    - q: "curl says `Connection refused` at once. What does it mean?"
+      a: "The address answered and, most often, nothing listens on that port; an active firewall rejection looks the same."
+    - q: "curl hangs, then times out. What does it suggest?"
+      a: "No answer to the connection attempt: packets may be dropped by a firewall or network policy, or nobody owns the address."
+  commands:
+    - cmd: "sh -c 'exit 3'; echo \"exit status: $?\""
+      meaning: "a program's exit status, read from $?"
+    - cmd: "ls /no-such-dir; echo $?"
+      meaning: "ls fails, and leaves status 2"
+    - cmd: "sleep 300 & kill $!; wait $!; echo \"after SIGTERM: $?\"; sleep 300 & kill -9 $!; wait $!; echo \"after SIGKILL: $?\""
+      meaning: "128 + the signal: 143 for SIGTERM, 137 for SIGKILL"
+    - cmd: "touch report.txt; ls -l report.txt; ls -n report.txt; id -u; id -g"
+      meaning: "owner and group as names, then as numbers"
+    - cmd: "false | true; echo \"without pipefail: $?\"; set -o pipefail; false | true; echo \"with pipefail: $?\""
+      meaning: "a pipeline reports its last command, unless pipefail is set"
+    - cmd: "curl -sS http://no-such-host.invalid/; echo \"curl exit status: $?\""
+      meaning: "a name that does not resolve: status 6"
+    - cmd: "curl -sS http://127.0.0.1:9/; echo \"curl exit status: $?\""
+      meaning: "nothing listening: refused at once, status 7"
+    - cmd: "bash firewalled.sh"
+      meaning: "a firewall drops the packets: timed out, status 28"
+  references:
+    - {title: "Linux man-pages: signal(7)", url: "https://man7.org/linux/man-pages/man7/signal.7.html"}
+    - {title: "GNU Bash manual: Exit status", url: "https://www.gnu.org/software/bash/manual/html_node/Exit-Status.html"}
+    - {title: "GNU Bash manual: Pipelines (pipefail)", url: "https://www.gnu.org/software/bash/manual/html_node/Pipelines.html"}
+    - {title: "Linux man-pages: path_resolution(7) (permission checks)", url: "https://man7.org/linux/man-pages/man7/path_resolution.7.html"}
+    - {title: "Linux man-pages: pid_namespaces(7) (signals to PID 1)", url: "https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"}
+    - {title: "curl man page (exit codes)", url: "https://curl.se/docs/manpage.html"}
+    - {title: "Kubernetes: Pod lifecycle (termination of pods)", url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"}
+    - {title: "OpenShift 4.21: Creating images, support arbitrary user ids", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/creating-images"}

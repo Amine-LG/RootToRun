@@ -1,0 +1,421 @@
+{
+ "lab": "lesson.o2.quotas-limits",
+ "kind": "lesson",
+ "lab_hash": "6c5c3124d1f86b3d",
+ "recorded_at": "2026-10-16T15:37:48+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o2-quotas-limits",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-shop --admin=developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-shop\n",
+   "stderr": "",
+   "combined": "Created project lab-shop\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-shop namespace.\n",
+   "combined": "No resources found in lab-shop namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create quota compute --hard=pods=3,requests.cpu=500m,requests.memory=256Mi,limits.memory=512Mi -n lab-shop",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourcequota/compute created\n",
+   "stderr": "",
+   "combined": "resourcequota/compute created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait resourcequota/compute -n lab-shop --for=jsonpath='{.status.hard.pods}'=3 --timeout=60s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourcequota/compute condition met\n",
+   "stderr": "",
+   "combined": "resourcequota/compute condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe quota compute -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       lab-shop\nResource         Used  Hard\n--------         ----  ----\nlimits.memory    0     512Mi\npods             0     3\nrequests.cpu     0     500m\nrequests.memory  0     256Mi\n",
+   "stderr": "",
+   "combined": "Name:            compute\nNamespace:       lab-shop\nResource         Used  Hard\n--------         ----  ----\nlimits.memory    0     512Mi\npods             0     3\nrequests.cpu     0     500m\nrequests.memory  0     256Mi\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment web --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n lab-shop -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=60s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web condition met\n",
+   "stderr": "",
+   "combined": "deployment.apps/web condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy web -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    0/1     0            0           1s\n",
+   "stderr": "",
+   "combined": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    0/1     0            0           1s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events -n lab-shop --field-selector reason=FailedCreate",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON         OBJECT                      MESSAGE\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-d9pdz\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-dhx2m\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-6vc9t\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-8qwdb\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-6ln2n\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-hh2s6\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n0s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-7f5q9\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON         OBJECT                      MESSAGE\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-d9pdz\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-dhx2m\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-6vc9t\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-8qwdb\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-6ln2n\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n1s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-hh2s6\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n0s          Warning   FailedCreate   replicaset/web-779d6bb6cb   Error creating: pods \"web-779d6bb6cb-7f5q9\" is forbidden: failed quota: compute: must specify limits.memory for: ubi-minimal; requests.cpu for: ubi-minimal; requests.memory for: ubi-minimal\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f limits.yaml -n lab-shop",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "limitrange/defaults created\n",
+   "stderr": "",
+   "combined": "limitrange/defaults created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe limitrange defaults -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:       defaults\nNamespace:  lab-shop\nType        Resource  Min  Max    Default Request  Default Limit  Max Limit/Request Ratio\n----        --------  ---  ---    ---------------  -------------  -----------------------\nContainer   memory    -    256Mi  32Mi             64Mi           -\nContainer   cpu       -    -      50m              -              -\n",
+   "stderr": "",
+   "combined": "Name:       defaults\nNamespace:  lab-shop\nType        Resource  Min  Max    Default Request  Default Limit  Max Limit/Request Ratio\n----        --------  ---  ---    ---------------  -------------  -----------------------\nContainer   memory    -    256Mi  32Mi             64Mi           -\nContainer   cpu       -    -      50m              -              -\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/web -n lab-shop --timeout=300s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l app=web -n lab-shop -o jsonpath='{.items[0].spec.containers[0].resources}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"limits\":{\"memory\":\"64Mi\"},\"requests\":{\"cpu\":\"50m\",\"memory\":\"32Mi\"}}\n",
+   "stderr": "",
+   "combined": "{\"limits\":{\"memory\":\"64Mi\"},\"requests\":{\"cpu\":\"50m\",\"memory\":\"32Mi\"}}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy web -n lab-shop -o jsonpath='{.spec.template.spec.containers[0].resources}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{}\n",
+   "stderr": "",
+   "combined": "{}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe quota compute -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       lab-shop\nResource         Used  Hard\n--------         ----  ----\nlimits.memory    64Mi  512Mi\npods             1     3\nrequests.cpu     50m   500m\nrequests.memory  32Mi  256Mi\n",
+   "stderr": "",
+   "combined": "Name:            compute\nNamespace:       lab-shop\nResource         Used  Hard\n--------         ----  ----\nlimits.memory    64Mi  512Mi\npods             1     3\nrequests.cpu     50m   500m\nrequests.memory  32Mi  256Mi\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f big.yaml -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): error when creating \"big.yaml\": pods \"big\" is forbidden: maximum memory usage per Container is 256Mi, but limit is 1Gi\n",
+   "combined": "Error from server (Forbidden): error when creating \"big.yaml\": pods \"big\" is forbidden: maximum memory usage per Container is 256Mi, but limit is 1Gi\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deploy/web --replicas=5 -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web scaled\n",
+   "stderr": "",
+   "combined": "deployment.apps/web scaled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait deploy/web -n lab-shop --for=condition=ReplicaFailure --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web condition met\n",
+   "stderr": "",
+   "combined": "deployment.apps/web condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy web -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    1/5     3            1           6s\n",
+   "stderr": "",
+   "combined": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    1/5     3            1           6s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe quota compute -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       lab-shop\nResource         Used   Hard\n--------         ----   ----\nlimits.memory    192Mi  512Mi\npods             3      3\nrequests.cpu     150m   500m\nrequests.memory  96Mi   256Mi\n",
+   "stderr": "",
+   "combined": "Name:            compute\nNamespace:       lab-shop\nResource         Used   Hard\n--------         ----   ----\nlimits.memory    192Mi  512Mi\npods             3      3\nrequests.cpu     150m   500m\nrequests.memory  96Mi   256Mi\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deploy web -n lab-shop -o jsonpath='{.status.conditions[?(@.type==\"ReplicaFailure\")].message}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pods \"web-779d6bb6cb-gr5j8\" is forbidden: exceeded quota: compute, requested: pods=1, used: pods=3, limited: pods=3\n",
+   "stderr": "",
+   "combined": "pods \"web-779d6bb6cb-gr5j8\" is forbidden: exceeded quota: compute, requested: pods=1, used: pods=3, limited: pods=3\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): resourcequotas \"compute\" is forbidden: User \"developer\" cannot patch resource \"resourcequotas\" in API group \"\" in the namespace \"lab-shop\"\n",
+   "combined": "Error from server (Forbidden): resourcequotas \"compute\" is forbidden: User \"developer\" cannot patch resource \"resourcequotas\" in API group \"\" in the namespace \"lab-shop\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete quota compute -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): resourcequotas \"compute\" is forbidden: User \"developer\" cannot delete resource \"resourcequotas\" in API group \"\" in the namespace \"lab-shop\"\n",
+   "combined": "Error from server (Forbidden): resourcequotas \"compute\" is forbidden: User \"developer\" cannot delete resource \"resourcequotas\" in API group \"\" in the namespace \"lab-shop\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i update limitranges -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "combined": "no\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch quota compute -n lab-shop -p '{\"spec\":{\"hard\":{\"pods\":\"6\"}}}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "resourcequota/compute patched\n",
+   "stderr": "",
+   "combined": "resourcequota/compute patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc rollout status deploy/web -n lab-shop --timeout=300s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 3 out of 5 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 3 out of 5 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 3 of 5 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 4 of 5 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "Waiting for deployment \"web\" rollout to finish: 3 out of 5 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 3 out of 5 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 3 of 5 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 4 of 5 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe quota compute -n lab-shop",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       lab-shop\nResource         Used   Hard\n--------         ----   ----\nlimits.memory    320Mi  512Mi\npods             5      6\nrequests.cpu     250m   500m\nrequests.memory  160Mi  256Mi\n",
+   "stderr": "",
+   "combined": "Name:            compute\nNamespace:       lab-shop\nResource         Used   Hard\n--------         ----   ----\nlimits.memory    320Mi  512Mi\npods             5      6\nrequests.cpu     250m   500m\nrequests.memory  160Mi  256Mi\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-shop",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-shop\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-shop\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 71,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-SELF-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete project lab-shop --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "found=$(oc get namespace lab-shop --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get namespace lab-shop -o name --ignore-not-found",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterresourcequotas -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'",
+    "same": true
+   }
+  ]
+ }
+}

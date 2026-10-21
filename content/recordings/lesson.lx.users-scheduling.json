@@ -1,0 +1,121 @@
+{
+ "lab": "lesson.lx.users-scheduling",
+ "kind": "lesson",
+ "lab_hash": "cedbdfede73afc8f",
+ "recorded_at": "2026-10-17T16:51:51+00:00",
+ "cluster": {},
+ "host": {},
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "getent passwd root; getent group wheel",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "root:x:0:0:root:/root:/bin/bash\nwheel:x:10:learner\n",
+   "stderr": "",
+   "combined": "root:x:0:0:root:/root:/bin/bash\nwheel:x:10:learner\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "id",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "uid=1000(learner) gid=1000(learner) groups=1000(learner),10(wheel) context=system_u:system_r:cloud_init_t:s0\n",
+   "stderr": "",
+   "combined": "uid=1000(learner) gid=1000(learner) groups=1000(learner),10(wheel) context=system_u:system_r:cloud_init_t:s0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat rule-ok; visudo -cf rule-ok; cat rule-bad; visudo -cf rule-bad",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "alice ALL=(root) /usr/bin/systemctl restart httpd\nrule-ok: parsed OK\nalice ALL=(root) /usr/bin/systemctl restart httpd,\n",
+   "stderr": "rule-bad:1:51: syntax error\nalice ALL=(root) /usr/bin/systemctl restart httpd,\n                                                  ^\n",
+   "combined": "alice ALL=(root) /usr/bin/systemctl restart httpd\nrule-ok: parsed OK\nalice ALL=(root) /usr/bin/systemctl restart httpd,\nrule-bad:1:51: syntax error\nalice ALL=(root) /usr/bin/systemctl restart httpd,\n                                                  ^\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemd-analyze calendar --iterations=2 'Mon..Fri *-*-* 02:30:00 Europe/Paris'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Normalized form: Mon..Fri *-*-* 02:30:00 Europe/Paris\n    Next elapse: Mon 2026-10-19 00:30:00 UTC\n       From now: 1 day 7h left\n       Iter. #2: Tue 2026-10-20 00:30:00 UTC\n       From now: 2 days left\n",
+   "stderr": "",
+   "combined": "Normalized form: Mon..Fri *-*-* 02:30:00 Europe/Paris\n    Next elapse: Mon 2026-10-19 00:30:00 UTC\n       From now: 1 day 7h left\n       Iter. #2: Tue 2026-10-20 00:30:00 UTC\n       From now: 2 days left\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "cat academy-report.timer && systemd-analyze verify --user ./academy-report.service ./academy-report.timer && echo \"units OK\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "[Unit]\nDescription=Run academy-report on weekday nights\n\n[Timer]\nOnCalendar=Mon..Fri *-*-* 02:30:00 Europe/Paris\nRandomizedDelaySec=10min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\nunits OK\n",
+   "stderr": "",
+   "combined": "[Unit]\nDescription=Run academy-report on weekday nights\n\n[Timer]\nOnCalendar=Mon..Fri *-*-* 02:30:00 Europe/Paris\nRandomizedDelaySec=10min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\nunits OK\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemd-run --user --unit=academy-report-demo --on-calendar='Mon..Fri *-*-* 02:30:00 Europe/Paris' /usr/bin/echo 'the report would run here' 2>&1; systemctl --user --no-pager list-timers academy-report-demo.timer",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Running timer as unit: academy-report-demo.timer\nWill run service as unit: academy-report-demo.service\nNEXT                        LEFT          LAST PASSED UNIT                      ACTIVATES\nMon 2026-10-19 00:30:00 UTC 1 day 7h left -    -      academy-report-demo.timer academy-report-demo.service\n\n1 timers listed.\nPass --all to see loaded but inactive timers, too.\n",
+   "stderr": "",
+   "combined": "Running timer as unit: academy-report-demo.timer\nWill run service as unit: academy-report-demo.service\nNEXT                        LEFT          LAST PASSED UNIT                      ACTIVATES\nMon 2026-10-19 00:30:00 UTC 1 day 7h left -    -      academy-report-demo.timer academy-report-demo.service\n\n1 timers listed.\nPass --all to see loaded but inactive timers, too.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemd-run --user --unit=academy-lx3-tick --on-active=2s --timer-property=AccuracySec=1s --same-dir /bin/sh -c 'echo \"tick from a transient timer\" > tick.txt' 2>&1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Running timer as unit: academy-lx3-tick.timer\nWill run service as unit: academy-lx3-tick.service\n",
+   "stderr": "",
+   "combined": "Running timer as unit: academy-lx3-tick.timer\nWill run service as unit: academy-lx3-tick.service\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 4; cat tick.txt; journalctl --user-unit academy-lx3-tick --since -1min --no-pager -o cat",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "tick from a transient timer\nStarted /bin/sh -c echo \"tick from a transient timer\" > tick.txt.\n",
+   "stderr": "",
+   "combined": "tick from a transient timer\nStarted /bin/sh -c echo \"tick from a transient timer\" > tick.txt.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "systemctl --user stop academy-lx3-tick.timer academy-report-demo.timer 2> /dev/null; systemctl --user is-active academy-lx3-tick.timer academy-lx3-tick.service academy-report-demo.timer || true",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "inactive\ninactive\ninactive\n",
+   "stderr": "",
+   "combined": "inactive\ninactive\ninactive\n",
+   "ok": true
+  }
+ ],
+ "seconds": 10,
+ "ok": true,
+ "problems": []
+}

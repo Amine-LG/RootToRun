@@ -1,0 +1,323 @@
+{
+ "lab": "lesson.p.cluster-partitioning",
+ "kind": "lesson",
+ "lab_hash": "726d3a94acffd099",
+ "recorded_at": "2026-10-16T18:47:33+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-p-cluster-partitioning",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get nodes",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get mcp",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     CONFIG                                             UPDATED   UPDATING   DEGRADED   MACHINECOUNT   READYMACHINECOUNT   UPDATEDMACHINECOUNT   DEGRADEDMACHINECOUNT   AGE\nmaster   rendered-master-4cb0d9ebf6bb3e2d62f602c810aa48aa   True      False      False      1              1                   1                     0                      200d\nworker   rendered-worker-3829a0ed06b767373ef25342f9ccce02   True      False      False      0              0                   0                     0                      200d\n",
+   "stderr": "",
+   "combined": "NAME     CONFIG                                             UPDATED   UPDATING   DEGRADED   MACHINECOUNT   READYMACHINECOUNT   UPDATEDMACHINECOUNT   DEGRADEDMACHINECOUNT   AGE\nmaster   rendered-master-4cb0d9ebf6bb3e2d62f602c810aa48aa   True      False      False      1              1                   1                     0                      200d\nworker   rendered-worker-3829a0ed06b767373ef25342f9ccce02   True      False      False      0              0                   0                     0                      200d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-payments --node-selector='lab-pool=payments'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-payments\n",
+   "stderr": "",
+   "combined": "Created project lab-payments\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get namespace lab-payments -o jsonpath='{.metadata.annotations.openshift\\.io/node-selector}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "lab-pool=payments\n",
+   "stderr": "",
+   "combined": "lab-pool=payments\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-role-to-user edit developer -n lab-payments",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/edit added: \"developer\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/edit added: \"developer\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run ledger -n lab-payments --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --image-pull-policy=IfNotPresent --restart=Never -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/ledger created\n",
+   "stderr": "",
+   "combined": "pod/ledger created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pod ledger -n lab-payments -o jsonpath='{.spec.nodeSelector}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"lab-pool\":\"payments\"}\n",
+   "stderr": "",
+   "combined": "{\"lab-pool\":\"payments\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/ledger -n lab-payments --for=condition=PodScheduled=false --timeout=60s && oc get events -n lab-payments --field-selector reason=FailedScheduling",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/ledger condition met\nLAST SEEN   TYPE      REASON             OBJECT       MESSAGE\n0s          Warning   FailedScheduling   pod/ledger   0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "pod/ledger condition met\nLAST SEEN   TYPE      REASON             OBJECT       MESSAGE\n0s          Warning   FailedScheduling   pod/ledger   0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run rogue -n lab-payments --image=registry.access.redhat.com/ubi9/ubi-minimal:latest --image-pull-policy=IfNotPresent --restart=Never --overrides='{\"apiVersion\":\"v1\",\"spec\":{\"nodeSelector\":{\"lab-pool\":\"general\"}}}' -- sleep infinity",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): pods \"rogue\" is forbidden: pod node label selector conflicts with its project node label selector\n",
+   "combined": "Error from server (Forbidden): pods \"rogue\" is forbidden: pod node label selector conflicts with its project node label selector\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc annotate namespace lab-payments openshift.io/node-selector-",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): namespaces \"lab-payments\" is forbidden: User \"developer\" cannot patch resource \"namespaces\" in API group \"\" in the namespace \"lab-payments\"\n",
+   "combined": "Error from server (Forbidden): namespaces \"lab-payments\" is forbidden: User \"developer\" cannot patch resource \"namespaces\" in API group \"\" in the namespace \"lab-payments\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label node crc lab-pool=payments",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc labeled\n",
+   "stderr": "",
+   "combined": "node/crc labeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/ledger -n lab-payments --for=condition=Ready --timeout=120s && oc get pod ledger -n lab-payments -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/ledger condition met\nNAME     READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nledger   1/1     Running   0          3s    10.217.0.237   crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "pod/ledger condition met\nNAME     READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nledger   1/1     Running   0          3s    10.217.0.237   crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label node crc lab-pool-",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc unlabeled\n",
+   "stderr": "",
+   "combined": "node/crc unlabeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-payments",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-payments\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-payments\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get scheduler cluster -o yaml | sed -n '/^spec:/,$p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "spec:\n  mastersSchedulable: true\n  policy:\n    name: \"\"\nstatus: {}\n",
+   "stderr": "",
+   "combined": "spec:\n  mastersSchedulable: true\n  policy:\n    name: \"\"\nstatus: {}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get namespace openshift-dns -o yaml | grep node-selector",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "    openshift.io/node-selector: \"\"\n",
+   "stderr": "",
+   "combined": "    openshift.io/node-selector: \"\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get ingresscontroller default -n openshift-ingress-operator -o yaml | sed -n '/^spec:/,/^status:/p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "spec:\n  clientTLS:\n    clientCA:\n      name: \"\"\n    clientCertificatePolicy: \"\"\n  closedClientConnectionPolicy: Continue\n  httpCompression: {}\n  httpEmptyRequestsPolicy: Respond\n  httpErrorCodePages:\n    name: \"\"\n  idleConnectionTerminationPolicy: Immediate\n  replicas: 1\n  tuningOptions:\n    reloadInterval: 0s\n  unsupportedConfigOverrides: null\nstatus:\n",
+   "stderr": "",
+   "combined": "spec:\n  clientTLS:\n    clientCA:\n      name: \"\"\n    clientCertificatePolicy: \"\"\n  closedClientConnectionPolicy: Continue\n  httpCompression: {}\n  httpEmptyRequestsPolicy: Respond\n  httpErrorCodePages:\n    name: \"\"\n  idleConnectionTerminationPolicy: Immediate\n  replicas: 1\n  tuningOptions:\n    reloadInterval: 0s\n  unsupportedConfigOverrides: null\nstatus:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get deployment router-default -n openshift-ingress -o jsonpath='{.spec.template.spec.nodeSelector}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"kubernetes.io/os\":\"linux\",\"node-role.kubernetes.io/master\":\"\"}\n",
+   "stderr": "",
+   "combined": "{\"kubernetes.io/os\":\"linux\",\"node-role.kubernetes.io/master\":\"\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get mcp worker -o jsonpath='{.spec.nodeSelector}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"matchLabels\":{\"node-role.kubernetes.io/worker\":\"\"}}\n",
+   "stderr": "",
+   "combined": "{\"matchLabels\":{\"node-role.kubernetes.io/worker\":\"\"}}\n",
+   "ok": true
+  }
+ ],
+ "seconds": 64,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NODE-04",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete project lab-payments --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "labels=$(oc get node crc -o jsonpath='{.metadata.labels}') || exit 1\nif grep -q '\"lab-pool\"' <<<\"$labels\"; then oc label node crc lab-pool-; fi",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready=True --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "found=$(oc get namespace lab-payments --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "labels=$(oc get node crc -o jsonpath='{.metadata.labels}') || exit 1\n! grep -q '\"lab-pool\"' <<<\"$labels\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait co --all --for=condition=Degraded=False --timeout=120s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.labels}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get namespace lab-payments -o name --ignore-not-found",
+    "same": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,109 @@
+id: inc.rbac-denied
+kind: incident
+title: "403 Forbidden from the API"
+summary: "An in-cluster reporting job gets 403 when it lists pods, although a RoleBinding was created for it."
+module: b2-authn-authz
+minutes: 20
+level: 2
+supports: "Recorded on OpenShift 4.21.8; the workload calls the Kubernetes API with its projected ServiceAccount token."
+concepts: [sec.rbac, sec.serviceaccounts]
+prerequisites: [f.rbac]
+namespace: academy-inc-rbac
+objective: |
+  Read an RBAC denial, find why an existing binding does not apply, and grant exactly what is needed.
+background: |
+  **Where everything comes from.** The project holds the ServiceAccount `reporter`, the `reporter` Deployment, which
+  runs as that ServiceAccount a shell loop in the UBI 9 minimal image calling the Kubernetes API every 10 seconds with
+  the token mounted into the pod, and the RoleBinding the ticket mentions. The app creates the project
+  `academy-inc-rbac` as your learner identity when you start the incident, with everything listed here in the state
+  the symptom describes; how it got into that state is part of the investigation and is shown in the debrief. The
+  images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login. Clean up deletes the
+  project. In the browser you replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The `reporter` deployment lists pods through the API every few seconds. Its logs show HTTP 403. The ticket says
+  "RoleBinding already created, still broken".
+setup:
+  - |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: reporter}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: reporter, labels: {app: reporter}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: reporter}}
+      template:
+        metadata: {labels: {app: reporter}}
+        spec:
+          serviceAccountName: reporter
+          containers:
+          - name: reporter
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            env:
+            - name: NS
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            command:
+            - /bin/sh
+            - -c
+            - |
+              SA=/var/run/secrets/kubernetes.io/serviceaccount
+              while true; do
+                code=$(curl -s -o /tmp/body -w '%{http_code}' --cacert $SA/ca.crt \
+                  -H "Authorization: Bearer $(cat $SA/token)" \
+                  https://kubernetes.default.svc/api/v1/namespaces/$NS/pods)
+                echo "$(date -u +%H:%M:%S) list pods -> HTTP $code"
+                [ "$code" = 200 ] || sed -n 's/^ *"message": "\(.*\)",$/\1/p' /tmp/body | sed 's/\\"/"/g'
+                sleep 10
+              done
+            resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
+break:
+  - |
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: reporter-view}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+    subjects:
+    - {kind: ServiceAccount, name: reportr, namespace: academy-inc-rbac}
+investigate:
+  - {cmd: "oc logs deploy/reporter --tail=4 -n academy-inc-rbac", meaning: "list pods -> HTTP 403 every 10 s, each followed by the API's message: pods is forbidden: User \"system:serviceaccount:academy-inc-rbac:reporter\" cannot list resource \"pods\" in API group \"\" in the namespace \"academy-inc-rbac\". It names the denied identity, the verb, the resource and its API group (\"\" is the core group), and the namespace"}
+  - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-inc-rbac:reporter -n academy-inc-rbac", meaning: "no (exit code 1): the ServiceAccount the pod runs as really is denied, so this is RBAC, not a token or network problem", expect: fail}
+  - {cmd: "oc get rolebinding reporter-view -n academy-inc-rbac -o wide", meaning: "the binding exists (ClusterRole/view)… read its subject: SERVICEACCOUNTS academy-inc-rbac/reportr"}
+  - {cmd: "oc get serviceaccounts -n academy-inc-rbac", meaning: "reporter exists; reportr does not (default is created by Kubernetes in every namespace; builder and deployer are added by OpenShift)"}
+hints:
+  - "A 403 from the API names the exact identity that was denied (`oc auth can-i --as=system:serviceaccount:<ns>:<name>` asks the same question). Compare that identity with the binding's subject, letter by letter."
+  - "RBAC matches subjects by name: a binding to a ServiceAccount that does not exist grants nothing (yet)."
+  - "Delete the binding whose subject is misspelt, then give the right ServiceAccount the read-only role it needs in this project. Check with `oc auth can-i` as that ServiceAccount before you look at the workload."
+fix:
+  - {cmd: "oc delete rolebinding reporter-view -n academy-inc-rbac", meaning: "remove the binding to a non-existent subject"}
+  - {cmd: "oc policy add-role-to-user view -z reporter -n academy-inc-rbac", meaning: "clusterrole.rbac.authorization.k8s.io/view added: \"reporter\": a RoleBinding to view for the real ServiceAccount, built from -z"}
+  - {cmd: "oc auth can-i list pods --as=system:serviceaccount:academy-inc-rbac:reporter -n academy-inc-rbac", meaning: "yes: the next call of the workload, at most 10 s later, returns 200"}
+fix_wait: [can-list, api-200, no-typo]
+checks:
+  - {id: can-list, title: "reporter may list pods", type: can_i, as: reporter, verb: list, resource: pods, expect: "yes", expect_text: "yes"}
+  - {id: api-200, title: "The workload's own API call returns 200", type: exec, from: app=reporter, command: ["/bin/sh", "-c", "curl -s -o /dev/null -w '%{http_code}' --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt -H \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" https://kubernetes.default.svc/api/v1/namespaces/academy-inc-rbac/pods"], expect_output: "^200$", expect_text: "HTTP 200"}
+  - {id: no-typo, title: "No binding names the non-existent reportr", type: count, kind: rolebindings, op: eq, value: 0, where: {path: "subjects[0].name", op: eq, value: reportr}, expect_text: "0 bindings"}
+root_cause: |
+  The RoleBinding named the subject `reportr` (a typo). RBAC does not check that subjects exist, so the binding was
+  accepted and granted nothing to `reporter`. The API server denied each request with a 403 whose message names the
+  denied identity, `system:serviceaccount:academy-inc-rbac:reporter`; `oc auth can-i --as` reproduces the same
+  decision without waiting for the workload. Left in place, the misspelt binding is also a dormant grant: anyone who
+  later creates a ServiceAccount called `reportr` would receive view.
+alternatives: |
+  - Create bindings with `oc policy add-role-to-user ... -z <sa>` or `oc create rolebinding --serviceaccount=ns:name`,
+    which build the subject from the command line, and verify with `oc auth can-i --as`.
+  - Grant a narrower custom Role (`get`, `list` on pods only) if view is broader than needed.
+sre: |
+  Every access change should end with a `can-i` check for the intended subject, and periodically, a scan for bindings
+  whose subjects do not exist (the lab "Access that can come back" shows why).
+questions:
+  - q: "Why did the API accept a RoleBinding for a ServiceAccount that does not exist?"
+    a: "RBAC subjects are names; the API does not validate that they exist."
+  - q: "Why remove the misspelt binding instead of just adding the correct one?"
+    a: "It is a dormant grant that would activate if someone created a ServiceAccount with that name."
+references:
+  - {title: "Kubernetes: Using RBAC authorization", url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"}
+  - {title: "Kubernetes: Accessing the API from a pod", url: "https://kubernetes.io/docs/tasks/run-application/access-api-from-pod/"}
+  - {title: "OpenShift 4.21: Using RBAC to define and apply permissions", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/using-rbac"}
+symptom_checks: [api-200]  # monitoring-level evidence shown before the answer

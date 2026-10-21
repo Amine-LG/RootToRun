@@ -1,0 +1,272 @@
+{
+ "lab": "lesson.o2.groups",
+ "kind": "lesson",
+ "lab_hash": "f141de92a5b317f6",
+ "recorded_at": "2026-10-16T15:10:01+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o2-groups",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups new academy-auditors developer",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): groups.user.openshift.io is forbidden: User \"developer\" cannot create resource \"groups\" in API group \"user.openshift.io\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): groups.user.openshift.io is forbidden: User \"developer\" cannot create resource \"groups\" in API group \"user.openshift.io\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups new academy-auditors developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io/academy-auditors created\n",
+   "stderr": "",
+   "combined": "group.user.openshift.io/academy-auditors created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get groups",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME               USERS\nacademy-auditors   developer\n",
+   "stderr": "",
+   "combined": "NAME               USERS\nacademy-auditors   developer\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy add-role-to-group view academy-auditors",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/view added: \"academy-auditors\"\n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/view added: \"academy-auditors\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get rolebindings -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                    ROLE                               AGE   USERS       GROUPS                                            SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  2s    developer                                                     \nsystem:deployers        ClusterRole/system:deployer        2s                                                                  academy-lesson-o2-groups/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2s                                                                  academy-lesson-o2-groups/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2s                system:serviceaccounts:academy-lesson-o2-groups   \nview                    ClusterRole/view                   0s                academy-auditors                                  \n",
+   "stderr": "",
+   "combined": "NAME                    ROLE                               AGE   USERS       GROUPS                                            SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  2s    developer                                                     \nsystem:deployers        ClusterRole/system:deployer        2s                                                                  academy-lesson-o2-groups/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2s                                                                  academy-lesson-o2-groups/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2s                system:serviceaccounts:academy-lesson-o2-groups   \nview                    ClusterRole/view                   0s                academy-auditors                                  \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth whoami",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        7b373b37-76ef-4208-b065-5cfbe48c5ba6\nGroups                                     [system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\n",
+   "stderr": "",
+   "combined": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        7b373b37-76ef-4208-b065-5cfbe48c5ba6\nGroups                                     [system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i list pods --as=someone --as-group=academy-auditors",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): users \"someone\" is forbidden: User \"developer\" cannot impersonate resource \"users\" in API group \"\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): users \"someone\" is forbidden: User \"developer\" cannot impersonate resource \"users\" in API group \"\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for v in list delete; do echo -n \"$v pods: \"; oc auth can-i $v pods -n academy-lesson-o2-groups --as=someone --as-group=academy-auditors; done",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "any",
+   "run": null,
+   "code": 1,
+   "stdout": "list pods: yes\ndelete pods: no\n",
+   "stderr": "",
+   "combined": "list pods: yes\ndelete pods: no\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy who-can list pods | sed -n '/^Groups:/,$p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Groups: academy-auditors\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "stderr": "",
+   "combined": "Groups: academy-auditors\n        system:cluster-admins\n        system:cluster-readers\n        system:masters\n        system:multus\n        system:ovn-nodes\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy who-can delete pods | sed -n '/^Groups:/,$p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Groups: system:cluster-admins\n        system:masters\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "stderr": "",
+   "combined": "Groups: system:cluster-admins\n        system:masters\n\nError during evaluation, results may not be complete: clusterrole.rbac.authorization.k8s.io \"crc-hostpath-external-health-monitor-controller-runner\" not found\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-audit && oc policy add-role-to-group view academy-auditors -n lab-audit",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-audit\nclusterrole.rbac.authorization.k8s.io/view added: \"academy-auditors\"\n",
+   "stderr": "",
+   "combined": "Created project lab-audit\nclusterrole.rbac.authorization.k8s.io/view added: \"academy-auditors\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "start=$(date +%s); until oc get pods -n lab-audit >/dev/null 2>&1; do [ $(( $(date +%s) - start )) -gt 300 ] && { echo 'still refused after 5 minutes'; exit 1; }; sleep 5; done; echo \"allowed after $(( $(date +%s) - start )) seconds\"; oc get pods -n lab-audit",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "allowed after 5 seconds\n",
+   "stderr": "No resources found in lab-audit namespace.\n",
+   "combined": "allowed after 5 seconds\nNo resources found in lab-audit namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth whoami",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        7b373b37-76ef-4208-b065-5cfbe48c5ba6\nGroups                                     [academy-auditors system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\n",
+   "stderr": "",
+   "combined": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        7b373b37-76ef-4208-b065-5cfbe48c5ba6\nGroups                                     [academy-auditors system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm groups remove-users academy-auditors developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io/academy-auditors removed: \"developer\"\n",
+   "stderr": "",
+   "combined": "group.user.openshift.io/academy-auditors removed: \"developer\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "start=$(date +%s); while oc get pods -n lab-audit >/dev/null 2>&1; do [ $(( $(date +%s) - start )) -gt 300 ] && { echo 'still allowed after 5 minutes'; exit 1; }; sleep 5; done; echo \"refused after $(( $(date +%s) - start )) seconds:\"; oc get pods -n lab-audit || true",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "refused after 125 seconds:\n",
+   "stderr": "Error from server (Forbidden): pods is forbidden: User \"developer\" cannot list resource \"pods\" in API group \"\" in the namespace \"lab-audit\"\n",
+   "combined": "refused after 125 seconds:\nError from server (Forbidden): pods is forbidden: User \"developer\" cannot list resource \"pods\" in API group \"\" in the namespace \"lab-audit\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc policy add-role-to-group edit payment-devs; oc get rolebindings -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/edit added: \"payment-devs\"\nNAME                    ROLE                               AGE     USERS       GROUPS                                            SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  2m14s   developer                                                     \nedit                    ClusterRole/edit                   0s                  payment-devs                                      \nsystem:deployers        ClusterRole/system:deployer        2m14s                                                                 academy-lesson-o2-groups/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2m14s                                                                 academy-lesson-o2-groups/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2m14s               system:serviceaccounts:academy-lesson-o2-groups   \nview                    ClusterRole/view                   2m12s               academy-auditors                                  \n",
+   "stderr": "",
+   "combined": "clusterrole.rbac.authorization.k8s.io/edit added: \"payment-devs\"\nNAME                    ROLE                               AGE     USERS       GROUPS                                            SERVICEACCOUNTS\nadmin                   ClusterRole/admin                  2m14s   developer                                                     \nedit                    ClusterRole/edit                   0s                  payment-devs                                      \nsystem:deployers        ClusterRole/system:deployer        2m14s                                                                 academy-lesson-o2-groups/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2m14s                                                                 academy-lesson-o2-groups/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2m14s               system:serviceaccounts:academy-lesson-o2-groups   \nview                    ClusterRole/view                   2m12s               academy-auditors                                  \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete group academy-auditors && oc get rolebindings -n lab-audit -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "group.user.openshift.io \"academy-auditors\" deleted\nNAME                    ROLE                               AGE     USERS   GROUPS                             SERVICEACCOUNTS\nsystem:deployers        ClusterRole/system:deployer        2m11s                                              lab-audit/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2m11s                                              lab-audit/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2m11s           system:serviceaccounts:lab-audit   \nview                    ClusterRole/view                   2m11s           academy-auditors                   \n",
+   "stderr": "",
+   "combined": "group.user.openshift.io \"academy-auditors\" deleted\nNAME                    ROLE                               AGE     USERS   GROUPS                             SERVICEACCOUNTS\nsystem:deployers        ClusterRole/system:deployer        2m11s                                              lab-audit/deployer\nsystem:image-builders   ClusterRole/system:image-builder   2m11s                                              lab-audit/builder\nsystem:image-pullers    ClusterRole/system:image-puller    2m11s           system:serviceaccounts:lab-audit   \nview                    ClusterRole/view                   2m11s           academy-auditors                   \n",
+   "ok": true
+  }
+ ],
+ "seconds": 143,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-AUTH-03",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete group academy-auditors --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project lab-audit --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [],
+  "snapshot": [
+   {
+    "cmd": "oc get groups -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get project lab-audit -o name --ignore-not-found",
+    "same": true
+   }
+  ]
+ }
+}

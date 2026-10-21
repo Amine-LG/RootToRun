@@ -1,0 +1,140 @@
+{
+ "lab": "inc.wrong-targetport",
+ "kind": "incident",
+ "lab_hash": "9a303c4b52e46fd6",
+ "recorded_at": "2026-10-14T17:31:07+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get pods,svc -n academy-inc-port",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                       READY   STATUS    RESTARTS   AGE\npod/web-7ddfddcc56-28djw   1/1     Running   0          32s\n\nNAME          TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE\nservice/web   ClusterIP   10.217.5.65   <none>        8080/TCP   32s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-port",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        ADDRESSTYPE   PORTS   ENDPOINTS      AGE\nweb-fnqf2   IPv4          80      10.217.1.131   33s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/web -n academy-inc-port -- curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8080/healthz",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "200\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc exec deploy/web -n academy-inc-port -- curl -sS -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 7,
+   "stdout": "",
+   "stderr": "curl: (7) Failed to connect to web port 8080: Connection refused\ncommand terminated with exit code 7\n",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc get svc web -n academy-inc-port -o jsonpath='{.spec.ports[0].port} -> {.spec.ports[0].targetPort}{\"\\n\"}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "8080 -> 80\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc patch svc web -n academy-inc-port --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/targetPort\",\"value\":8080}]'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web patched\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc exec deploy/web -n academy-inc-port -- curl -sS -m 3 http://web:8080/",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "<h1>payments portal</h1>",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "targetport",
+    "title": "Service web forwards to port 8080",
+    "expect": "8080",
+    "status": "fail",
+    "observed": "spec.ports[0].targetPort = 80"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-port.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791999101.8352225
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "targetport",
+    "title": "Service web forwards to port 8080",
+    "expect": "8080",
+    "status": "pass",
+    "observed": "spec.ports[0].targetPort = 8080"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-port.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791999111.4588084
+ },
+ "seconds": 44,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-port: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

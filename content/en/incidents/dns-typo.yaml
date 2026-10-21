@@ -1,0 +1,127 @@
+id: inc.dns-typo
+kind: incident
+title: "Could not resolve host"
+summary: "A client service fails every call with a DNS error after a configuration change."
+module: a5-network
+minutes: 15
+level: 1
+supports: "Recorded on OpenShift 4.21.8 (CoreDNS in openshift-dns, cluster domain cluster.local)."
+concepts: [net.dns, net.services]
+prerequisites: [d.services-dns]
+namespace: academy-inc-dns
+objective: |
+  Find out from inside the client pod why every call fails, understand how a short name is resolved there, and repair
+  the client's configuration.
+background: |
+  **Where everything comes from.** The project holds the portal (a Deployment, a Service and the ConfigMap with its
+  page, on Red Hat's UBI 9 Apache httpd image) and the `checkout` client: a Deployment running a small shell loop in
+  the UBI 9 minimal image that calls the address in its `TARGET` variable every 5 seconds and prints the result to its
+  log. The app creates the project `academy-inc-dns` as your learner identity when you start the incident, with
+  everything listed here in the state the symptom describes; how it got into that state is part of the investigation
+  and is shown in the debrief. The images come from Red Hat's public registry `registry.access.redhat.com`, which
+  needs no login. Clean up deletes the project. In the browser you replay what this produced on OpenShift Local
+  4.21.8; nothing runs.
+symptom: |
+  The `checkout` client calls the portal at the address in its `TARGET` variable. Since the variable was edited,
+  every call fails with "Could not resolve host". The portal itself is fine. Team convention: a client calls a Service
+  of its own project by the Service's short name, in the form `http://<service>:8080/`.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: checkout, labels: {app: checkout}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: checkout}}
+      template:
+        metadata: {labels: {app: checkout}}
+        spec:
+          containers:
+          - name: client
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            env: [{name: TARGET, value: "http://payments-web:8080/"}]
+            command:
+            - /bin/sh
+            - -c
+            - |
+              while true; do
+                echo "$(date -u +%H:%M:%S) GET $TARGET"
+                curl -sS -m 3 -o /dev/null -w 'HTTP %{http_code}\n' "$TARGET" 2>&1
+                sleep 5
+              done
+            resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
+investigate:
+  - {cmd: "oc logs deploy/checkout --tail=4 -n academy-inc-dns", meaning: "GET http://payments-web:8080/, then curl: (6) Could not resolve host: payments-web and HTTP 000 (no response at all)"}
+  - {cmd: "oc get svc -n academy-inc-dns", meaning: "the only Service is called web (ClusterIP, 8080/TCP); there is no payments-web"}
+  - {cmd: "oc exec deploy/checkout -n academy-inc-dns -- cat /etc/resolv.conf", meaning: "search academy-inc-dns.svc.cluster.local svc.cluster.local cluster.local (plus the node's own domain, crc.testing here), the cluster DNS Service as nameserver, options ndots:5"}
+  - {cmd: "oc exec deploy/checkout -n academy-inc-dns -- getent hosts payments-web", meaning: "no output, exit code 2 (getent: name not found): no Service has this name in any search domain", expect: fail}
+  - {cmd: "oc exec deploy/checkout -n academy-inc-dns -- getent hosts web", meaning: "10.217.4.57 web.academy-inc-dns.svc.cluster.local: the short name was completed with the first search domain and returns the Service's ClusterIP"}
+hints:
+  - "Which name does the client try to resolve, and which Services exist in the namespace?"
+  - "Inside a pod, short names are completed with the search path in /etc/resolv.conf: web → web.<namespace>.svc.cluster.local."
+  - "Point TARGET at the Service's real name and port (`oc get svc` lists them). Changing the variable rolls out new pods; then read the client's log again."
+fix:
+  - {cmd: "oc set env deploy/checkout -n academy-inc-dns TARGET=http://web:8080/", meaning: "point at the Service that exists"}
+  - {cmd: "oc rollout status deploy/checkout -n academy-inc-dns --timeout=120s", meaning: "a new client pod with the corrected variable", timeout: 140}
+fix_wait: [target, client-ready, resolves]
+checks:
+  - {id: target, title: "TARGET points at the web Service", type: field, kind: deployment, name: checkout, path: "spec.template.spec.containers[0].env[?name=TARGET].value", op: eq, value: "http://web:8080/", expect_text: "http://web:8080/"}
+  - {id: client-ready, title: "checkout is available", type: deployment_ready, name: checkout, expect_text: "1/1"}
+  - {id: resolves, title: "The client reaches the portal through its TARGET", type: exec, from: app=checkout, command: ["/bin/sh", "-c", "curl -sS -m 3 \"$TARGET\""], expect_output: "payments portal", expect_text: "the portal page"}
+root_cause: |
+  `TARGET` named `payments-web`, but the Service is `web`. Cluster DNS only answers for names that exist: each Service
+  gets `<service>.<namespace>.svc.cluster.local`. With `ndots:5`, the resolver tried the short name with every search
+  domain and then on its own, got no answer each time, so curl failed with exit code 6 before any connection was
+  attempted. The client pod itself stayed Running and Ready: nothing in its status shows the problem, only its logs.
+alternatives: |
+  - Use the fully qualified name (`web.academy-inc-dns.svc.cluster.local`) for cross-namespace calls. Note that with
+    `ndots:5` even this name (4 dots) is first tried with each search suffix; only a trailing dot
+    (`web.academy-inc-dns.svc.cluster.local.`) skips the search path and its extra lookups. Within one project, as
+    here, the team uses the short name, and that exact value is what this incident's `target` check compares.
+  - Store service addresses in a ConfigMap that is reviewed and promoted with the application.
+sre: |
+  Order of checks for "can't reach X": name resolution (getent/nslookup), then the Service and its endpoints, then
+  network policy, then the application. Each layer has its own error: DNS (exit 6), refused (7), timeout (28), HTTP
+  status.
+questions:
+  - q: "Why does `web` resolve inside the pod without the namespace?"
+    a: "The pod's resolv.conf search path appends <namespace>.svc.cluster.local first."
+  - q: "Which curl exit code means DNS failure, which means refused, which means timeout?"
+    a: "6 = could not resolve host, 7 = failed to connect (refused), 28 = operation timed out."
+references:
+  - {title: "Kubernetes: DNS for Services and Pods", url: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"}
+  - {title: "Kubernetes: Pod DNS config (search path, ndots)", url: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config"}
+  - {title: "OpenShift 4.21: DNS Operator", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/networking_operators/dns-operator"}
+  - {title: "Everything curl: exit codes", url: "https://everything.curl.dev/cmdline/exitcode.html"}
+symptom_checks: [client-ready]  # monitoring-level evidence shown before the answer

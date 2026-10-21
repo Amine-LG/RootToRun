@@ -1,0 +1,85 @@
+id: inc.oomkilled
+kind: incident
+title: "OOMKilled at start-up"
+summary: "A worker restarts every few seconds; its last state says OOMKilled, exit code 137."
+module: a2-apps
+minutes: 15
+level: 2
+supports: "Recorded on OpenShift 4.21.8 (cgroup v2: the kernel kills the whole container when it exceeds its memory limit)."
+concepts: [k8s.requests-limits, linux.cgroups, k8s.qos]
+prerequisites: [b.resources-qos]
+namespace: academy-inc-oom
+objective: |
+  Prove that the container is killed for exceeding its memory limit, size the limit from evidence, and verify it.
+background: |
+  **Where everything comes from.** The project holds one Deployment, `worker`, running a short shell script in the UBI
+  9 minimal image: it announces a cache warm-up in its log, performs it, then waits for work. The script is in the
+  Deployment's `command`. The app creates the project `academy-inc-oom` as your learner identity when you start the
+  incident, with everything listed here in the state the symptom describes; how it got into that state is part of the
+  investigation and is shown in the debrief. The images come from Red Hat's public registry
+  `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay what
+  this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  The cache worker was "optimised" by lowering its memory limit to save quota. It now restarts constantly; the logs,
+  when they can be read at all, stop after "warming cache".
+setup: []
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: worker, labels: {app: worker}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: worker}}
+      template:
+        metadata: {labels: {app: worker}}
+        spec:
+          containers:
+          - name: worker
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["/bin/sh", "-c", "echo 'warming cache (about 64 MiB)'; head -c 64m /dev/zero | tail > /dev/null; echo 'cache warm, serving'; exec sleep infinity"]
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 32Mi}}
+investigate:
+  - {cmd: "oc get pods -n academy-inc-oom", meaning: "STATUS alternates between OOMKilled and CrashLoopBackOff while RESTARTS grows (OOMKilled with 2 restarts, 29 s after creation, when recorded)"}
+  - {cmd: "oc get pod <pod> -n academy-inc-oom -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}{\"\\n\"}'", run: "oc get pod {anypod:app=worker} -n academy-inc-oom -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}{\"\\n\"}'", meaning: "OOMKilled exit=137 (128 + SIGKILL 9)"}
+  - {cmd: "oc describe pod <pod> -n academy-inc-oom", run: "oc describe pod {anypod:app=worker} -n academy-inc-oom", meaning: "State: Terminated, Reason: OOMKilled, Exit Code: 137 when recorded (at another moment it reads Waiting, CrashLoopBackOff); Last State: Terminated, Reason: OOMKilled, Exit Code: 137, within about a second of starting; Restart Count: 2; Limits: memory 32Mi. The events show only image pulls, Created, Started and BackOff: no probe failure and no Killing event, because the kernel ended the process, not the kubelet"}
+  - {cmd: "oc logs deploy/worker --previous -n academy-inc-oom", meaning: "when recorded it returned only unable to retrieve container logs for cri-o://...: the runtime no longer had the killed instance's log, which is why the terminated state is the stronger evidence. On other runs it shows the last line before the kill, warming cache (about 64 MiB), and nothing after it: no error, because the process was killed with SIGKILL", expect: any}
+  - {cmd: "oc get deploy worker -n academy-inc-oom -o jsonpath='{.spec.template.spec.containers[0].resources}{\"\\n\"}'", meaning: "{\"limits\":{\"memory\":\"32Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}}: a 32Mi limit for a 64 MiB warm-up"}
+hints:
+  - "Look at the container's last terminated state, not only the logs."
+  - "OOMKilled with exit code 137 means an out-of-memory kill, either at the container's memory limit or because the whole node ran out of memory. Here compare the 64 MiB warm-up with the 32Mi limit; elsewhere also check the node for memory pressure."
+  - "Give the worker a memory limit above what it really needs at start-up, with a request below that limit; the OOMKilled reason says the current limit is too small. Then watch the restarts stop."
+fix:
+  - {cmd: "oc set resources deploy/worker -n academy-inc-oom --requests=memory=96Mi --limits=memory=160Mi", meaning: "room for the 64 MiB warm-up plus the runtime"}
+  - {cmd: "oc rollout status deploy/worker -n academy-inc-oom --timeout=120s", meaning: "the new pod starts", timeout: 140}
+  - {cmd: "oc logs deploy/worker -n academy-inc-oom", meaning: "warming cache (about 64 MiB), then cache warm, serving: the warm-up now completes (if oc finds two pods during the switch-over, it prints a note on stderr and picks one)"}
+fix_wait: [worker-ready, stable]
+checks:
+  - {id: oom-seen, title: "A container was OOMKilled", type: pods, selector: app=worker, last_terminated_reason: OOMKilled, final: false, expect_text: "OOMKilled"}
+  - {id: worker-ready, title: "worker is available", type: deployment_ready, name: worker, expect_text: "1/1"}
+  - {id: stable, title: "The running worker has not restarted", type: pods, selector: app=worker, ready: true, max_restarts: 0, expect_text: "Ready, 0 restarts"}
+root_cause: |
+  The warm-up holds 64 MiB in memory; the limit was 32 MiB. The memory limit becomes the container cgroup's
+  `memory.max`; when the cgroup reaches it and the kernel cannot reclaim enough, the kernel OOM killer kills the
+  container's processes (SIGKILL, exit code 137) and the container is reported as `OOMKilled`. No application error is
+  logged: the process never gets a chance to write one.
+alternatives: |
+  - Reduce the program's memory use (stream instead of loading everything).
+  - Measure first: where the metrics API is available (OpenShift's monitoring stack provides it), `oc adm top pod`
+    or the console's memory graph shows real usage; set the request near steady-state use and the limit above the
+    peak.
+  - A VerticalPodAutoscaler in recommendation-only mode (`updateMode: "Off"`; on OpenShift, installed with the
+    Vertical Pod Autoscaler Operator) suggests values from observed usage.
+sre: |
+  Memory limits are hard (unlike CPU, which is throttled). Watch `container_oom_events_total` and restart counts, keep
+  requests honest so the scheduler places pods correctly, and treat limit reductions as risky changes that need load
+  evidence.
+questions:
+  - q: "Why is exit code 137 a strong clue?"
+    a: "137 = 128 + 9: the process received SIGKILL, which for containers usually means the OOM killer (or a forced kill)."
+  - q: "What happens when a container exceeds its CPU limit instead?"
+    a: "It is throttled, not killed."
+references:
+  - {title: "Kubernetes: Assign memory resources", url: "https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/"}
+  - {title: "Kubernetes: How pods with resource limits are run", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#how-pods-with-resource-limits-are-run"}
+symptom_checks: [worker-ready, stable]  # monitoring-level evidence shown before the answer

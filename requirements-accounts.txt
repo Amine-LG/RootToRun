@@ -1,0 +1,7 @@
+# Optional, and disabled: sign-in with an OpenID Connect provider (ACADEMY_OIDC_* settings) is not part of this
+# release and has never been tested with a real provider. Without these packages accounts stay off.
+-r requirements.txt
+PyJWT==2.15.0
+cryptography==50.0.0
+cffi==2.0.0
+pycparser==3.0

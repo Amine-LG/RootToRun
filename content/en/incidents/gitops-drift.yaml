@@ -1,0 +1,127 @@
+id: inc.gitops-drift
+kind: incident
+title: "Someone changed production by hand"
+summary: "The portal is down after a late-night manual change; the declared state in Git says otherwise."
+module: b1-declarative
+minutes: 20
+level: 2
+supports: "Recorded on OpenShift 4.21.8; `oc diff` performs a server-side dry run and exits 1 when live and desired differ."
+concepts: [gitops.drift, deploy.declarative, change.control]
+prerequisites: [gx.declarative]
+namespace: academy-inc-drift
+files:
+  desired/web.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            env: [{name: PORTAL_MODE, value: live}]
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+objective: |
+  Detect drift between declared and live state, restore the declared state, and prove there is no drift left.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`. The declared state is the file `lab/desired/web.yaml`, which the app writes before you
+  start: it stands for the team's Git repository. The app creates the project `academy-inc-drift` as your learner
+  identity when you start the incident, with everything listed here in the state the symptom describes; how it got
+  into that state is part of the investigation and is shown in the debrief. The images come from Red Hat's public
+  registry `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you replay
+  what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  At 02:00 an engineer "temporarily" switched the portal to maintenance and scaled it down during a database
+  intervention, then went home. The portal is still down in the morning; the database team confirms that their work
+  ended at 03:00. The declared state is in the repository (available to you as `lab/desired/web.yaml`).
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 0
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            env: [{name: PORTAL_MODE, value: maintenance}]
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get deploy,pods -n academy-inc-drift", meaning: "deployment.apps/web 0/0 and no pods at all: nothing serves (the Route answers 503)"}
+  - {cmd: "oc diff -f lab/desired/web.yaml -n academy-inc-drift", meaning: "exit 1 and a unified diff (- live, + declared): replicas 0 -> 2 and PORTAL_MODE maintenance -> live; generation 1 -> 2 only shows that applying would change the spec", expect: fail}
+hints:
+  - "Before changing anything by hand, compare the live object with the declared one."
+  - "`oc diff -f lab/desired/web.yaml` shows every field that drifted, as a unified diff."
+  - "Bring the cluster back to the state declared in the files under lab/desired, then run oc diff again: nothing should differ."
+fix:
+  - {cmd: "oc apply -f lab/desired/web.yaml -n academy-inc-drift", meaning: "converge to the declared state"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-drift --timeout=120s", meaning: "0 of 2, then 1 of 2 updated replicas available, then successfully rolled out", timeout: 140}
+  - {cmd: "oc diff -f lab/desired/web.yaml -n academy-inc-drift", meaning: "exit 0, no output: no drift"}
+fix_wait: [replicas, mode, route-ok]
+checks:
+  - {id: replicas, title: "web runs 2 ready replicas", type: deployment_ready, name: web, replicas: 2, expect_text: "2/2"}
+  - {id: mode, title: "PORTAL_MODE is live again", type: field, kind: deployment, name: web, path: "spec.template.spec.containers[0].env[?name=PORTAL_MODE].value", op: eq, value: live, expect_text: "live"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  A manual change (replicas 0, PORTAL_MODE=maintenance) was never reverted. Nothing reconciled the cluster back to the
+  declared state, so the drift persisted until someone noticed the outage.
+alternatives: |
+  - With OpenShift GitOps (Argo CD), automated sync with `selfHeal: true` reverts live changes shortly after they are
+    made. Automated sync without self-heal only reacts to new commits in Git, but the Application would at least have
+    shown OutOfSync.
+  - Temporary changes during an intervention should go through Git as well (a commit, then a revert commit), so
+    the history explains them.
+sre: |
+  `oc diff` is the manual drift detector; GitOps makes it continuous. In regulated environments, restrict direct write
+  access in production to break-glass accounts whose use is audited, and make "revert manual changes" part of the
+  intervention checklist. Before you revert someone else's manual change, find out why it was made and whether the
+  reason still holds: here the database team had confirmed the end of their work; had it still been running,
+  restoring `live` would have sent users to a database under maintenance.
+questions:
+  - q: "What does exit code 1 from oc diff mean?"
+    a: "The live state differs from the given manifests (0 = no difference, >1 = an error)."
+  - q: "How would GitOps self-heal have changed this incident?"
+    a: "Argo CD compares live objects with Git continuously. With `selfHeal: true` it would have re-applied the declared state shortly after the 02:00 change; without it, the Application would have shown OutOfSync, so the drift would have been visible, and could have raised an alert, before users noticed."
+references:
+  - {title: "Kubernetes: Declarative management (kubectl diff)", url: "https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/"}
+  - {title: "Argo CD: Automated sync and self-heal", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/"}
+  - {title: "kubectl diff reference", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_diff/"}
+symptom_checks: [route-ok]  # monitoring-level evidence shown before the answer

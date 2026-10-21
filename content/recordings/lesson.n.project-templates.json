@@ -1,0 +1,652 @@
+{
+ "lab": "lesson.n.project-templates",
+ "kind": "lesson",
+ "lab_hash": "d48ab6ae853c5a58",
+ "recorded_at": "2026-10-16T15:45:29+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-project-templates",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create projectrequests",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\n",
+   "combined": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\nyes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe clusterrolebinding.rbac self-provisioners",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: true\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind   Name                        Namespace\n  ----   ----                        ---------\n  Group  system:authenticated:oauth  \n",
+   "stderr": "",
+   "combined": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: true\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind   Name                        Namespace\n  ----   ----                        ---------\n  Group  system:authenticated:oauth  \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project.config.openshift.io/cluster -o yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: config.openshift.io/v1\nkind: Project\nmetadata:\n  annotations:\n    include.release.openshift.io/ibm-cloud-managed: \"true\"\n    include.release.openshift.io/self-managed-high-availability: \"true\"\n    release.openshift.io/create-only: \"true\"\n  creationTimestamp: \"2026-03-30T12:10:15Z\"\n  generation: 1\n  name: cluster\n  ownerReferences:\n  - apiVersion: config.openshift.io/v1\n    kind: ClusterVersion\n    name: version\n    uid: 56ab34a8-56ce-44ce-96c6-c0285d095ad1\n  resourceVersion: \"1580\"\n  uid: c2356bda-d031-40a6-b594-fa5d83e42013\nspec: {}\n",
+   "stderr": "",
+   "combined": "apiVersion: config.openshift.io/v1\nkind: Project\nmetadata:\n  annotations:\n    include.release.openshift.io/ibm-cloud-managed: \"true\"\n    include.release.openshift.io/self-managed-high-availability: \"true\"\n    release.openshift.io/create-only: \"true\"\n  creationTimestamp: \"2026-03-30T12:10:15Z\"\n  generation: 1\n  name: cluster\n  ownerReferences:\n  - apiVersion: config.openshift.io/v1\n    kind: ClusterVersion\n    name: version\n    uid: 56ab34a8-56ce-44ce-96c6-c0285d095ad1\n  resourceVersion: \"1580\"\n  uid: c2356bda-d031-40a6-b594-fa5d83e42013\nspec: {}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-before",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Now using project \"lab-before\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "stderr": "",
+   "combined": "Now using project \"lab-before\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-before",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-before namespace.\n",
+   "combined": "No resources found in lab-before namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm create-bootstrap-project-template -o yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: template.openshift.io/v1\nkind: Template\nmetadata:\n  name: project-request\nobjects:\n- apiVersion: project.openshift.io/v1\n  kind: Project\n  metadata:\n    annotations:\n      openshift.io/description: ${PROJECT_DESCRIPTION}\n      openshift.io/display-name: ${PROJECT_DISPLAYNAME}\n      openshift.io/requester: ${PROJECT_REQUESTING_USER}\n    name: ${PROJECT_NAME}\n  spec: {}\n  status: {}\n- apiVersion: rbac.authorization.k8s.io/v1\n  kind: RoleBinding\n  metadata:\n    name: admin\n    namespace: ${PROJECT_NAME}\n  roleRef:\n    apiGroup: rbac.authorization.k8s.io\n    kind: ClusterRole\n    name: admin\n  subjects:\n  - apiGroup: rbac.authorization.k8s.io\n    kind: User\n    name: ${PROJECT_ADMIN_USER}\nparameters:\n- name: PROJECT_NAME\n- name: PROJECT_DISPLAYNAME\n- name: PROJECT_DESCRIPTION\n- name: PROJECT_ADMIN_USER\n- name: PROJECT_REQUESTING_USER\n",
+   "stderr": "",
+   "combined": "apiVersion: template.openshift.io/v1\nkind: Template\nmetadata:\n  name: project-request\nobjects:\n- apiVersion: project.openshift.io/v1\n  kind: Project\n  metadata:\n    annotations:\n      openshift.io/description: ${PROJECT_DESCRIPTION}\n      openshift.io/display-name: ${PROJECT_DISPLAYNAME}\n      openshift.io/requester: ${PROJECT_REQUESTING_USER}\n    name: ${PROJECT_NAME}\n  spec: {}\n  status: {}\n- apiVersion: rbac.authorization.k8s.io/v1\n  kind: RoleBinding\n  metadata:\n    name: admin\n    namespace: ${PROJECT_NAME}\n  roleRef:\n    apiGroup: rbac.authorization.k8s.io\n    kind: ClusterRole\n    name: admin\n  subjects:\n  - apiGroup: rbac.authorization.k8s.io\n    kind: User\n    name: ${PROJECT_ADMIN_USER}\nparameters:\n- name: PROJECT_NAME\n- name: PROJECT_DISPLAYNAME\n- name: PROJECT_DESCRIPTION\n- name: PROJECT_ADMIN_USER\n- name: PROJECT_REQUESTING_USER\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm create-bootstrap-project-template -o yaml > bootstrap.yaml; diff bootstrap.yaml project-request.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "any",
+   "run": null,
+   "code": 1,
+   "stdout": "4c4\n<   name: project-request\n---\n>   name: lab-project-request\n28a29,76\n> - apiVersion: v1\n>   kind: ResourceQuota\n>   metadata:\n>     name: project-quota\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     hard:\n>       pods: \"10\"\n>       requests.cpu: \"1\"\n>       requests.memory: 1Gi\n>       limits.memory: 2Gi\n> - apiVersion: v1\n>   kind: LimitRange\n>   metadata:\n>     name: project-limits\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     limits:\n>     - type: Container\n>       default:\n>         memory: 256Mi\n>       defaultRequest:\n>         cpu: 50m\n>         memory: 64Mi\n>       max:\n>         memory: 1Gi\n> - apiVersion: networking.k8s.io/v1\n>   kind: NetworkPolicy\n>   metadata:\n>     name: allow-from-same-namespace\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     podSelector: {}\n>     ingress:\n>     - from:\n>       - podSelector: {}\n> - apiVersion: networking.k8s.io/v1\n>   kind: NetworkPolicy\n>   metadata:\n>     name: allow-from-openshift-ingress\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     podSelector: {}\n>     ingress:\n>     - from:\n>       - namespaceSelector:\n>           matchLabels:\n>             policy-group.network.openshift.io/ingress: \"\"\n",
+   "stderr": "",
+   "combined": "4c4\n<   name: project-request\n---\n>   name: lab-project-request\n28a29,76\n> - apiVersion: v1\n>   kind: ResourceQuota\n>   metadata:\n>     name: project-quota\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     hard:\n>       pods: \"10\"\n>       requests.cpu: \"1\"\n>       requests.memory: 1Gi\n>       limits.memory: 2Gi\n> - apiVersion: v1\n>   kind: LimitRange\n>   metadata:\n>     name: project-limits\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     limits:\n>     - type: Container\n>       default:\n>         memory: 256Mi\n>       defaultRequest:\n>         cpu: 50m\n>         memory: 64Mi\n>       max:\n>         memory: 1Gi\n> - apiVersion: networking.k8s.io/v1\n>   kind: NetworkPolicy\n>   metadata:\n>     name: allow-from-same-namespace\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     podSelector: {}\n>     ingress:\n>     - from:\n>       - podSelector: {}\n> - apiVersion: networking.k8s.io/v1\n>   kind: NetworkPolicy\n>   metadata:\n>     name: allow-from-openshift-ingress\n>     namespace: ${PROJECT_NAME}\n>   spec:\n>     podSelector: {}\n>     ingress:\n>     - from:\n>       - namespaceSelector:\n>           matchLabels:\n>             policy-group.network.openshift.io/ingress: \"\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc process --local -f project-request.yaml -p PROJECT_NAME=lab-check -p PROJECT_ADMIN_USER=developer -p PROJECT_REQUESTING_USER=developer -o name",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io/lab-check\nrolebinding.rbac.authorization.k8s.io/admin\nresourcequota/project-quota\nlimitrange/project-limits\nnetworkpolicy.networking.k8s.io/allow-from-same-namespace\nnetworkpolicy.networking.k8s.io/allow-from-openshift-ingress\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io/lab-check\nrolebinding.rbac.authorization.k8s.io/admin\nresourcequota/project-quota\nlimitrange/project-limits\nnetworkpolicy.networking.k8s.io/allow-from-same-namespace\nnetworkpolicy.networking.k8s.io/allow-from-openshift-ingress\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f project-request.yaml -n openshift-config --dry-run=server",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "template.template.openshift.io/lab-project-request created (server dry run)\n",
+   "stderr": "",
+   "combined": "template.template.openshift.io/lab-project-request created (server dry run)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f project-request.yaml -n openshift-config",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "template.template.openshift.io/lab-project-request created\n",
+   "stderr": "",
+   "combined": "template.template.openshift.io/lab-project-request created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch project.config.openshift.io/cluster --type=merge -p '{\"spec\":{\"projectRequestTemplate\":{\"name\":\"lab-project-request\"},\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\"}}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.config.openshift.io/cluster patched\n",
+   "stderr": "",
+   "combined": "project.config.openshift.io/cluster patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\",\"projectRequestTemplate\":{\"name\":\"lab-project-request\"}}\n",
+   "stderr": "",
+   "combined": "{\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\",\"projectRequestTemplate\":{\"name\":\"lab-project-request\"}}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "stderr": "",
+   "combined": "clusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n openshift-apiserver",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                         READY   STATUS        RESTARTS        AGE\napiserver-68c94dcf66-2zc9s   2/2     Terminating   5 (3h56m ago)   4d2h\n",
+   "stderr": "",
+   "combined": "NAME                         READY   STATUS        RESTARTS        AGE\napiserver-68c94dcf66-2zc9s   2/2     Terminating   5 (3h56m ago)   4d2h\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "stderr": "",
+   "combined": "clusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\",\"projectRequestTemplate\":\"openshift-config/lab-project-request\"}\n",
+   "stderr": "",
+   "combined": "{\"projectRequestMessage\":\"To request a project, open a ticket with the platform team.\",\"projectRequestTemplate\":\"openshift-config/lab-project-request\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-after",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Now using project \"lab-after\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "stderr": "",
+   "combined": "Now using project \"lab-after\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-after",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                          REQUEST                                                 LIMIT                  AGE\nresourcequota/project-quota   pods: 0/10, requests.cpu: 0/1, requests.memory: 0/1Gi   limits.memory: 0/2Gi   1s\n\nNAME                        CREATED AT\nlimitrange/project-limits   2026-10-16T15:41:12Z\n\nNAME                                                           POD-SELECTOR   AGE\nnetworkpolicy.networking.k8s.io/allow-from-openshift-ingress   <none>         0s\nnetworkpolicy.networking.k8s.io/allow-from-same-namespace      <none>         1s\n",
+   "stderr": "",
+   "combined": "NAME                          REQUEST                                                 LIMIT                  AGE\nresourcequota/project-quota   pods: 0/10, requests.cpu: 0/1, requests.memory: 0/1Gi   limits.memory: 0/2Gi   1s\n\nNAME                        CREATED AT\nlimitrange/project-limits   2026-10-16T15:41:12Z\n\nNAME                                                           POD-SELECTOR   AGE\nnetworkpolicy.networking.k8s.io/allow-from-openshift-ingress   <none>         0s\nnetworkpolicy.networking.k8s.io/allow-from-same-namespace      <none>         1s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-before",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-before namespace.\n",
+   "combined": "No resources found in lab-before namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete quota project-quota -n lab-after",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): resourcequotas \"project-quota\" is forbidden: User \"developer\" cannot delete resource \"resourcequotas\" in API group \"\" in the namespace \"lab-after\"\n",
+   "combined": "Error from server (Forbidden): resourcequotas \"project-quota\" is forbidden: User \"developer\" cannot delete resource \"resourcequotas\" in API group \"\" in the namespace \"lab-after\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i delete networkpolicies -n lab-after",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "combined": "yes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create namespace lab-raw",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/lab-raw created\n",
+   "stderr": "",
+   "combined": "namespace/lab-raw created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-raw",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-raw namespace.\n",
+   "combined": "No resources found in lab-raw namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete namespace lab-raw",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace \"lab-raw\" deleted\n",
+   "stderr": "",
+   "combined": "namespace \"lab-raw\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=false --overwrite",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners annotated\n",
+   "stderr": "",
+   "combined": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners annotated\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch clusterrolebinding.rbac self-provisioners -p '{\"subjects\":null}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners patched\n",
+   "stderr": "",
+   "combined": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe clusterrolebinding.rbac self-provisioners",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: false\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind  Name  Namespace\n  ----  ----  ---------\n",
+   "stderr": "",
+   "combined": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: false\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind  Name  Namespace\n  ----  ----  ---------\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create projectrequests",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\n",
+   "combined": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\nno\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-denied",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): To request a project, open a ticket with the platform team.\n",
+   "combined": "Error from server (Forbidden): To request a project, open a ticket with the platform team.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm new-project lab-team --admin=developer",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Created project lab-team\n",
+   "stderr": "",
+   "combined": "Created project lab-team\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-team",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-team namespace.\n",
+   "combined": "No resources found in lab-team namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm policy add-cluster-role-to-group self-provisioner system:authenticated:oauth --rolebinding-name=self-provisioners",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrole.rbac.authorization.k8s.io/self-provisioner added: \"system:authenticated:oauth\"\n",
+   "stderr": "Warning: Group 'system:authenticated:oauth' not found\n",
+   "combined": "Warning: Group 'system:authenticated:oauth' not found\nclusterrole.rbac.authorization.k8s.io/self-provisioner added: \"system:authenticated:oauth\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc annotate clusterrolebinding.rbac self-provisioners rbac.authorization.kubernetes.io/autoupdate=true --overwrite",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners annotated\n",
+   "stderr": "",
+   "combined": "clusterrolebinding.rbac.authorization.k8s.io/self-provisioners annotated\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe clusterrolebinding.rbac self-provisioners",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: true\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind   Name                        Namespace\n  ----   ----                        ---------\n  Group  system:authenticated:oauth  \n",
+   "stderr": "",
+   "combined": "Name:         self-provisioners\nLabels:       <none>\nAnnotations:  rbac.authorization.kubernetes.io/autoupdate: true\nRole:\n  Kind:  ClusterRole\n  Name:  self-provisioner\nSubjects:\n  Kind   Name                        Namespace\n  ----   ----                        ---------\n  Group  system:authenticated:oauth  \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create projectrequests",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\n",
+   "combined": "Warning: resource 'projectrequests' is not namespace scoped in group 'project.openshift.io'\n\nyes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch project.config.openshift.io/cluster --type=json -p '[{\"op\":\"remove\",\"path\":\"/spec/projectRequestTemplate\"},{\"op\":\"remove\",\"path\":\"/spec/projectRequestMessage\"}]'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.config.openshift.io/cluster patched\n",
+   "stderr": "",
+   "combined": "project.config.openshift.io/cluster patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait co/openshift-apiserver --for=condition=Progressing=True --timeout=180s && oc wait co/openshift-apiserver --for=condition=Progressing=False --timeout=600s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "clusteroperator.config.openshift.io/openshift-apiserver condition met\nclusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "stderr": "",
+   "combined": "clusteroperator.config.openshift.io/openshift-apiserver condition met\nclusteroperator.config.openshift.io/openshift-apiserver condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete template lab-project-request -n openshift-config",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "template.template.openshift.io \"lab-project-request\" deleted from openshift-config namespace\n",
+   "stderr": "",
+   "combined": "template.template.openshift.io \"lab-project-request\" deleted from openshift-config namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project.config.openshift.io/cluster -o jsonpath='{.spec}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{}\n",
+   "stderr": "",
+   "combined": "{}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project lab-again",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Now using project \"lab-again\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "stderr": "",
+   "combined": "Now using project \"lab-again\" on server \"https://api.crc.testing:6443\".\n\nYou can add applications to this project with the 'new-app' command. For example, try:\n\n    oc new-app rails-postgresql-example\n\nto build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:\n\n    kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.43 -- /agnhost serve-hostname\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get resourcequotas,limitranges,networkpolicies -n lab-again",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in lab-again namespace.\n",
+   "combined": "No resources found in lab-again namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project lab-before lab-after lab-team lab-again",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"lab-before\" deleted\nproject.project.openshift.io \"lab-after\" deleted\nproject.project.openshift.io \"lab-team\" deleted\nproject.project.openshift.io \"lab-again\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"lab-before\" deleted\nproject.project.openshift.io \"lab-after\" deleted\nproject.project.openshift.io \"lab-team\" deleted\nproject.project.openshift.io \"lab-again\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 403,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-SELF-03",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc patch project.config.openshift.io cluster --type=json -p \"[{\\\"op\\\":\\\"replace\\\",\\\"path\\\":\\\"/spec\\\",\\\"value\\\":$(cat \"$SNAPSHOT_DIR/0\")}]\"",
+    "code": 0
+   },
+   {
+    "cmd": "oc get clusterrolebinding self-provisioners >/dev/null 2>&1 || oc create clusterrolebinding self-provisioners --clusterrole=self-provisioner --group=system:authenticated:oauth",
+    "code": 0
+   },
+   {
+    "cmd": "oc patch clusterrolebinding self-provisioners --type=json -p \"[{\\\"op\\\":\\\"add\\\",\\\"path\\\":\\\"/subjects\\\",\\\"value\\\":$(cat \"$SNAPSHOT_DIR/1\")}]\"",
+    "code": 0
+   },
+   {
+    "cmd": "oc annotate clusterrolebinding self-provisioners rbac.authorization.kubernetes.io/autoupdate=true --overwrite",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete clusterrolebinding self-provisioner --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project lab-before lab-after lab-team lab-again lab-denied --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete namespace lab-raw --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete template lab-project-request -n openshift-config --ignore-not-found",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc wait co/openshift-apiserver --for=condition=Available=True --timeout=120s && oc wait co/openshift-apiserver --for=condition=Degraded=False --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc auth can-i create projectrequests --as=developer --as-group=system:authenticated --as-group=system:authenticated:oauth",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get project.config.openshift.io cluster -o jsonpath='{.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebinding self-provisioners -o jsonpath='{.subjects}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef} {.subjects} {.metadata.annotations}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get clusterrolebindings -o jsonpath='{range .items[?(@.roleRef.name==\"self-provisioner\")]}{.metadata.name}{\"\\n\"}{end}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get templates -n openshift-config -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get openshiftapiserver cluster -o jsonpath='{.spec.observedConfig.projectConfig}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get namespace lab-before lab-after lab-team lab-again lab-raw lab-denied -o name --ignore-not-found",
+    "same": true
+   }
+  ]
+ }
+}

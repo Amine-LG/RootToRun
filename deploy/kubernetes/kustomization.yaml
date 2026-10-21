@@ -1,0 +1,10 @@
+# A generic example for hosting the static site on OpenShift (it includes an edge Route; on other Kubernetes
+# distributions replace route.yaml with an Ingress). Replace the placeholder with the image you built and pushed,
+# by digest, before applying:
+#   kustomize edit set image static-site=registry.example.com/team/site@sha256:<digest>
+#   oc apply -k deploy/kubernetes
+resources: [deployment.yaml, service.yaml, route.yaml]
+images:
+  - name: static-site
+    newName: registry.example.com/team/site
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

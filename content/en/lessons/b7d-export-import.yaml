@@ -1,0 +1,365 @@
+# Export and import an application (generated from one command list; edit with care)
+- id: p.export-import
+  title: Export and import an application
+  subtitle: Portable manifests, and images copied out of and into the internal registry
+  module: p4-enterprise
+  mode: REAL_LAB
+  minutes: 30
+  level: 3
+  supports: OpenShift 4.21 internal image registry and image streams, `oc get -o json` with jq, and skopeo 1.22 (in a pod from registry.access.redhat.com/ubi9/skopeo
+    and on the workstation). Every command was run on OpenShift Local 4.21 by the ordinary user developer, in a temporary project and a second
+    project created and deleted by the lesson. Persistent data and OADP are described, not run.
+  concepts:
+  - storage.dr
+  - container.images
+  - ocp.imagestreams
+  prerequisites:
+  - a.images-registries
+  - o1.config-secrets
+  record_on: cluster
+  objective: |
+    Export an application's objects as manifests that can be applied elsewhere, copy its image out of the
+    internal registry into an archive and into another project without disabling TLS checks, re-create the
+    application there, and explain what such a manual copy leaves out compared with a backup.
+  flow:
+  - kind: ask
+    id: recall-digest
+    recalls: a.images-registries
+    prompt: Two registries hold an image under the same tag. How can you tell whether they hold the same image?
+    choices:
+    - text: Compare their digests
+      why: A digest is computed from the manifest; the same content gives the same digest, a tag can point anywhere.
+    - text: Compare their tags
+      why: A tag is a movable name; the same tag can name different images in two places.
+    - text: Compare the image sizes
+      why: Different images can have similar sizes; only the digest identifies content.
+    answer: 0
+  - kind: teach
+    id: situation
+    title: Moving an application by hand
+    body: |
+      A team wants its shop application in a new project, perhaps on another cluster. An application is two
+      different things: **objects** in the API (a Deployment, a Service, a Route, a ConfigMap) and the **images**
+      its pods run. Backup tools such as OADP automate both, together with persistent data; doing it once by
+      hand shows what they have to solve.
+
+      Everything here was run by the ordinary user developer on a lab cluster, in a temporary project and in a
+      second project created for the copy.
+  - kind: show
+    id: import
+    run: oc import-image shop:1.0 --from=registry.access.redhat.com/ubi9/httpd-24:latest --confirm >/dev/null && oc get istag shop:1.0 -o jsonpath='{.image.dockerImageReference}{"\n"}'
+    notice: 'An image stream tag `shop:1.0`. It records where the image was imported from, by digest:
+      `registry.access.redhat.com/ubi9/httpd-24@sha256:b48d…`. The Deployment created next names it by its internal-registry
+      path instead, under this project''s name; the integrated registry serves an imported image there by pulling it
+      through from its source. Keep the digest in mind: the last steps compare it with the copy''s.'
+  - kind: show
+    id: app
+    run: oc create configmap shop-page --from-literal=index.html='<h1>shop 1.0</h1>' && oc label configmap shop-page app=shop && oc create deployment
+      shop --image=image-registry.openshift-image-registry.svc:5000/$(oc project -q)/shop:1.0 --port=8080 && oc set volume deploy/shop --add --name=page
+      --configmap-name=shop-page --mount-path=/var/www/html >/dev/null && oc expose deploy/shop && oc expose svc/shop && oc rollout status deploy/shop
+      --timeout=180s
+    notice: Four objects, all labelled app=shop, and a successful rollout.
+  - kind: show
+    id: curl1
+    run: host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 30); do curl -sf "http://$host/" && break; sleep 2; done
+    notice: 'The page from the ConfigMap. The loop retries until the page is reachable: a new Route takes a few seconds to reach the router.'
+  - kind: ask
+    id: guess-export
+    guess: true
+    prompt: You save these four objects with `oc get ... -o yaml` and apply the file in another project. What gets in the way?
+    choices:
+    - text: Fields the server set
+      why: They describe the objects as they exist here; the next steps count them.
+    - text: 'Nothing: oc get output is already a manifest'
+      why: It is the object's full state, including fields only the server may set.
+    - text: Only the base64 encoding of the Secrets
+      why: There is no Secret here; the problems come from server-set fields and references.
+    answer: 0
+  - kind: show
+    id: raw
+    run: oc get deployment/shop service/shop route/shop configmap/shop-page -o yaml > shop-raw.yaml && grep -E '^ +(uid|resourceVersion|creationTimestamp|clusterIP|host):'
+      shop-raw.yaml | sort | uniq -c
+    notice: 'Every object carries a uid, a resourceVersion and a creation time; the Service has its cluster IP and the Route its
+      generated host. Two lines are not what they seem: `resourceVersion: ""` belongs to the List that `oc get` wraps
+      around several objects, and the Route''s host appears twice, in its spec and in its status.'
+  - kind: teach
+    id: server-fields
+    title: Keep what you wrote, drop what the server added
+    body: |
+      A manifest to re-create an object keeps `metadata.name`, labels and `spec`. It drops the server's fields:
+      `uid`, `resourceVersion` (applying it elsewhere would fail as a conflict), `creationTimestamp`,
+      `managedFields`, `status`, the namespace (the target decides), and values allocated per cluster or per
+      project: a Service's `clusterIP` and a generated Route `host`. Annotations are dropped here too, as they
+      hold the previous applied configuration and the Deployment's revision.
+  - kind: show
+    id: clean
+    run: oc get deployment/shop service/shop route/shop configmap/shop-page -o json | jq '.items |= map(del(.metadata.uid, .metadata.resourceVersion,
+      .metadata.creationTimestamp, .metadata.managedFields, .metadata.generation, .metadata.namespace, .metadata.annotations, .status, .spec.clusterIP,
+      .spec.clusterIPs, .spec.host))' > shop-export.json && jq -r '.items[] | .kind + "/" + .metadata.name' shop-export.json
+    notice: 'The same four objects, without the server''s fields: a portable file.'
+  - kind: show
+    id: imgref
+    body: 'One reference still ties the copy to this project:'
+    run: jq -r '.items[] | select(.kind=="Deployment") | .spec.template.spec.containers[0].image' shop-export.json
+    notice: The Deployment pulls from this project's path in the internal registry. In the new project, that path is someone else's, and it disappears
+      when this project is deleted.
+  - kind: ask
+    id: image-plan
+    prompt: What must happen to the image before the copied Deployment can run on its own in the new project?
+    choices:
+    - text: Copy it over and re-point the Deployment
+      why: Then the copy depends on nothing in the old project; the next steps do exactly this.
+    - text: 'Nothing: every project shares all images'
+      why: The internal registry keeps images per project; pulling another project's image needs a grant, and fails once it is gone.
+    - text: Rebuild it from the application's source code
+      why: Rebuilding gives a new image that may differ; copying keeps the exact content.
+    answer: 0
+  - kind: teach
+    id: copy-inside
+    title: Copy the image without weakening TLS
+    body: |
+      The internal registry is reachable from inside the cluster at `image-registry.openshift-image-registry.svc:5000`,
+      with a certificate signed by the service CA. Every pod already has that CA and a token for its
+      ServiceAccount under `/var/run/secrets/kubernetes.io/serviceaccount`. A pod running skopeo as the project's
+      `builder` account (present when the Build capability is enabled, as here), which may push and pull this
+      project's images, can copy the image to an archive with full certificate checks; `oc exec ... cat` then brings the archive to the workstation.
+  - kind: show
+    id: copier
+    run: oc run copier --image=registry.access.redhat.com/ubi9/skopeo:latest --restart=Never --overrides='{"spec":{"serviceAccountName":"builder"}}'
+      --command -- sleep 900 && oc wait pod/copier --for=condition=Ready --timeout=180s
+  - kind: show
+    id: export-img
+    run: oc exec copier -- sh -c 'skopeo copy --quiet --src-cert-dir=/var/run/secrets/kubernetes.io/serviceaccount --src-registry-token="$(cat
+      /var/run/secrets/kubernetes.io/serviceaccount/token)" docker://image-registry.openshift-image-registry.svc:5000/$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)/shop:1.0
+      oci-archive:/tmp/shop-1.0.tar && ls -lh /tmp/shop-1.0.tar'
+    notice: 'An OCI archive: the image''s manifest, configuration and layers in one file.'
+  - kind: ask
+    id: why-pod
+    prompt: Why does the copy run in a pod here instead of on the workstation through the registry's Route?
+    choices:
+    - text: The pod already trusts the registry
+      why: Inside the cluster the service CA and a token are already there. From the workstation it also works once you trust the Route's certificate
+        chain (a company CA, or the router CA from an administrator); on this lab cluster an ordinary user cannot read that CA, and switching
+        checks off is never the answer.
+    - text: Skopeo cannot run on a workstation at all
+      why: 'It runs on the workstation too: the next step reads the archive there.'
+    - text: Routes cannot carry any registry traffic
+      why: The registry's Route works; the question is trusting its certificate.
+    answer: 0
+  - kind: show
+    id: fetch
+    run: oc exec copier -- cat /tmp/shop-1.0.tar > shop-1.0.tar && ls -lh shop-1.0.tar && skopeo inspect --format '{{.Architecture}} {{len .Layers}}
+      layers' oci-archive:shop-1.0.tar
+    notice: The archive on the workstation, readable by skopeo without any registry.
+  - kind: show
+    id: newp
+    body: 'The target: a second project, with its own copier pod.'
+    run: oc new-project lab-shop-restore --skip-config-write >/dev/null && oc run copier -n lab-shop-restore --image=registry.access.redhat.com/ubi9/skopeo:latest
+      --restart=Never --overrides='{"spec":{"serviceAccountName":"builder"}}' --command -- sleep 900 && oc wait pod/copier -n lab-shop-restore
+      --for=condition=Ready --timeout=180s
+  - kind: show
+    id: import-img
+    run: oc exec -i copier -n lab-shop-restore -- sh -c 'cat > /tmp/shop-1.0.tar' < shop-1.0.tar && oc exec copier -n lab-shop-restore -- sh -c
+      'skopeo copy --quiet --dest-cert-dir=/var/run/secrets/kubernetes.io/serviceaccount --dest-registry-token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+      oci-archive:/tmp/shop-1.0.tar docker://image-registry.openshift-image-registry.svc:5000/lab-shop-restore/shop:1.0' && oc get istag shop:1.0
+      -n lab-shop-restore
+    notice: Pushing to the registry created the image stream `shop` in the new project automatically.
+  - kind: try
+    id: try-apply
+    body: The cleaned file is `shop-export.json`, and its Deployment still pulls from this project's path, `/<this project>/shop:`.
+      In one command, rewrite that path to `/lab-shop-restore/shop:` with `sed` (this project's name is what `oc project -q`
+      prints) and pipe the result to `oc apply` in the project `lab-shop-restore`.
+    accept:
+    - sed "s#/$(oc project -q)/shop:#/lab-shop-restore/shop:#" shop-export.json | oc apply -n lab-shop-restore -f -
+    - sed "s#/$(oc project -q)/shop:#/lab-shop-restore/shop:#" shop-export.json | oc apply -f - -n lab-shop-restore
+    - sed "s|/$(oc project -q)/shop:|/lab-shop-restore/shop:|" shop-export.json | oc apply -n lab-shop-restore -f -
+    - sed "s|/$(oc project -q)/shop:|/lab-shop-restore/shop:|" shop-export.json | oc apply -f - -n lab-shop-restore
+    - sed 's#/academy-lesson-p-export-import/shop:#/lab-shop-restore/shop:#' shop-export.json | oc apply -n lab-shop-restore -f -
+    - sed 's#/academy-lesson-p-export-import/shop:#/lab-shop-restore/shop:#' shop-export.json | oc apply -f - -n lab-shop-restore
+    - sed 's|/academy-lesson-p-export-import/shop:|/lab-shop-restore/shop:|' shop-export.json | oc apply -n lab-shop-restore -f -
+    - sed 's|/academy-lesson-p-export-import/shop:|/lab-shop-restore/shop:|' shop-export.json | oc apply -f - -n lab-shop-restore
+    hints:
+    - match: ^oc (create|apply|-n)
+      say: 'Applied as it is, the copied Deployment would still pull from this project''s registry path. Rewrite the path with `sed` first and pipe the result to `oc apply -f -`.'
+    - match: \| *oc create
+      say: '`oc create` works once; `oc apply` can be run again after you fix the file.'
+    - match: ^(?!.*(-n|--namespace)).*$
+      say: 'The file has no namespace any more: name the target with `-n lab-shop-restore`.'
+    - match: oc apply(?!.*-f -)
+      say: 'With a pipe, `oc apply` reads the manifests from its standard input: `-f -`.'
+    hint: '`sed "s#/$(oc project -q)/shop:#/lab-shop-restore/shop:#" shop-export.json | oc apply -n lab-shop-restore -f -`.'
+    then: Four objects created from the file, with the image path of the new project. The next step shows this command as recorded.
+  - kind: show
+    id: apply
+    run: sed "s#/$(oc project -q)/shop:#/lab-shop-restore/shop:#" shop-export.json | oc apply -n lab-shop-restore -f -
+    notice: Four objects created from the file, with the image path of the new project.
+  - kind: show
+    id: curl2
+    run: oc rollout status deploy/shop -n lab-shop-restore --timeout=180s && oc get route shop -n lab-shop-restore -o jsonpath='{.spec.host}{"\n"}'
+      && host=$(oc get route shop -n lab-shop-restore -o jsonpath='{.spec.host}'); for i in $(seq 30); do curl -sf "http://$host/" && break; sleep
+      2; done
+    notice: The same page, served by the copy, under a host name generated for the new project.
+  - kind: ask
+    id: guess-digest
+    guess: true
+    prompt: The image travelled through an OCI archive. Will its digest in the new project equal the original one?
+    choices:
+    - text: 'Not necessarily: a rewritten manifest has a new digest'
+      why: A digest hashes the manifest bytes. Choosing one platform from a multi-platform image, or converting the manifest's format, writes
+        different bytes; the next step shows the two values.
+    - text: 'Always: a digest never changes when an image is copied'
+      why: It stays only when the manifest is copied byte for byte (skopeo's --preserve-digests refuses any conversion).
+    - text: 'Never: every push creates a new digest'
+      why: Pushing the same manifest gives the same digest; registries do not add anything to it.
+    answer: 0
+  - kind: show
+    id: digests
+    run: oc get istag shop:1.0 -o jsonpath='{.image.metadata.name}{"\n"}' && oc get istag shop:1.0 -n lab-shop-restore -o jsonpath='{.image.metadata.name}{"\n"}'
+    notice: Two digests. The restored image's manifest is not a byte-for-byte copy of the one the image stream named, so its digest differs
+      although it serves the same page. Keeping one platform of a multi-platform image and converting the manifest's format both write new
+      bytes; these two values show that the bytes changed, not which of the two happened. To keep digests that signatures or policies refer
+      to, copy registry to registry with `--all --preserve-digests`.
+  - kind: teach
+    id: what-moved
+    title: What a manifest copy does not move
+    body: |
+      This copy moved four objects and one image. It did not move **persistent data** (a PersistentVolumeClaim
+      manifest copies no data: provisioning or binding decides what storage the copy gets), **Secrets you did not export** (and exporting them puts credentials in a file),
+      role bindings, quotas and the project's own settings, or the image's history in its image stream. Nor is it
+      consistent in time: objects changed between export and import are lost.
+
+      That is the work OADP (OpenShift API for Data Protection, based on Velero) automates: it backs up selected
+      namespaces' objects to object storage together with volume snapshots or file-system copies of their data,
+      on a schedule, and restores them, including into a new namespace.
+  - kind: order
+    id: order-move
+    prompt: Put the steps of moving an application to another project in order.
+    items:
+    - Export the objects with oc get -o json
+    - 'Remove the server-set fields: uid, resourceVersion, status, clusterIP, generated host'
+    - Copy each image into the target's registry path
+    - Point the manifests at the copied images
+    - Apply the manifests in the target project
+    - Test the application through its new address
+    why: The manifests must be cleaned and point at images that exist in the target before they are applied; the test proves the copy stands alone.
+  - kind: show
+    id: gone
+    run: oc delete project lab-shop-restore
+  - kind: reflect
+    id: explain-backup
+    prompt: 'A colleague says: "We keep our manifests in Git, so we don''t need backups." What would you answer?'
+    model: |
+      Git gives us the objects we wrote, which is a good start: we can re-create them, after removing nothing,
+      because they never had server fields. It does not hold the images unless they come from a registry we keep,
+      the data in persistent volumes, Secrets we deliberately keep out of Git, or anything changed on the cluster
+      by hand. A backup of the namespace, with its volumes, on a schedule and tested by restoring, covers what
+      Git cannot; OADP is the cluster-native way to do it.
+  - kind: teach
+    id: what-next
+    title: What you can do now
+    body: |
+      You can export objects as portable manifests, copy an image out of the internal registry and into another
+      project with certificate checks intact, re-point and apply the manifests, and say what such a copy leaves
+      behind. [Stateful workloads, backup and disaster recovery](/lesson/e.stateful-dr) covers the data and
+      OADP's backups and restores.
+  sections:
+  - id: reference
+    title: Reference
+    depth: true
+    body: |
+      | Task | Command |
+      |---|---|
+      | export objects | `oc get deployment/<d> service/<s> route/<r> configmap/<c> -o json > raw.json` |
+      | drop server fields | `jq '.items \|= map(del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.managedFields, .metadata.namespace, .status, .spec.clusterIP, .spec.clusterIPs, .spec.host))'` |
+      | image to archive, inside the cluster | `skopeo copy --src-cert-dir=<sa dir> --src-registry-token=<token> docker://image-registry.openshift-image-registry.svc:5000/<ns>/<is>:<tag> oci-archive:<file>` |
+      | archive to registry | `skopeo copy --dest-cert-dir=<sa dir> --dest-registry-token=<token> oci-archive:<file> docker://image-registry.openshift-image-registry.svc:5000/<ns>/<is>:<tag>` |
+      | keep the digest | add `--preserve-digests` (fails if the format must change) |
+
+      Never copy with `--tls-verify=false` or `--insecure`: the token you send would go to whoever answers.
+  review:
+  - q: Which fields must you remove before applying an exported object elsewhere?
+    a: 'Server-set ones: uid, resourceVersion, creationTimestamp, managedFields, status, the namespace, a Service''s clusterIP(s) and a generated
+      Route host.'
+  - q: Why does a copied Deployment still depend on the old project?
+    a: Its image reference names the old project's path in the internal registry; copy the image and re-point it.
+  - q: Can you copy an image out of the internal registry with TLS checks on, as a project user?
+    a: 'Yes: from a pod, using its ServiceAccount token and the service CA under /var/run/secrets/kubernetes.io/serviceaccount, against image-registry.openshift-image-registry.svc:5000.'
+  - q: What does a manifest export not protect?
+    a: Persistent data, Secrets not exported, bindings and quotas, image history, and consistency in time; OADP backs up namespaces with their
+      volumes.
+  references:
+  - title: 'Kubernetes: API concepts (resourceVersion, server-set fields)'
+    url: https://kubernetes.io/docs/reference/using-api/api-concepts/
+  - title: 'OpenShift 4.21: Managing image streams (import, reference policy and pull-through)'
+    url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/managing-image-streams
+  - title: 'OpenShift 4.21: Accessing the registry'
+    url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/registry/accessing-the-registry
+  - title: skopeo copy manual (--src-cert-dir, --src-registry-token, oci-archive, --preserve-digests)
+    url: https://github.com/containers/skopeo/blob/main/docs/skopeo-copy.1.md
+  - title: 'OCI image specification: descriptors and digests'
+    url: https://github.com/opencontainers/image-spec/blob/main/descriptor.md
+  - title: 'OpenShift 4.21: OADP application backup and restore'
+    url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/backup_and_restore/oadp-application-backup-and-restore
+  labs: []
+  limits: |
+    One cluster: the copy goes to another project of the same cluster, the same steps reach another cluster's
+    registry. No persistent volume is involved. OADP needs an operator and object storage set up by an administrator (recent
+    versions also let project users run their own backups and restores); it is not run here.
+  enterprise: |
+    Teams keep manifests in Git and images in a registry they control; platform teams back up namespaces with
+    OADP on a schedule, and test restores into a new namespace or cluster.
+  commands:
+  - cmd: oc import-image shop:1.0 --from=registry.access.redhat.com/ubi9/httpd-24:latest --confirm >/dev/null && oc get istag shop:1.0 -o jsonpath='{.image.dockerImageReference}{"\n"}'
+    meaning: an image stream tag in this project, pointing at a public image
+  - cmd: oc create configmap shop-page --from-literal=index.html='<h1>shop 1.0</h1>' && oc label configmap shop-page app=shop && oc create deployment
+      shop --image=image-registry.openshift-image-registry.svc:5000/$(oc project -q)/shop:1.0 --port=8080 && oc set volume deploy/shop --add --name=page
+      --configmap-name=shop-page --mount-path=/var/www/html >/dev/null && oc expose deploy/shop && oc expose svc/shop && oc rollout status deploy/shop
+      --timeout=180s
+    meaning: 'the application: a page in a ConfigMap, a Deployment, a Service and a Route'
+    timeout: 210
+  - cmd: host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 30); do curl -sf "http://$host/" && break; sleep 2; done
+    meaning: it answers, once the router has taken the Route
+  - cmd: oc get deployment/shop service/shop route/shop configmap/shop-page -o yaml > shop-raw.yaml && grep -E '^ +(uid|resourceVersion|creationTimestamp|clusterIP|host):'
+      shop-raw.yaml | sort | uniq -c
+    meaning: 'a plain export: full of fields the server set'
+  - cmd: oc get deployment/shop service/shop route/shop configmap/shop-page -o json | jq '.items |= map(del(.metadata.uid, .metadata.resourceVersion,
+      .metadata.creationTimestamp, .metadata.managedFields, .metadata.generation, .metadata.namespace, .metadata.annotations, .status, .spec.clusterIP,
+      .spec.clusterIPs, .spec.host))' > shop-export.json && jq -r '.items[] | .kind + "/" + .metadata.name' shop-export.json
+    meaning: the same objects without the server's fields
+  - cmd: jq -r '.items[] | select(.kind=="Deployment") | .spec.template.spec.containers[0].image' shop-export.json
+    meaning: the image reference still names this project
+  - cmd: oc run copier --image=registry.access.redhat.com/ubi9/skopeo:latest --restart=Never --overrides='{"spec":{"serviceAccountName":"builder"}}'
+      --command -- sleep 900 && oc wait pod/copier --for=condition=Ready --timeout=180s
+    meaning: a pod with skopeo, running as the project's builder account
+    timeout: 210
+  - cmd: oc exec copier -- sh -c 'skopeo copy --quiet --src-cert-dir=/var/run/secrets/kubernetes.io/serviceaccount --src-registry-token="$(cat
+      /var/run/secrets/kubernetes.io/serviceaccount/token)" docker://image-registry.openshift-image-registry.svc:5000/$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)/shop:1.0
+      oci-archive:/tmp/shop-1.0.tar && ls -lh /tmp/shop-1.0.tar'
+    meaning: the image, copied from the internal registry into an archive
+    timeout: 300
+  - cmd: oc exec copier -- cat /tmp/shop-1.0.tar > shop-1.0.tar && ls -lh shop-1.0.tar && skopeo inspect --format '{{.Architecture}} {{len .Layers}}
+      layers' oci-archive:shop-1.0.tar
+    meaning: the archive, now on the workstation
+    timeout: 240
+  - cmd: oc new-project lab-shop-restore --skip-config-write >/dev/null && oc run copier -n lab-shop-restore --image=registry.access.redhat.com/ubi9/skopeo:latest
+      --restart=Never --overrides='{"spec":{"serviceAccountName":"builder"}}' --command -- sleep 900 && oc wait pod/copier -n lab-shop-restore
+      --for=condition=Ready --timeout=180s
+    meaning: the target project, with its own copier pod
+    timeout: 210
+  - cmd: oc exec -i copier -n lab-shop-restore -- sh -c 'cat > /tmp/shop-1.0.tar' < shop-1.0.tar && oc exec copier -n lab-shop-restore -- sh -c
+      'skopeo copy --quiet --dest-cert-dir=/var/run/secrets/kubernetes.io/serviceaccount --dest-registry-token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+      oci-archive:/tmp/shop-1.0.tar docker://image-registry.openshift-image-registry.svc:5000/lab-shop-restore/shop:1.0' && oc get istag shop:1.0
+      -n lab-shop-restore
+    meaning: the archive pushed into the new project's registry namespace
+    timeout: 300
+  - cmd: sed "s#/$(oc project -q)/shop:#/lab-shop-restore/shop:#" shop-export.json | oc apply -n lab-shop-restore -f -
+    meaning: the cleaned manifests, with the image reference moved to the new project
+  - cmd: oc rollout status deploy/shop -n lab-shop-restore --timeout=180s && oc get route shop -n lab-shop-restore -o jsonpath='{.spec.host}{"\n"}'
+      && host=$(oc get route shop -n lab-shop-restore -o jsonpath='{.spec.host}'); for i in $(seq 30); do curl -sf "http://$host/" && break; sleep
+      2; done
+    meaning: the copy answers, under a new host name
+    timeout: 270
+  - cmd: oc get istag shop:1.0 -o jsonpath='{.image.metadata.name}{"\n"}' && oc get istag shop:1.0 -n lab-shop-restore -o jsonpath='{.image.metadata.name}{"\n"}'
+    meaning: the image's digest in each project
+  - cmd: oc delete project lab-shop-restore
+    meaning: remove the copy

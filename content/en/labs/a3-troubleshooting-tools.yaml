@@ -1,0 +1,137 @@
+id: lab.troubleshooting-tools
+title: "The troubleshooting toolbox"
+summary: "Status, describe, events, logs, previous logs, exec and debug pods, practised on an app that crashes on purpose, then fixed."
+module: a3-troubleshoot
+mode: REAL_LAB
+minutes: 30
+level: 1
+supports: "Recorded on OpenShift 4.21.8. `oc debug` on a Deployment creates a copy of its pod with your command instead of the entrypoint."
+concepts: [container.debugging, k8s.pod-lifecycle, obs.signals]
+prerequisites: [o1.troubleshooting]
+namespace: academy-debug
+objective: |
+  Use each troubleshooting tool for what it is best at, in a fixed order, on a container that keeps crashing, and
+  repair it.
+background: |
+  `app` exits with code 3 a few seconds after start because a configuration variable is missing. `web` is a healthy
+  httpd for comparison. Order of the toolbox: **status → describe (events, last state) → logs (and --previous) →
+  exec into a healthy container → debug pod for a container that cannot stay up → fix → verify**.
+
+  **Where everything comes from.** The app creates the project `academy-debug` as the learner identity and applies the
+  two Deployments shown below: `app` runs a short shell script in the small UBI 9 image
+  `registry.access.redhat.com/ubi9/ubi-minimal` that exits with code 3 when `CONFIG_URL` is not set (the script is the
+  `command` in its manifest), and `web` runs Red Hat's UBI 9 Apache httpd image
+  (`registry.access.redhat.com/ubi9/httpd-24`). Both images come from Red Hat's public registry, which needs no login.
+  Clean up deletes the project.
+commands:
+  - {cmd: "oc get pods -n academy-debug", meaning: "STATUS and RESTARTS first"}
+  - {cmd: "oc describe pod -l app=app -n academy-debug", meaning: "Last State: Terminated, Exit Code, Events"}
+  - {cmd: "oc logs <pod> --previous -n academy-debug", run: "oc logs {anypod:app=app} --previous -n academy-debug", meaning: "logs of the crashed container instance; before the first crash it fails with `previous terminated container ... not found`", expect: any}
+setup:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: app, labels: {app: app}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: app}}
+      template:
+        metadata: {labels: {app: app}}
+        spec:
+          terminationGracePeriodSeconds: 2
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sh", "-c", "echo starting app; if [ -z \"$CONFIG_URL\" ]; then echo 'fatal: CONFIG_URL is not set' >&2; sleep 3; exit 3; fi; echo \"using $CONFIG_URL\"; sleep infinity"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+steps:
+  - id: status
+    title: "1. Status"
+    do: "Look at the pods. Then wait until `app` is in CrashLoopBackOff (about twenty seconds; the step's check confirms it) and look again in the next step."
+    commands:
+      - {cmd: "oc get pods -n academy-debug", meaning: "STATUS, RESTARTS"}
+    wait_for: [crashing]
+    observe: "In the first seconds the picture depends on the moment. The Quick reference commands, recorded a moment earlier, caught `app` as `0/1 Error` with 0 restarts: it had exited once and had not been restarted yet. This step's recording, three seconds later, shows `app` `1/1 Running` with `1 (4s ago)` in RESTARTS: the kubelet has started it again, and with no readiness probe it is reported Ready as soon as it starts (it sleeps 3 seconds before exiting). `web` is `1/1 Running`."
+    why: "One `get` is a snapshot. A container without a readiness probe is reported Ready as soon as it starts, so only a second look (or the RESTARTS column) reveals a crash loop."
+  - id: describe
+    title: "2. Look again, then describe: last state and events"
+    do: "List the pods a second time, then describe the crashing pod."
+    commands:
+      - {cmd: "oc get pods -n academy-debug", meaning: "the second look, about twenty seconds after the first"}
+      - {cmd: "oc describe pod -l app=app -n academy-debug", meaning: "read Last State and Events"}
+    predict:
+      prompt: "Where is the exit code of the previous crash?"
+      choices: ["In the pod's labels", "Under Last State: Terminated, Exit Code", "Only in the node's journal"]
+      answer: 1
+      explain: "The kubelet records the previous container termination: reason Error, exit code 3, start and finish times."
+      feedback:
+        - "No: labels are set by you and the controllers for selection; nothing writes runtime results into them."
+        - "Right: the pod status keeps the last termination (`lastState.terminated`), and describe prints it as Last State with Reason, Exit Code, Started and Finished."
+        - "No: you do not need node access. The kubelet reports the termination into the pod's status, readable by anyone who can get the pod."
+    observe: "The second look, 29 s after creation, shows `app` `1/1 Running` with `2 (15s ago)` in RESTARTS: it has crashed twice and has just been started a third time. `web` is still Running. The describe output has `State: Running` for the new instance, `Last State: Terminated, Reason: Error, Exit Code: 3` with Started/Finished three seconds apart, `Restart Count: 2`, and a `Warning BackOff ... Back-off restarting failed container app` event. A RESTARTS count that keeps growing is the sign of a crash loop, even when one snapshot shows Running."
+  - id: logs
+    title: "3. Logs, current and previous"
+    do: "Read the logs of the container, and of its previous instance."
+    commands:
+      - {cmd: "oc logs deploy/app -n academy-debug", meaning: "the latest instance: while the pod waits in back-off, the one that died; right after a restart, the new one (may be short)", expect: any}
+      - {cmd: "oc logs <pod> --previous -n academy-debug", run: "oc logs {anypod:app=app} --previous -n academy-debug", meaning: "the instance that crashed"}
+    observe: "`oc logs deploy/app` printed `starting app` then `fatal: CONFIG_URL is not set`: by then the kubelet had already restarted the container, and the new instance failed the same way. `--previous` answered `unable to retrieve container logs for cri-o://…` in this recording: the log of the instance before it was no longer kept. Timing decides what you see: while the pod waits in CrashLoopBackOff, both commands read the instance that just died; right after a restart, plain `oc logs` reads the new one, and `--previous` the one before, if its log is still there."
+    why: "Plain `oc logs` reads the newest container instance. Once the kubelet restarts the container, that is the new one, which may only have printed `starting app`; `--previous` always reads the last terminated instance, which is where the error is."
+  - id: exec
+    title: "4. Exec into a healthy container"
+    do: "Inspect the healthy `web` container from inside."
+    commands:
+      - {cmd: "oc exec deploy/web -n academy-debug -- ps aux", meaning: "processes in the container"}
+      - {cmd: "oc exec deploy/web -n academy-debug -- id", meaning: "the UID it runs as"}
+    observe: "`httpd -D FOREGROUND` as PID 1 with its worker processes, plus a few `cat` processes: this image pipes httpd's access and error logs through `/usr/bin/cat` so they reach the container's stdout (and `oc logs`). Everything runs as a high UID (`uid=1000740000` in the recording) with group 0."
+  - id: debug
+    title: "5. A debug pod for a container that cannot stay up"
+    do: "You cannot exec into a container that keeps dying. `oc debug` starts a copy of the pod running your command instead."
+    commands:
+      - {cmd: "oc debug deploy/app -n academy-debug -- env", meaning: "the environment the app would see"}
+    observe: "oc reports `Starting pod/app-debug-<suffix>` with the original command it replaced, prints the environment (PATH, HOSTNAME, the `KUBERNETES_*` service variables… and no CONFIG_URL), then `Removing debug pod ...` when the command ends."
+    why: "A debug copy keeps the image, environment, volumes and security context but replaces the command; by default oc also strips the labels (so no Service sends it traffic) and the probes. You can inspect the environment of a broken app safely."
+  - id: fix
+    title: "6. Fix and verify"
+    do: "Provide the missing variable and watch the rollout replace the crashing pod."
+    commands:
+      - {cmd: "oc set env deploy/app CONFIG_URL=http://config.example.internal -n academy-debug", meaning: "the fix: a template change"}
+      - {cmd: "oc rollout status deploy/app -n academy-debug --timeout=180s", meaning: "the new pod stays up", timeout: 200}
+      - {cmd: "oc logs deploy/app -n academy-debug", meaning: "the app now logs the URL"}
+    observe: "The rollout completes, and the logs show `starting app` then `using http://config.example.internal`."
+    checks: [app-env, app-ready]
+    wait_for: [app-env, app-ready]
+hints: []
+checks:
+  - {id: crashing, title: "app is crash-looping (step 1)", type: pods, selector: app=app, waiting_reason: CrashLoopBackOff, final: false, expect_text: "CrashLoopBackOff"}
+  - {id: app-ready, title: "app is rolled out and ready", type: deployment_ready, name: app, expect_text: "1/1"}
+  - {id: app-env, title: "CONFIG_URL is set (not empty) in the template", type: field, kind: deployment, name: app, path: "spec.template.spec.containers[0].env[?name=CONFIG_URL].value", op: matches, value: '\S', expect_text: "CONFIG_URL set"}
+questions:
+  - q: "Why can `oc logs` show nothing useful during CrashLoopBackOff?"
+    a: "Right after a restart, the newest instance has only just started and may not have logged the error yet; the error is in the previous instance. `--previous` always reads the last terminated one."
+  - q: "What does `oc debug deploy/app` change compared with the real pod?"
+    a: "It runs your command (or a shell) instead of the container's command, strips labels and probes by default, and is not part of the Deployment; image, env, volumes and security context are kept."
+enterprise: |
+  Give developers this exact order as a runbook. Most tickets close at step 2 or 3, and the evidence (exit code,
+  last log lines, events) is what the platform team needs if they escalate.
+references:
+  - {title: "OpenShift 4.21: Investigating pod issues", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/troubleshooting#investigating-pod-issues"}
+  - {title: "Kubernetes: Debug running pods", url: "https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/"}
+  - {title: "OpenShift 4.21 CLI reference: oc debug", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/cli_tools/openshift-cli-oc#oc-debug"}
+variations:
+  - "On your own: break `web` in a way this lab has not shown (for example a command that does not exist in the image), then diagnose it with the same order of tools without looking at what you changed. Check: you can name the field that caused it and the output that proved it."
+  - "Run `oc debug` on the `web` Deployment and compare the debug pod's labels with the real pod's. Check: you can say why no Service sends traffic to the debug copy."

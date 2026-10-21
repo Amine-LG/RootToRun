@@ -1,0 +1,1352 @@
+# Linux path, module lx2-system, written as teaching flows.
+- id: lx.processes-signals
+  title: "Processes and signals"
+  subtitle: "What runs on a machine, how to stop it, and what the exit status says about how it ended"
+  module: lx2-system
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "Bash 5.1 and procps-ng 3.3 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user, in a practice directory made for this lesson."
+  concepts: [linux.process]
+  prerequisites: [lx.exit-status]
+  objective: |
+    List processes and read their PID, parent and owner; start a command in the background; send signals with
+    kill and predict what SIGTERM and SIGKILL do; and read an exit status such as 143 or 137 back to the signal
+    that ended the process.
+  flow:
+    - kind: ask
+      id: recall-status
+      recalls: lx.exit-status
+      prompt: "A look back. A command ends with exit status 0. What does that mean?"
+      choices:
+        - text: "It succeeded"
+          why: "0 is success; any other value means something went wrong, with a meaning the command documents."
+        - text: "It printed nothing"
+          why: "The exit status is about success, not output: a command can print a lot and succeed, or print nothing and fail."
+        - text: "It was stopped by the user"
+          why: "A process stopped from outside usually ends with a status above 128. This lesson explains those numbers."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "Every running program is a process"
+      body: |
+        You have stopped programs with Ctrl-C many times by now. What actually happens when you do, and why do
+        some programs stop at once, others take a moment to tidy up, and some refuse until something stronger is
+        used? This lesson answers that, and the answer will come back often later in the course.
+
+        It starts with the word **process**: a program that is running. The same program file can run as many
+        processes at once. Behind every process is the **kernel**, the core of the operating system: the program
+        that controls the hardware and runs every other program, sharing the processor and memory between them.
+        The kernel gives each process a number, its **PID**, and remembers which process started it, its
+        **parent** (the PPID).
+    - kind: show
+      id: ps-f
+      body: "`ps` lists processes; `-f` (full) adds the parent and the owner. Here it is asked about two processes: the shell (`-p $$`, the shell's own PID) and the shell's children (`--ppid $$`). Read the `UID` (owner), `PID`, `PPID` and `CMD` columns and ignore the others:"
+      run: "ps -f -p $$ --ppid $$; echo \"this shell is PID $$\""
+      notice: |
+        Two processes: the shell that ran the recording (`bash`, whose PID the `echo` confirms) and `ps`
+        itself. Look at the numbers: the `PPID` of `ps` is the `PID` of `bash`. The shell started `ps`, so the
+        shell is its parent.
+    - kind: teach
+      id: tree
+      body: |
+        Every process has a parent, so processes form a tree. At its root is **PID 1**, the first process the
+        kernel starts when the machine boots. On RHEL it is **systemd**, which starts and supervises the system's
+        services.
+    - kind: show
+      id: pid1
+      run: "ps -o pid,user,comm -p 1; echo \"processes running now: $(ps -e --no-headers | wc -l)\""
+      notice: "`-o pid,user,comm` chose the columns to print, and `-e` (every process) with `wc -l` counted the lines. PID 1 is `systemd`, owned by root. Around it, a few hundred processes run on an ordinary workstation."
+    - kind: ask
+      id: who-parent
+      prompt: "System services such as `crond` are started by systemd at boot. What PPID do you expect `crond` to have?"
+      choices:
+        - text: "1"
+          why: "systemd is PID 1 and started `crond`, so it is its parent. The next step shows it."
+        - text: "The PID of your shell"
+          why: "Your shell starts the commands you type. Services are started by systemd, before you even log in."
+        - text: "0: services have no parent"
+          why: "Every process except the very first has a parent. Services are children of systemd."
+      answer: 0
+    - kind: show
+      id: services
+      run: "ps -o pid,ppid,user,cmd -C crond,chronyd"
+      notice: "`-C` selects processes by command name. Both services have PPID 1: systemd started them. `chronyd` (time synchronisation) runs as its own user, `chrony`, rather than root."
+    - kind: teach
+      id: background
+      title: "Running something in the background"
+      body: |
+        Normally the shell waits for a command to finish. With `&` at the end, it starts the command **in the
+        background** and gives the prompt back at once. The special variable `$!` holds the PID of the last
+        background process, so you can refer to it later.
+    - kind: show
+      id: bg
+      run: "sleep 300 & echo \"started sleep, PID $!\"; ps -o pid,ppid,stat,cmd --ppid $$; kill $!"
+      notice: |
+        `sleep 300` runs in the background while the shell continues. `ps --ppid $$` lists the children of the
+        current shell (`$$` is the shell's own PID): the `sleep`, and `ps` itself. In the `STAT` column, `S` means the process is sleeping, waiting for something;
+        you can ignore it for now (the `N` only means the recorder ran at low priority). The `kill $!` at the end stops the `sleep` again; the next part is about exactly that.
+    - kind: teach
+      id: signals
+      title: "Signals: how processes are told to stop"
+      body: |
+        A **signal** is a short message the kernel delivers to a process. There are a few dozen; three matter
+        most, and each has a name and a number:
+
+        | Signal | Number | Meaning | Can the program react? |
+        |---|---|---|---|
+        | SIGINT | 2 | interrupt: what Ctrl-C sends | yes |
+        | SIGTERM | 15 | "please stop": the polite request | yes: it can tidy up, or even ignore it |
+        | SIGKILL | 9 | stop now | no: the kernel ends the process |
+
+        The command that sends signals is called `kill`, a misleading name: `kill PID` sends SIGTERM, the polite
+        one. `kill -KILL PID` (or `kill -9 PID`) sends SIGKILL.
+    - kind: ask
+      id: which-signal
+      prompt: |
+        A process table shows `4242  you   sleep 300` and `4300  root  /usr/sbin/crond`. Which command stops
+        your `sleep` politely?
+      choices:
+        - text: "`kill 4242`"
+          why: "PID 4242 is your `sleep`, and without an option `kill` sends SIGTERM (15), the polite request the process may catch."
+        - text: "`kill -9 4242`"
+          why: "PID 4242 is the right process, but `-9` is SIGKILL: no chance to tidy up. It is the second step, after the polite one fails."
+        - text: "`kill 4300`"
+          why: "The right signal, but PID 4300 is root's `crond`, not your `sleep`. Check the PID and the owner before sending anything."
+      answer: 0
+    - kind: teach
+      id: by-signal
+      body: |
+        When a process is ended by a signal, the shell reports an exit status of **128 + the signal's number**.
+        That is how you can tell, afterwards, *how* a process ended. `wait $!` waits for the background process
+        and takes its exit status, so `$?` holds it.
+    - kind: ask
+      id: guess-143
+      guess: true
+      prompt: "A `sleep` is ended by SIGTERM (15). What exit status will the shell report?"
+      choices:
+        - text: "15"
+          why: "The number of the signal is part of the answer, but the shell adds something to it. The next step shows the result."
+        - text: "143"
+          why: "See the next step."
+        - text: "0"
+          why: "0 means the program finished its work successfully. Being stopped by a signal is reported differently, as the next step shows."
+      answer: 1
+    - kind: show
+      id: term
+      run: "sleep 300 & kill $!; wait $!; echo \"exit status: $?\""
+      notice: "143 = 128 + 15: ended by SIGTERM. `sleep` has no special reaction to SIGTERM, so it stopped at once."
+    - kind: try
+      id: try-kill9
+      body: "Process 4242 does not react to the polite request. Send it SIGKILL."
+      accept: ["kill -9 4242", "kill -KILL 4242", "kill -s KILL 4242", "kill -SIGKILL 4242", "kill -s SIGKILL 4242", "kill -s 9 4242", "kill -kill 4242", "kill -Kill 4242", "kill -s kill 4242", "kill -s sigkill 4242"]
+      hints:
+        - match: "^kill 4242$"
+          say: "Without an option, `kill` sends SIGTERM, the polite request that this process ignores. Name the signal that cannot be ignored."
+        - match: "^kill -15"
+          say: "15 is SIGTERM, the polite one. SIGKILL has another number."
+        - match: "^kill -(TERM|term|SIGTERM|sigterm) "
+          say: "TERM is the polite signal that this process ignores. Name the one that cannot be ignored."
+        - match: "^kill 4242 -"
+          say: "The signal comes first, then the PID: `kill -<signal> <PID>`."
+        - match: "^kill -sigkill "
+          say: "Bash reads `-s` followed by letters as the `-s` option, so `-sigkill` fails with an invalid signal. Write `-SIGKILL` (capital S), `-KILL` or `-9`."
+      hint: "`kill`, then the signal as `-9` or `-KILL`, then the PID."
+      run: "sleep 300 & kill -KILL $!; wait $!; echo \"exit status: $?\""
+      then: |
+        The recording sent SIGKILL to a `sleep`. The shell reported `Killed`, and the status is 137 = 128 + 9.
+    - kind: teach
+      id: trap
+      title: "Programs that tidy up before they stop"
+      body: |
+        Because SIGTERM can be caught, a program can use it to finish cleanly: save its data, close its
+        connections, then exit. In a shell script, `trap '<commands>' TERM` means: run these commands when SIGTERM arrives.
+        Here is a small script that does that, `graceful.sh`, supplied with the lesson (see "Before you start: source files";
+        the recording made it executable first with `chmod +x graceful.sh`). Only the `trap` line is the point here; the waiting
+        line at the end is scaffolding that keeps the script alive, and the scripts lesson explains its syntax later:
+    - kind: show
+      id: script
+      run: "cat graceful.sh"
+      notice: "The `trap` line says what happens on SIGTERM: print a message and exit with status 0, a clean, successful stop. The last line only keeps the script waiting, one second at a time, after it prints `ready`."
+    - kind: show
+      id: graceful
+      run: "./graceful.sh & sleep 1; kill $!; wait $!; echo \"exit status: $?\""
+      notice: "SIGTERM was caught: the script printed its message and chose its own exit status, 0. Nothing about this stop looks like a failure."
+    - kind: ask
+      id: guess-kill-graceful
+      prompt: "The same script is sent SIGKILL instead. What happens?"
+      choices:
+        - text: "It ends at once, with no message, status 137"
+          why: "SIGKILL never reaches the program: the kernel ends it. No `trap` runs, so there is no tidying up."
+        - text: "It prints its message, then ends with 0"
+          why: "That is SIGTERM's path. SIGKILL cannot be caught, so the `trap` never runs."
+        - text: "It ignores the signal and keeps waiting"
+          why: "Nothing can ignore SIGKILL: that is its purpose."
+      answer: 0
+    - kind: show
+      id: killed
+      run: "./graceful.sh & sleep 1; kill -KILL $!; wait $!; echo \"exit status: $?\""
+      notice: "Only the `ready` it printed at the start: no SIGTERM message from the `trap`, and 137. Whatever it was in the middle of doing was cut off. The `bash: line 1: … Killed` line is how the recorder's non-interactive shell reports it; at your own prompt the same report appears as a job line, such as `[1]+  Killed  ./graceful.sh`."
+    - kind: teach
+      id: why-order
+      body: |
+        This is why careful tools stop things in two steps: send SIGTERM, wait a few seconds for the program to
+        finish cleanly, and only then send SIGKILL. `systemctl stop` does it for services, and you will meet the
+        same sequence again when you work with containers: a stop request, a grace period, then a kill. The
+        statuses 143 and 137 are consistent with those two endings, but a program can also choose to exit with any number itself. Treat the status as a clue, and look for evidence such as the shell's `Killed` message or systemd's `code=killed, status=9` before stating the cause.
+    - kind: ask
+      id: read-130
+      prompt: "A nightly job's log ends with `exit status: 130` and no error message. Which cause fits that number best, as a hypothesis to check?"
+      choices:
+        - text: "Ctrl-C, or something sending SIGINT"
+          why: "130 = 128 + 2, and signal 2 is SIGINT, which Ctrl-C sends. A program could also exit with 130 itself, so confirm with the job's logs or the shell's report."
+        - text: "The job's own error number 130"
+          why: "A program can return any value up to 255, so this is possible. But 130 is exactly the shell's number for death by signal 2, which makes the signal the better first hypothesis."
+        - text: "SIGKILL from the system"
+          why: "SIGKILL is 9, which gives 137, not 130."
+      answer: 0
+    - kind: reflect
+      id: explain-signals
+      prompt: "Explain to a colleague the difference between `kill PID` and `kill -9 PID`, and why the first should be tried first."
+      model: |
+        `kill PID` sends SIGTERM, a request the program can catch to save its work and exit cleanly (often with
+        status 0, or 143 if it does not catch it). `kill -9 PID` sends SIGKILL, which the kernel carries out at once:
+        the program gets no chance to clean up, and the status is 137. Try SIGTERM first and give it a few seconds;
+        use SIGKILL only for a program that does not stop.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can list processes and read their PID, parent and owner, start a command in the background, send
+        SIGTERM and SIGKILL, and read 130, 137 and 143 as clues to the signal that ended a process.
+
+        Containers are processes too: the containers part of the course starts from this lesson, and the same
+        stop sequence and the same numbers come back whenever a container is stopped or killed, on one machine
+        and later on many.
+
+        Next: services, the long-running processes that systemd starts and watches, and their logs.
+  sections:
+    - id: more-processes
+      title: "Process states, zombies and priorities"
+      depth: true
+      body: |
+        - The `STAT` column shows a process's state: `R` running, `S` sleeping (waiting for something), `D`
+          waiting for the disk and not interruptible, `T` stopped, `Z` zombie.
+        - A **zombie** is a process that has ended but whose parent has not yet collected its exit status. It uses
+          no memory, only a slot in the process table. `kill` cannot remove it, because it is already dead: the
+          parent must collect it, or the parent must end, after which it is adopted and collected by PID 1, or by a
+          nearer "subreaper" such as your session's `systemd --user`.
+        - Ctrl-Z sends SIGTSTP and stops (pauses) the foreground program; `bg` lets it continue in the background,
+          `fg` brings it back. `jobs` lists the shell's background jobs.
+        - `nice -n 10 command` starts a command with a lower priority, which matters only when CPUs are busy;
+          `top` shows the busiest processes live.
+        - Everything `ps` shows comes from `/proc/<PID>/`: `cat /proc/<PID>/status` shows a process's details.
+  review:
+    - q: "What is a PPID?"
+      a: "The PID of a process's parent, the process that started it."
+    - q: "Which signal does `kill PID` send? And `kill -9 PID`?"
+      a: "SIGTERM (15), which the program can catch. SIGKILL (9), which it cannot."
+    - q: "What do the exit statuses 130, 137 and 143 mean?"
+      a: "Consistent with death by signal: 128 + 2 (SIGINT, Ctrl-C), 128 + 9 (SIGKILL), 128 + 15 (SIGTERM). A program can also exit with these numbers itself, so look for confirming evidence."
+    - q: "Why send SIGTERM before SIGKILL?"
+      a: "SIGTERM gives the program a chance to finish cleanly; SIGKILL cuts it off."
+  commands:
+    - cmd: "ps -f -p $$ --ppid $$; echo \"this shell is PID $$\""
+      meaning: "the shell and its child, with parent and owner"
+    - cmd: "ps -o pid,user,comm -p 1; echo \"processes running now: $(ps -e --no-headers | wc -l)\""
+      meaning: "PID 1, and how many processes run"
+    - cmd: "ps -o pid,ppid,user,cmd -C crond,chronyd"
+      meaning: "services started by systemd (PPID 1)"
+    - cmd: "sleep 300 & echo \"started sleep, PID $!\"; ps -o pid,ppid,stat,cmd --ppid $$; kill $!"
+      meaning: "a background process and its parent"
+    - cmd: "sleep 300 & kill $!; wait $!; echo \"exit status: $?\""
+      meaning: "SIGTERM: exit status 143"
+    - cmd: "sleep 300 & kill -KILL $!; wait $!; echo \"exit status: $?\""
+      meaning: "SIGKILL: exit status 137"
+    - cmd: "chmod +x graceful.sh"
+      meaning: "make the script executable (not shown in the lesson)"
+    - cmd: "cat graceful.sh"
+      meaning: "a script that catches SIGTERM"
+    - cmd: "./graceful.sh & sleep 1; kill $!; wait $!; echo \"exit status: $?\""
+      meaning: "SIGTERM caught: clean exit, status 0"
+    - cmd: "./graceful.sh & sleep 1; kill -KILL $!; wait $!; echo \"exit status: $?\""
+      meaning: "SIGKILL: no clean-up, status 137"
+  files:
+    graceful.sh: |
+      #!/bin/bash
+      trap 'echo "SIGTERM received: saving and exiting"; exit 0' TERM
+      echo ready
+      while true; do sleep 1; done
+  references:
+    - {title: "Linux man-pages: signal(7)", url: "https://man7.org/linux/man-pages/man7/signal.7.html"}
+    - {title: "Linux man-pages: ps(1)", url: "https://man7.org/linux/man-pages/man1/ps.1.html"}
+    - {title: "Linux man-pages: kill(1)", url: "https://man7.org/linux/man-pages/man1/kill.1.html"}
+    - {title: "GNU Bash manual: Exit status (128 + n)", url: "https://www.gnu.org/software/bash/manual/html_node/Exit-Status.html"}
+    - {title: "GNU Bash manual: Signals and trap", url: "https://www.gnu.org/software/bash/manual/html_node/Signals.html"}
+    - {title: "systemd: systemd.kill (stop sequence)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html"}
+
+- id: lx.systemd-journal
+  title: "Services and their logs"
+  subtitle: "systemd starts, watches and restarts long-running programs; the journal keeps what they say"
+  module: lx2-system
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "systemd 252 on RHEL 9. Outputs recorded on a RHEL 9 workstation as an ordinary user; the demonstration services are temporary units in the user's own systemd instance, removed afterwards."
+  concepts: [linux.systemd]
+  prerequisites: [lx.processes-signals]
+  objective: |
+    Check whether a service is running and enabled, start, stop and restart one, read its unit file, explain what
+    a restart policy does when a program crashes, and find a service's messages in the journal.
+  flow:
+    - kind: ask
+      id: recall-pid1
+      recalls: lx.processes-signals
+      prompt: "A look back. What is PID 1 on a RHEL machine?"
+      choices:
+        - text: "systemd"
+          why: "The first process the kernel starts; it starts and supervises the system's services."
+        - text: "bash"
+          why: "Your shell is an ordinary process started for your session. PID 1 is started by the kernel at boot."
+        - text: "the kernel"
+          why: "The kernel is not a process with a PID; PID 1 is the first process it starts, systemd."
+      answer: 0
+    - kind: teach
+      id: services
+      title: "Programs that must keep running"
+      body: |
+        A web server, a database, a scheduler: some programs must start when the machine boots, keep running
+        whoever is logged in, and come back if they crash. Nobody wants to start them by hand with `&`. That is
+        the job of **systemd**, PID 1: each such program is a **service**, described by a small configuration
+        file called a **unit**, and systemd starts it, watches it, restarts it if told to, and keeps its output.
+
+        Two words matter for every service: its state now, **active** or not, and whether it is **enabled**
+        (set up to start automatically at boot). They are independent. For the long-running services in this
+        lesson, `active (running)` means the program is running now; other kinds of unit can be `active` in
+        other ways, so read the detail in brackets and the journal when you diagnose a stop.
+    - kind: show
+      id: is-active
+      body: "`systemctl` asks systemd. Here, about the scheduler service `crond` and the SSH server `sshd`:"
+      run: "systemctl --no-pager is-active crond sshd; systemctl --no-pager is-enabled crond"
+      notice: "`crond` and `sshd` are both running now (`active`), and `crond` will also start at the next boot (`enabled`)."
+    - kind: ask
+      id: active-vs-enabled
+      prompt: "A service shows `inactive` and `enabled`. What does that mean?"
+      choices:
+        - text: "Not running now; will start at boot"
+          why: "Active is about now, enabled about boot. This service is stopped now, and enabled means it is set up to start at boot, if its start succeeds then."
+        - text: "Running, but only until reboot"
+          why: "That would be active and disabled. `inactive` means it is not running now."
+        - text: "Broken and waiting to be repaired"
+          why: "`inactive` only means it is stopped now, not that anything is wrong: a service stopped on request is inactive, while one that crashed usually shows `failed`."
+      answer: 0
+    - kind: show
+      id: status
+      body: "`systemctl status` gives the whole picture of one service:"
+      run: "systemctl --no-pager status crond -n 0"
+      highlight: ["Active:", "Main PID"]
+      notice: |
+        `Loaded` names the unit file and whether it is enabled; `Active` says since when it runs; `Main PID` is its
+        main process (the processes lesson's PID), and `CGroup` lists all the processes that belong to it.
+        (`-n 0` hid the latest log lines that `status` normally shows at the end.)
+    - kind: teach
+      id: unit-file
+      title: "The unit file"
+      body: |
+        What systemd does with a service is written in its unit file. `systemctl cat` prints it, wherever it is
+        stored:
+    - kind: show
+      id: cat
+      run: "systemctl --no-pager cat crond"
+      highlight: ["ExecStart", "Restart", "WantedBy"]
+      notice: |
+        `[Service]` says what to run (`ExecStart`) and what to do when it stops (`Restart=on-failure`, after
+        `RestartSec`). `[Install]` says which group of units pulls it in at boot (`WantedBy=multi-user.target`):
+        that is what `enable` links up.
+    - kind: ask
+      id: read-unit
+      prompt: "In crond's unit file, which line decides that `systemctl enable crond` makes it start at boot?"
+      choices:
+        - text: "`WantedBy=multi-user.target`"
+          why: "`enable` links the unit into the target named in `[Install]`; at boot, that target pulls it in."
+        - text: "`Restart=on-failure`"
+          why: "That decides what happens when the running service fails, not whether it starts at boot."
+        - text: "`ExecStart=/usr/sbin/crond -n $CRONDARGS`"
+          why: "That is what runs when the service starts, at boot or by hand; it does not decide when."
+      answer: 0
+    - kind: teach
+      id: control
+      title: "Starting, stopping, enabling"
+      body: |
+        | Command | Effect |
+        |---|---|
+        | `systemctl start NAME` | start now |
+        | `systemctl stop NAME` | stop now: SIGTERM, then SIGKILL if it does not stop in time |
+        | `systemctl restart NAME` | stop, then start |
+        | `systemctl enable NAME` | start at every boot (does not start it now) |
+        | `systemctl enable --now NAME` | both |
+
+        System services need administrator rights: in practice `sudo systemctl …`. To try all of this without
+        them, every user also has a systemd instance of their own: `systemctl --user`. The recordings below use
+        it, with `systemd-run`, which starts a temporary service from a command, without writing a unit file.
+        `--user` needs a session you logged in to directly (console, SSH or desktop); in a shell opened with `su`
+        or `sudo -u` it usually fails with an error such as `Failed to connect to bus`.
+    - kind: show
+      id: run-demo
+      run: "systemd-run --user --unit=academy-demo --quiet sleep 300 && systemctl --user --no-pager status academy-demo -n 0 | head -n 4"
+      notice: "A temporary service, `academy-demo`, running `sleep 300` as its main process, `active (running)`."
+    - kind: try
+      id: try-stop
+      body: "Stop the service `academy-demo` in your user's systemd instance."
+      accept: ["systemctl --user stop academy-demo", "systemctl --user stop academy-demo.service", "systemctl stop --user academy-demo", "systemctl stop --user academy-demo.service"]
+      hints:
+        - match: "^systemctl stop academy-demo"
+          say: "Without `--user`, `systemctl` talks to the system instance, where this service does not exist (and stopping system services needs sudo). Add `--user`."
+        - match: "^kill "
+          say: "Killing its process works, but systemd may then consider the service failed, or restart it. Ask systemd to stop it."
+        - match: "^sudo "
+          say: "This service runs in your own user instance; no administrator rights are needed. Use `systemctl --user`."
+      hint: "`systemctl --user stop`, then the service's name."
+      run: "systemctl --user stop academy-demo; systemctl --user --no-pager is-active academy-demo"
+      then: "`inactive`: stopped. A temporary service like this one also disappears once it has stopped."
+    - kind: teach
+      id: restart
+      title: "When a service crashes"
+      body: |
+        `Restart=on-failure` in a unit tells systemd to start the service again after an unsuccessful exit code,
+        an unclean signal such as SIGKILL, or certain other failures. A stop you request with `systemctl stop`
+        does not trigger a restart, and neither do SIGTERM and a few other signals, which systemd counts as a
+        clean stop. That turns a crash into a short interruption. But a service that fails *every* time,
+        for example because of a typo in its configuration, would be restarted forever, so systemd also has a
+        limit: too many starts in a short time (by default 5 within 10 seconds), and it gives up and marks the
+        service `failed`.
+    - kind: show
+      id: crash
+      body: "A temporary service whose program prints two lines and exits with an error, every time, with `Restart=on-failure` after one second:"
+      run: "systemd-run --user --unit=academy-crash --quiet -p Restart=on-failure -p RestartSec=1 sh -c 'echo \"starting\"; echo \"config error: missing port\" >&2; exit 1'; sleep 8; systemctl --user --no-pager is-active academy-crash"
+      notice: "After a few seconds of being restarted every second, the service is `failed`: systemd stopped trying, as designed."
+    - kind: teach
+      id: journal
+      title: "The journal: what services said"
+      body: |
+        Everything a service writes to its standard output and standard error goes into the **journal**, systemd's
+        log store, tagged with the unit's name and the time. `journalctl` reads it:
+
+        - `journalctl -u NAME` shows one service's messages (`--user-unit NAME` for your own services);
+        - `-n 20` shows only the last 20 lines, `-f` follows new ones as they arrive;
+        - `-b` limits to this boot. `-p err` keeps only messages whose assigned severity is `err` or worse. A
+          plain `echo` on standard error is usually recorded at severity `info`, so `-p err` would not show it.
+          Start with the unfiltered log of the unit.
+    - kind: try
+      id: try-journal
+      body: "Read the messages of your user service `academy-crash`, without paging (`--no-pager`)."
+      accept: ["journalctl --user-unit academy-crash --no-pager", "journalctl --no-pager --user-unit academy-crash", "journalctl --user-unit=academy-crash --no-pager", "journalctl --user-unit academy-crash.service --no-pager", "journalctl --no-pager --user-unit academy-crash.service", "journalctl --user-unit=academy-crash.service --no-pager"]
+      hints:
+        - match: "^journalctl -u academy-crash"
+          say: "`-u` alone reads the system's services. This one runs in your user instance: `--user-unit academy-crash`."
+        - match: "--user .*-u academy-crash"
+          say: "`--user` reads only your own journal files, which exist only when the journal is kept on disk. On the machine used for this lesson it is kept in memory, and that finds nothing. `--user-unit academy-crash` also finds your service's messages in the system journal, if you may read it (see \"Limits and caveats\")."
+        - match: "^systemctl"
+          say: "`systemctl` controls services; their messages are read with `journalctl`."
+        - match: "^cat /var/log"
+          say: "Services' output goes to the journal, which `journalctl` reads. Some systems also copy it to files under /var/log, but the journal is the source."
+      hint: "`journalctl --user-unit academy-crash --no-pager`."
+      run: "journalctl --user-unit academy-crash --since -30s --no-pager -o cat | head -n 6"
+      then: |
+        Each attempt printed `starting` and the error, and systemd added its own lines about the restarts. (The
+        recording added `-o cat`, which hides time stamps, `--since -30s`, and `head` to keep it short.) The
+        error message is the answer: here, a missing setting. It was found without a `-p err` filter on purpose: that error line was printed, not assigned the severity `err`.
+    - kind: ask
+      id: where-look
+      prompt: "A service is `failed` after an update. Which command shows the program's own error message?"
+      choices:
+        - text: "`journalctl -u NAME -n 50`"
+          why: "The journal holds what the service printed, including the error that made it exit."
+        - text: "`systemctl enable NAME`"
+          why: "`enable` sets up starting at boot; it neither starts the service nor shows its messages."
+        - text: "`ps -ef | grep NAME`"
+          why: "A failed service has no running process to list. Its last words are in the journal."
+      answer: 0
+    - kind: show
+      id: cleanup
+      run: "systemctl --user reset-failed academy-crash && echo cleaned up"
+      notice: "`reset-failed` clears the failed state (and lets a temporary unit disappear). After fixing a real service's configuration, `systemctl reset-failed NAME`, then `start`, is the usual sequence."
+    - kind: reflect
+      id: explain-restart
+      prompt: "A colleague asks why their service with `Restart=always` is `failed` and no longer restarting. Explain."
+      model: |
+        systemd does restart it, but it also limits how often: too many starts in a short time (by default 5 in 10
+        seconds) and it stops trying and marks the service failed, so that a service that can never start does not
+        loop forever. The journal (`journalctl -u NAME`) shows why each attempt failed; fix that, then
+        `systemctl reset-failed NAME` and start it again.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can tell whether a service is running and enabled, start, stop and restart it, read its unit file,
+        explain what a restart policy and its limit do, and read a service's messages in the journal.
+
+        The same ideas, a description of what should run, a supervisor that restarts it, and logs from its output
+        streams, return later in the course at a larger scale: on a platform that runs containers across many
+        machines, you describe what should run, the platform keeps it running, and you read what each container
+        printed. Next: how a Linux machine talks to the network.
+  sections:
+    - id: more-systemd
+      title: "Drop-ins, dependencies, timers and persistent journals"
+      depth: true
+      body: |
+        - Never edit a unit file under `/usr/lib/systemd/system`: package updates replace it. `systemctl edit NAME`
+          creates a **drop-in** under `/etc/systemd/system/NAME.service.d/` that overrides single settings. After
+          changing unit files, `systemctl daemon-reload`.
+        - `Wants=` and `Requires=` pull other units in; `After=` and `Before=` only order them. A service that needs
+          the network up uses `After=network-online.target` with `Wants=network-online.target`.
+        - A **timer** unit starts a service on a schedule, like cron; `Persistent=true` runs a missed occurrence
+          when the machine comes back. `systemctl list-timers` lists them.
+        - The journal is kept in memory under `/run/log/journal` unless `/var/log/journal` exists (or
+          `Storage=persistent` is set), in which case it survives reboots; `journalctl -b -1` reads the previous
+          boot.
+        - `systemctl stop` sends SIGTERM to the service's processes, waits (`TimeoutStopSec`, 90 seconds by
+          default), then SIGKILL.
+  limits: |
+    On the machine used for this lesson the journal is kept in memory. Then journald does not keep separate
+    journal files per user: your own services' messages go into the system journal, which on RHEL 9 only members
+    of the `wheel`, `adm` or `systemd-journal` groups can read. The recording user could read them; outside those
+    groups, `journalctl --user-unit` shows nothing from them. `systemctl --user` and `systemd-run --user` need a
+    session you logged in to directly, not one opened with `su` or `sudo -u`.
+  review:
+    - q: "What is the difference between active and enabled?"
+      a: "Active: running now. Enabled: started automatically at boot. They are independent."
+    - q: "How do you read the last 50 messages of a service?"
+      a: "`journalctl -u NAME -n 50` (`--user-unit` for a user service)."
+    - q: "Why can a service with Restart=on-failure end up `failed`?"
+      a: "systemd stops restarting after too many starts in a short time (by default 5 in 10 seconds)."
+    - q: "Which command starts a service now and at every boot?"
+      a: "`systemctl enable --now NAME`."
+  commands:
+    - cmd: "systemctl --no-pager is-active crond sshd; systemctl --no-pager is-enabled crond"
+      meaning: "running now, and enabled at boot"
+    - cmd: "systemctl --no-pager status crond -n 0"
+      meaning: "the status of one service"
+    - cmd: "systemctl --no-pager cat crond"
+      meaning: "its unit file"
+    - cmd: "systemd-run --user --unit=academy-demo --quiet sleep 300 && systemctl --user --no-pager status academy-demo -n 0 | head -n 4"
+      meaning: "a temporary user service"
+    - cmd: "systemctl --user stop academy-demo; systemctl --user --no-pager is-active academy-demo"
+      expect: any
+      meaning: "stopped"
+    - cmd: "systemd-run --user --unit=academy-crash --quiet -p Restart=on-failure -p RestartSec=1 sh -c 'echo \"starting\"; echo \"config error: missing port\" >&2; exit 1'; sleep 8; systemctl --user --no-pager is-active academy-crash"
+      expect: any
+      meaning: "a service that always fails ends up failed"
+    - cmd: "journalctl --user-unit academy-crash --since -30s --no-pager -o cat | head -n 6"
+      meaning: "its messages in the journal"
+    - cmd: "systemctl --user reset-failed academy-crash && echo cleaned up"
+      meaning: "clear the failed state"
+  references:
+    - {title: "systemd: systemctl(1)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemctl.html"}
+    - {title: "systemd: systemd.service(5) (Restart=)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html"}
+    - {title: "systemd: systemd.unit(5) (StartLimitIntervalSec, StartLimitBurst)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html"}
+    - {title: "systemd: journalctl(1)", url: "https://www.freedesktop.org/software/systemd/man/latest/journalctl.html"}
+    - {title: "systemd: systemd-run(1)", url: "https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html"}
+    - {title: "RHEL 9: Managing systemd", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_basic_system_settings/managing-systemd_configuring-basic-system-settings"}
+
+- id: lx.networking
+  title: "How a Linux machine talks to the network"
+  subtitle: "Addresses, routes, names, ports, and reading why a connection fails"
+  module: lx2-system
+  mode: GUIDED_INVESTIGATION
+  minutes: 28
+  level: 1
+  supports: "iproute2, curl 7.76, getent and nftables on RHEL 9. Recorded on a RHEL 9 workstation as an ordinary user; the experiments run in a private, empty network created with `unshare -rn`, so the machine's real network is never changed; only its loopback, its SSH listener and its name-lookup settings are shown."
+  concepts: [linux.networking]
+  prerequisites: [lx.systemd-journal]
+  objective: |
+    Read a machine's addresses and routes, know what a /24 contains, check how a name resolves, see which programs
+    listen on which ports and addresses, and tell a refused connection from a timeout, an unreachable network and
+    a name that does not resolve.
+  flow:
+    - kind: ask
+      id: recall-journal
+      recalls: lx.systemd-journal
+      prompt: "A look back. Which command shows the recent messages of the service `httpd`?"
+      choices:
+        - text: "`journalctl -u httpd -n 50`"
+          why: "The journal keeps what each service printed; `-u` selects the service and `-n` the last lines."
+        - text: "`systemctl enable httpd`"
+          why: "`enable` sets up starting at boot; it shows nothing about what the service said."
+        - text: "`cat /etc/httpd`"
+          why: "That is a configuration directory, not the service's messages, which are in the journal."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "\"It cannot connect\""
+      body: |
+        "The application cannot reach the database" is one of the most common problems there is, and one of the
+        vaguest. Picture two machines: the application on one, the database on the other. For a request to get
+        through, several steps must all work: the machine needs an **address**, it needs a **route** to the other
+        machine, the name you typed must be turned into an address (a **name lookup**), a program on the other
+        machine must be **listening** on the right **port**, and nothing in between may drop the traffic.
+
+        Each of those words is explained in the section where it first matters. The lesson ends with the skill
+        that ties them together: reading *how* a connection failed, which tells you which step is broken.
+    - kind: teach
+      id: addresses
+      title: "Interfaces and addresses"
+      body: |
+        A machine is attached to a network through an **interface**. Each interface has one or more **IP
+        addresses** (IP is the Internet Protocol, the common language of networks): numbers such as `10.88.0.5`
+        that identify the interface on its network, the way a street address identifies a house. Every Linux
+        machine also has `lo`, the **loopback** interface, with the address `127.0.0.1` (and `::1`, its IPv6
+        form, a newer and longer kind of address): it only ever connects a machine to itself.
+
+        `ip -br addr` (brief) lists the interfaces, one line each: name, state, addresses.
+    - kind: teach
+      id: private-net
+      body: |
+        A real workstation's network cannot be shown safely in a course, so the recordings use a practice network.
+        `unshare -rn` starts a command with a **network of its own**: empty at first, invisible to the rest of the
+        machine, and gone when the command ends. (It uses the same kernel feature that containers use, which
+        comes back in the containers part of the course.) A script supplied with the lesson, `net-setup.sh` (see "Before you start: source files"), gives that private
+        network a loopback and one interface, `eth0`, with the address `10.88.0.5/24`.
+
+        In every recording that starts with `unshare -rn bash -c 'source net-setup.sh; …'`, the wrapper is supplied
+        setup (`source` runs the script's lines in that shell). Only the `ip` commands after it are what you
+        would type.
+
+        The `-r` makes you root inside that private namespace only. That is why the setup can add addresses, routes
+        and firewall rules without `sudo`, and why `ip route get` shows `uid 0` below. On the machine's real network,
+        the same changes need root.
+    - kind: show
+      id: setup
+      body: "The addresses of the practice network:"
+      run: "unshare -rn bash -c 'source net-setup.sh; ip -br addr' 2>&1"
+      highlight: ["10.88.0.5/24"]
+      notice: |
+        Two lines: `lo` with `127.0.0.1/8`, and `eth0` with `10.88.0.5/24` (the long address starting `fe80` is an
+        automatic IPv6 address that you can ignore). The state column says `UNKNOWN` for both interfaces: that is normal for a loopback and for this practice interface (a real network card usually shows `UP`), and does not mean the address is unknown, so ignore it here. The
+        `/24` is explained below.
+      understand:
+        purpose: Starts a shell in a network namespace of its own, builds the practice network there with the supplied
+          script, and lists its interfaces. The private network disappears when that shell ends.
+        parts:
+          - text: -rn
+            means: 'Two options. `-n` creates a new network namespace: a separate set of interfaces, addresses and routes,
+              with only a loopback interface (still down) at first. `-r` maps your user to root (UID 0) inside a new user
+              namespace, which gives the command the rights to configure that network without being root on the real machine.'
+          - text: bash -c
+            means: Runs the quoted text as a script in a new `bash`, inside those namespaces. The single quotes keep your
+              own shell from reading the `;` inside them.
+          - text: 2>&1
+            means: Sends error messages (stream 2) to the same place as normal output (stream 1), so both appear together.
+        needs: A Linux machine that lets ordinary users create user namespaces (the per-user limit in `/proc/sys/user/max_user_namespaces`
+          must be above 0), and the lesson's `net-setup.sh` in the current directory.
+        concepts:
+          - linux.networking
+        refs:
+          - title: unshare(1)
+            url: https://man7.org/linux/man-pages/man1/unshare.1.html
+          - title: 'namespaces(7): /proc/sys/user'
+            url: https://man7.org/linux/man-pages/man7/namespaces.7.html
+          - title: 'Bash manual: Redirections'
+            url: https://www.gnu.org/software/bash/manual/html_node/Redirections.html
+    - kind: try
+      id: lo
+      body: "On the real machine, list only the loopback interface `lo` and its addresses, in the brief format."
+      accept: ["ip -br addr show lo", "ip -br address show lo", "ip -br a show lo", "ip -brief addr show lo", "ip -br addr show dev lo", "ip -brief address show lo", "ip -brief addr show dev lo", "ip -br address show dev lo", "ip -brief address show dev lo", "ip -br addr list lo", "ip -br a s lo"]
+      hints:
+        - match: "^ifconfig"
+          say: "`ifconfig` is the old tool and is often not installed on RHEL. The current one is `ip`."
+        - match: "^ip -br addr$"
+          say: "That lists every interface. Add `show lo` to keep only the loopback."
+        - match: "^ip addr show lo$"
+          say: "That works, in the long format. The task asked for the brief one: add `-br`."
+      hint: "The brief listing from the previous step, followed by `show` and the interface's name."
+      run: "ip -br addr show lo"
+      then: "`lo` with `127.0.0.1/8` and `::1/128`, the same two addresses as in the practice network. The state `UNKNOWN` is again normal for a loopback."
+    - kind: teach
+      id: cidr
+      body: |
+        An IPv4 address is four numbers from 0 to 255 separated by dots, such as `10.88.0.5`. The `/24` after an
+        address is the **prefix length**. For a /24, the first three numbers name the network and only the last
+        number varies: it names the machine in it. So `10.88.0.0/24` covers `10.88.0.0` to `10.88.0.255`.
+        (Strictly, the 24 counts bits: each number is 8 bits, so three numbers are 24 bits. You need that only to
+        read other prefix lengths.)
+
+        A smaller number after the slash means a larger network: `/16` fixes only the first two numbers and covers
+        `10.88.0.0` to `10.88.255.255`.
+    - kind: ask
+      id: in-network
+      prompt: "Which address is inside `10.88.0.0/24`?"
+      choices:
+        - text: "`10.88.0.200`"
+          why: "The first three numbers are `10.88.0`, so it is in the network; only the last number varies."
+        - text: "`10.88.1.5`"
+          why: "The third number differs. A /24 fixes the first three numbers; `10.88.1.5` is in the next /24."
+        - text: "`10.89.0.5`"
+          why: "The second number differs, so it is outside, in a different network altogether."
+      answer: 0
+    - kind: teach
+      id: routes
+      title: "Routes: which way out"
+      body: |
+        To send something to another machine, the kernel needs a **route**: a rule saying which interface to use
+        for a range of addresses. `ip route` lists the routing table, and `ip route get ADDRESS` asks which rule
+        applies to one address.
+    - kind: show
+      id: route-table
+      run: "unshare -rn bash -c 'source net-setup.sh; ip route; ip route get 10.88.0.77' 2>&1"
+      highlight: ["10.88.0.0/24"]
+      notice: |
+        The routing table has one line: addresses in `10.88.0.0/24` are reachable directly through `eth0` (`dev
+        eth0`), and the machine uses its own address `10.88.0.5` as the sender (`src`). The second command asks
+        about one address: `10.88.0.77` is inside that network, so it goes out through `eth0`. (The `cache` line
+        is a detail you can ignore.)
+    - kind: ask
+      id: which-interface
+      prompt: "With only that routing table, which interface does traffic to `10.88.0.200` leave through?"
+      choices:
+        - text: "`eth0`"
+          why: "`10.88.0.200` is inside `10.88.0.0/24`, and the only route says that network is reachable directly through `eth0`."
+        - text: "`lo`"
+          why: "`lo` only connects the machine to itself. No route sends other addresses to it."
+        - text: "None: no route matches"
+          why: "A route matches: `10.88.0.0/24` covers `10.88.0.200`, as the last number varies inside a /24."
+      answer: 0
+    - kind: show
+      id: no-route
+      body: "An address outside that network:"
+      run: "unshare -rn bash -c 'source net-setup.sh; ip route get 192.0.2.10 || echo \"exit status: $?\"' 2>&1"
+      highlight: ["unreachable"]
+      notice: "No route matches `192.0.2.10`, so the kernel refuses at once: \"Network is unreachable\"."
+    - kind: teach
+      id: gateway
+      body: |
+        A network of 256 addresses is not the whole world. For everything else, a normal machine has a **default
+        route**, naming a **gateway**: another machine on this network that passes traffic on towards other
+        networks. (Traffic travels in **packets**: small pieces of data, each carrying the address it is going to.) The next recording adds one to the practice network (the `ip route add` part is supplied setup)
+        and asks again about the same address.
+    - kind: show
+      id: default-route
+      run: "unshare -rn bash -c 'source net-setup.sh; ip route add default via 10.88.0.1; ip route get 192.0.2.10' 2>&1"
+      highlight: ["via 10.88.0.1"]
+      notice: |
+        Now the same address has a route: `192.0.2.10 via 10.88.0.1 dev eth0`. The packets leave through `eth0`
+        addressed to the gateway `10.88.0.1`, which passes them on. `10.88.0.1` is only a placeholder here; no
+        machine answers at that address in the practice network.
+    - kind: ask
+      id: read-gateway
+      prompt: "In `192.0.2.10 via 10.88.0.1 dev eth0`, what is `10.88.0.1`?"
+      choices:
+        - text: "The next machine on the way"
+          why: "`via` names the next hop. The packets go to that machine, which passes them towards `192.0.2.10`."
+        - text: "The destination of the connection"
+          why: "The destination is `192.0.2.10`, the address asked about at the start of the line."
+        - text: "This machine's own address"
+          why: "The machine's own address is the `src` value shown in the earlier routes, `10.88.0.5`."
+      answer: 0
+    - kind: teach
+      id: names
+      title: "Names: from web.example.com to an address"
+      body: |
+        Programs usually connect to **names**, not addresses. The order in which Linux looks them up is in
+        `/etc/nsswitch.conf`: typically `files` (the `/etc/hosts` file) first, then `dns`. **DNS** is a service on the
+        network that answers the question "which address has this name?". `getent hosts NAME` tests the system's
+        configured lookup sources in that order. `getent ahosts NAME` is a useful approximation of what many
+        applications do; the connection output of the application itself shows which address it really tried.
+    - kind: try
+      id: nsswitch
+      body: "Find out what address `localhost` resolves to, using the system's configured lookup sources."
+      accept: ["getent hosts localhost", "getent ahosts localhost"]
+      hints:
+        - match: "^(ping|dig|nslookup|host) "
+          say: "`dig`, `nslookup` and `host` ask DNS servers directly and skip `/etc/hosts`; `ping` sends traffic. `getent hosts` follows the configured lookup order."
+        - match: "^cat /etc/hosts"
+          say: "That shows one of the sources, but not the order programs follow. `getent hosts` does the whole lookup."
+      hint: "`getent hosts`, then the name."
+      run: "grep -E '^hosts:' /etc/nsswitch.conf; getent hosts localhost"
+      then: "Files first, then DNS, then `myhostname`. `localhost` is answered from `/etc/hosts`, without any DNS server. `getent hosts` showed one address; `getent ahosts localhost` would list the addresses in the form many applications use."
+    - kind: show
+      id: bad-name
+      body: "A name that does not exist (the `.invalid` domain is reserved for that):"
+      run: "getent hosts web.invalid || echo \"getent exit status: $?\"; curl -sS -m 5 http://web.invalid/ 2>&1 || echo \"curl exit status: $?\""
+      notice: "`getent` finds nothing (status 2), and `curl` fails before any connection is tried: \"Could not resolve host\", exit status 6. The failure happened during the name lookup, before connecting to the application. Here the name deliberately does not exist. For a real name, check the spelling and the configured lookup sources, including whether the DNS servers can be reached."
+      understand:
+        purpose: Looks up a name that cannot exist twice, first with the system's own lookup (`getent`) and then with
+          an application (`curl`), and prints each command's exit status when it fails.
+        parts:
+          - text: '||'
+            means: Runs the command on its right only if the one on its left failed (a non-zero exit status).
+          - text: $?
+            means: 'The exit status of the last command: here, the one that just failed.'
+          - text: -sS
+            means: '`-s` hides curl''s progress meter and error messages; `-S` brings the error message back. Together:
+              quiet, but it still says why it failed.'
+          - text: -m 5
+            means: Gives up after 5 seconds in total (`--max-time`), so a slow network cannot make the command hang.
+        concepts:
+          - linux.shell
+          - linux.networking
+        refs:
+          - title: curl manual (-s, -S, -m, exit codes)
+            url: https://curl.se/docs/manpage.html
+          - title: 'Bash manual: Lists of commands'
+            url: https://www.gnu.org/software/bash/manual/html_node/Lists.html
+          - title: 'Bash manual: Special parameters'
+            url: https://www.gnu.org/software/bash/manual/html_node/Special-Parameters.html
+    - kind: teach
+      id: ports
+      title: "Ports, and who listens"
+      body: |
+        An address identifies a machine; a **port** (a number from 1 to 65535) identifies a program on it. A server
+        **listens** on a port, and clients connect to address and port. Most connections use **TCP**, which sets up
+        a connection first, then delivers the data in order and confirms it arrived. `ss -tln` lists the TCP (`-t`)
+        ports on which something is listening (`-l`), with numbers (`-n`) instead of names.
+    - kind: show
+      id: ss
+      run: "ss -tln 'sport = :22'"
+      notice: "The SSH server listens on port 22, on `0.0.0.0` (every IPv4 address of the machine) and `[::]` (every IPv6 address). The filter kept only port 22."
+    - kind: teach
+      id: binding
+      title: "127.0.0.1 or 0.0.0.0: where a server listens"
+      body: |
+        A server listens not only on a port but on an **address**. Bound to `127.0.0.1`, it accepts only connections
+        made to `127.0.0.1`, which can only come from the same machine. Bound to `0.0.0.0`, it accepts connections
+        to any of the machine's addresses. Many development servers default to `127.0.0.1`, which is safe, and
+        surprising when you try to reach them from elsewhere.
+
+        The next recording runs the supplied script `bind-demo.sh` (see "Before you start: source files"). It starts a small
+        web server (Python's built-in one: a program that answers **HTTP** requests, the protocol browsers use to
+        ask for pages) bound to the address it is given, in the private network, then connects to it with `curl`
+        on both of that network's addresses.
+    - kind: ask
+      id: guess-bind
+      guess: true
+      prompt: "The server is bound to `127.0.0.1:8080`. Does a connection to `10.88.0.5:8080`, the same machine's other address, work?"
+      choices:
+        - text: "Yes: it is the same machine"
+          why: "A reasonable guess. The next step shows what the kernel does."
+        - text: "No: refused, nothing listens on that address"
+          why: "See the next step."
+        - text: "It hangs until a timeout"
+          why: "The next step shows how the failure looks."
+      answer: 1
+    - kind: show
+      id: bind-local
+      run: "unshare -rn bash bind-demo.sh 127.0.0.1 2>&1"
+      highlight: ["127.0.0.1:8080", "refused"]
+      notice: |
+        `ss` shows the server listening on `127.0.0.1:8080`. Through `127.0.0.1` it answers; through `10.88.0.5` the
+        kernel finds no listener for that address and port, and refuses at once (curl exit status 7).
+    - kind: show
+      id: bind-all
+      body: "The same server bound to `0.0.0.0`:"
+      run: "unshare -rn bash bind-demo.sh 0.0.0.0 2>&1"
+      notice: "Listening on `0.0.0.0:8080`, it answers on both addresses."
+    - kind: teach
+      id: failures
+      title: "Reading how a connection failed"
+      body: |
+        Each broken layer fails in its own way, and `curl -v` (verbose) shows it. The last recording runs the
+        supplied script `failures.sh`, which sets up a firewall rule and a server and then triggers three
+        failures in the private network: a port where nothing listens, a port where a server listens but a
+        **firewall** (rules that decide which packets may pass, on the machine or on a device in between) drops
+        the packets, and an address with no route. Watch the message and the time each takes.
+    - kind: show
+      id: three-failures
+      run: "unshare -rn bash failures.sh 2>&1"
+      highlight: ["refused", "timed out", "unreachable"]
+      notice: |
+        - **Connection refused**, at once: something answered with an active rejection. Common causes are that
+          nothing listens there (wrong port, or bound to another address) or that a firewall rejects the
+          connection. In this recording the setup is controlled, so we know the cause is the missing listener.
+        - **Timed out**, after the full 3 seconds: no answer at all, and the `Trying` line is not followed by a
+          `Connected` line. The packets were dropped, typically by a firewall, or the machine is down. Exit
+          status 28.
+        - **Network is unreachable**, at once: no route, the packets never left.
+
+        With "Could not resolve host" from earlier, that is four distinct failures, each pointing at a different
+        layer.
+    - kind: ask
+      id: diagnose
+      prompt: |
+        `curl -v --connect-timeout 5 http://web.internal:8080/` prints `Trying 10.88.0.5:8080...`, then five seconds
+        later `Connection timed out`. There is no `Connected` line. Which statement does that evidence support best?
+      choices:
+        - text: "Packets get no reply: check firewalls next"
+          why: "The name resolved (an address is shown), but the connection never completed and nothing came back, which fits dropped packets. It is a hypothesis: confirm it by checking the firewalls on the path and whether the machine is up."
+        - text: "The name does not resolve"
+          why: "An address is shown after `Trying`, so the name lookup worked. A failed lookup stops before any `Trying` line, with \"Could not resolve host\"."
+        - text: "The server answered with an error page"
+          why: "An HTTP answer needs a completed connection, and there is no `Connected` line. A timeout means no reply ever came back."
+      answer: 0
+    - kind: order
+      id: checklist
+      prompt: "A program cannot reach `api.example.com:443`. Put the checks in the order the connection itself depends on them."
+      items:
+        - "Does the name resolve? (`getent hosts api.example.com`)"
+        - "Is there a route to that address? (`ip route get <address>`)"
+        - "Does something listen on that port and address? (`ss -tln` on the server)"
+        - "Does a firewall allow the traffic? (refused or timed out?)"
+      why: "A connection needs a name resolved to an address, a route to it, a listener on the other side and a path that is not blocked. Checking in that order follows the connection itself."
+    - kind: reflect
+      id: explain-failures
+      prompt: "Explain to a colleague the difference between \"Connection refused\" and a timeout, and what each suggests."
+      model: |
+        Refused comes back at once: something actively rejected the connection. The usual causes are that nothing
+        listens on that port and address (check the port, and whether the server is bound to 127.0.0.1 only) or that
+        a firewall rejects it. A timeout means no answer came back at all: the packets were dropped on the way,
+        usually by a firewall, or the machine is down, so look at firewalls and routes between the two machines.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can read addresses and routes, say what a /24 contains, test a name the way programs resolve it, see
+        what listens on which port and address, and recognise the four common connection failures by their message
+        and timing.
+
+        Everything later in the course that connects programs, containers included, is built from exactly these
+        pieces, and the same four failures come back there. Next: disks, filesystems and why "No space left on device" can appear on a disk
+        that is not full.
+  sections:
+    - id: more-networking
+      title: "UDP, NAT and firewalld"
+      depth: true
+      body: |
+        - TCP connects and confirms delivery; **UDP** sends single datagrams without a connection (DNS queries
+          usually use UDP port 53). `ss -tuln` lists both; a UDP socket shows as `UNCONN` rather than `LISTEN`.
+        - Private address ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are not routed on the internet;
+          a router translates them (**NAT**) on the way out.
+        - On RHEL, **firewalld** manages the firewall: `firewall-cmd --list-all` shows the active zone's services
+          and ports. Its default zones reject (an immediate "No route to host"), unlike a plain drop rule, which
+          produces a timeout.
+        - `/etc/resolv.conf` lists the DNS servers and the `search` domains tried for short names.
+        - Two of the source files are extras that no recording uses: `curl-verbose.sh` shows the stages `curl -v`
+          reports (trying, connected, request, response) on a working connection, and `udp-demo.sh` opens a UDP
+          socket next to a TCP one so that `ss -tuln` lists both. Run them the same way, with `unshare -rn bash`.
+  limits: |
+    The practice scripts need `unshare -r` to be allowed for ordinary users (the RHEL 9 default; some distributions
+    disable it), plus `python3`, `curl` and `nft`. The `ss` step shows output only if an SSH server is running on
+    your machine.
+  review:
+    - q: "What does `10.88.0.0/24` cover?"
+      a: "10.88.0.0 to 10.88.0.255: the first 24 bits identify the network."
+    - q: "How do you test a name with the system's configured lookup sources?"
+      a: "`getent hosts NAME` (it follows /etc/nsswitch.conf: /etc/hosts, then DNS); `getent ahosts NAME` approximates many applications."
+    - q: "A server listens on 127.0.0.1:8080. Who can connect to it?"
+      a: "Only programs on the same machine, through 127.0.0.1. Bind to 0.0.0.0 to accept connections on every address."
+    - q: "Refused, timed out, unreachable, could not resolve: what does each point to?"
+      a: "Nothing listening or a firewall rejecting; packets dropped (firewall or host down); no route; the name lookup (a bad name, or DNS not reachable)."
+  commands:
+    - cmd: "ip -br addr show lo"
+      meaning: "the loopback interface"
+    - cmd: "unshare -rn bash -c 'source net-setup.sh; ip -br addr' 2>&1"
+      meaning: "addresses of a private practice network"
+    - cmd: "unshare -rn bash -c 'source net-setup.sh; ip route; ip route get 10.88.0.77' 2>&1"
+      meaning: "the routing table, and the route to one address"
+    - cmd: "unshare -rn bash -c 'source net-setup.sh; ip route get 192.0.2.10 || echo \"exit status: $?\"' 2>&1"
+      meaning: "an address with no route"
+    - cmd: "unshare -rn bash -c 'source net-setup.sh; ip route add default via 10.88.0.1; ip route get 192.0.2.10' 2>&1"
+      meaning: "the same address, with a default route through a gateway"
+    - cmd: "grep -E '^hosts:' /etc/nsswitch.conf; getent hosts localhost"
+      meaning: "the lookup order, and a name from /etc/hosts"
+    - cmd: "getent hosts web.invalid || echo \"getent exit status: $?\"; curl -sS -m 5 http://web.invalid/ 2>&1 || echo \"curl exit status: $?\""
+      meaning: "a name that does not resolve"
+    - cmd: "ss -tln 'sport = :22'"
+      meaning: "the SSH server listening on port 22"
+    - cmd: "unshare -rn bash bind-demo.sh 127.0.0.1 2>&1"
+      meaning: "a server bound to 127.0.0.1"
+    - cmd: "unshare -rn bash bind-demo.sh 0.0.0.0 2>&1"
+      meaning: "a server bound to 0.0.0.0"
+    - cmd: "unshare -rn bash failures.sh 2>&1"
+      meaning: "refused, timed out, unreachable"
+  files:
+    "net-setup.sh": |
+      # Sourced inside a new network namespace (unshare -rn): only these processes see this network.
+      ip link set lo up
+      ip link add eth0 type dummy
+      ip addr add 10.88.0.5/24 dev eth0
+      ip link set eth0 up
+    "bind-demo.sh": |
+      # Start a web server bound to the address given as $1, then connect to it on two addresses.
+      source net-setup.sh
+      python3 -m http.server 8080 --bind "$1" > /dev/null 2>&1 &
+      sleep 1
+      ss -tln
+      for ip in 127.0.0.1 10.88.0.5; do
+        code=$(curl -sS -m 3 -o /dev/null -w '%{http_code}' "http://$ip:8080/") \
+          && echo "$ip:8080 answers HTTP $code" || echo "$ip:8080 failed (curl exit status $?)"
+      done
+      kill $!
+    "curl-verbose.sh": |
+      # The stages curl reports with -v: lines starting with * (curl), > (request) and < (response).
+      source net-setup.sh
+      python3 -m http.server 8080 > /dev/null 2>&1 &
+      sleep 1
+      curl -sv -o /dev/null http://10.88.0.5:8080/ 2>&1 | grep -E '^(\*  *(Trying|Connected)|[<>] [A-Za-z])' | head -8
+      kill $!
+    "failures.sh": |
+      # Three ways a TCP connection fails, each with its own message and timing.
+      source net-setup.sh
+      # a firewall rule that silently drops TCP traffic to port 9000
+      nft add table inet fw
+      nft add chain inet fw input '{ type filter hook input priority 0; }'
+      nft add rule inet fw input tcp dport 9000 drop
+      python3 -m http.server 9000 > /dev/null 2>&1 &   # a server that listens behind the firewall
+      sleep 1
+      try() {
+        echo "--- $1"
+        start=$SECONDS
+        curl -sv --connect-timeout 3 -o /dev/null "$1" 2>&1 | grep -v '^\* Closing'
+        echo "curl exit status: ${PIPESTATUS[0]} after $((SECONDS - start)) s"
+      }
+      try http://10.88.0.5:8081/   # nothing listens on port 8081
+      try http://10.88.0.5:9000/   # a server listens, the firewall drops the packets
+      try http://192.0.2.10/       # no route to that network
+      kill $!
+    "udp-demo.sh": |
+      # A UDP socket next to a TCP one: ss -tuln shows both kinds.
+      source net-setup.sh
+      python3 -m http.server 8080 > /dev/null 2>&1 &
+      python3 -c 'import socket, time; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("0.0.0.0", 5353)); time.sleep(3)' &
+      sleep 1
+      ss -tuln
+      kill %1 %2
+  references:
+    - {title: "Linux man-pages: ip-address(8)", url: "https://man7.org/linux/man-pages/man8/ip-address.8.html"}
+    - {title: "Linux man-pages: ip-route(8)", url: "https://man7.org/linux/man-pages/man8/ip-route.8.html"}
+    - {title: "Linux man-pages: ss(8)", url: "https://man7.org/linux/man-pages/man8/ss.8.html"}
+    - {title: "Linux man-pages: nsswitch.conf(5)", url: "https://man7.org/linux/man-pages/man5/nsswitch.conf.5.html"}
+    - {title: "curl documentation: exit codes", url: "https://curl.se/docs/manpage.html#EXIT"}
+    - {title: "RFC 4632: Classless Inter-domain Routing (CIDR)", url: "https://www.rfc-editor.org/rfc/rfc4632"}
+    - {title: "RHEL 9: Configuring firewalls and packet filters", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/index"}
+
+- id: lx.storage-filesystems
+  title: "Disks, filesystems and \"No space left\""
+  subtitle: "Where files really live, how space is counted, and the two ways a filesystem can be full"
+  module: lx2-system
+  mode: GUIDED_INVESTIGATION
+  minutes: 25
+  level: 1
+  supports: "util-linux and GNU coreutils 8.32 on CentOS Stream 9 (the upstream of RHEL 9). Recorded as an ordinary user on a disposable virtual machine with two virtual disks, the second one given to LVM; the experiments with full filesystems run on small private memory filesystems created with `unshare -rm`, never on the machine's disks."
+  concepts: [linux.storage]
+  prerequisites: [lx.networking]
+  objective: |
+    Read which disk and filesystem hold a directory, check free space and free inodes, explain why "No space left on
+    device" can appear on a filesystem that is not full, and find space held by a deleted file that is still open.
+  flow:
+    - kind: ask
+      id: recall-timeout
+      recalls: lx.networking
+      prompt: "A look back. A connection attempt fails at once with \"Connection refused\". What does that tell you?"
+      choices:
+        - text: "Something actively rejected it"
+          why: "Refused is an active rejection. A common cause is that no program listens on that port and address; a firewall that rejects with a TCP reset can give the same message, so check both."
+        - text: "A firewall silently dropped the packets"
+          why: "Dropped packets give no answer at all, so the client waits until it times out instead of failing at once."
+        - text: "The name did not resolve"
+          why: "That fails before any connection, with \"Could not resolve host\"."
+      answer: 0
+    - kind: teach
+      id: situation
+      title: "\"No space left on device\", on a half-empty disk"
+      body: |
+        An application stops writing with "No space left on device". You check, and the disk is less than half
+        full. Or you delete a huge log file to free space, and nothing is freed. Both happen regularly, and both
+        make sense once you know how Linux stores files and counts space.
+
+        Start with where files live.
+    - kind: teach
+      id: devices
+      title: "Disks, partitions and volumes"
+      body: |
+        A physical disk appears as a **block device**, such as `sda` (`vda` for a virtual disk). It is usually
+        divided into **partitions** (`vda1`, `vda2`…). On RHEL, a partition or a whole disk is often handed to **LVM**
+        (Logical Volume Manager), which builds
+        **logical volumes** from storage capacity and can extend a volume when capacity is available. Moving
+        capacity out of an existing filesystem depends on that filesystem: the XFS filesystems used here cannot
+        be shrunk. `lsblk` draws the whole picture:
+    - kind: try
+      id: lsblk
+      body: "List the block devices of this machine."
+      accept: ["lsblk", "lsblk -f", "lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS"]
+      hints:
+        - match: "^ls "
+          say: "`ls` lists files. Block devices have their own listing command: `lsblk`."
+        - match: "^(fdisk|parted)"
+          say: "Those tools change partitions and need root. `lsblk` only reads, and any user may run it."
+      hint: "The command's name starts like `ls`, followed by `blk` for block devices."
+      run: "lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS"
+      then: |
+        The recording added `-o` to choose the columns. This virtual machine has two disks. `vda` has four
+        partitions: a tiny one for the boot loader, `vda2` for the EFI firmware (`vfat`), `vda3` for `/boot` and
+        `vda4` for `/`. The second disk, `vdb`, is handed whole to LVM (`LVM2_member`), which built two logical
+        volumes on it: one for swap (disk space the kernel uses when memory runs short) and one for `/home`. `FSTYPE` is the **filesystem**, the format that organises files on the volume (`xfs` is RHEL's default). `MOUNTPOINTS` says where each one appears in the directory tree.
+    - kind: teach
+      id: mounts
+      body: |
+        Remember the first lesson: everything on Linux hangs from one tree, starting at `/`. Each filesystem is
+        attached somewhere in that tree, at a **mount point**: `/home` here is a different volume from `/`, but you
+        reach it by walking into the directory. `findmnt` shows the tree of mounted filesystems:
+    - kind: show
+      id: findmnt
+      run: "findmnt -o TARGET,SOURCE,FSTYPE -t xfs,vfat"
+    - kind: ask
+      id: which-volume
+      prompt: "In that output, a file `/home/learner/notes.txt` is stored on which source?"
+      choices:
+        - text: "`/dev/mapper/vg_data-home`"
+          why: "`/home` is a mount point of its own, so everything below it lives on the volume mounted there."
+        - text: "`/dev/vda4`"
+          why: "That is the root filesystem. Paths below `/home` are on the filesystem mounted at `/home`."
+        - text: "`/dev/vda3`"
+          why: "`/dev/vda3` is mounted at `/boot`; only paths below `/boot` live there."
+      answer: 0
+    - kind: teach
+      id: fstab
+      body: |
+        Which filesystems are mounted at boot, and where, is listed in `/etc/fstab`, one line per mount: device,
+        mount point, filesystem type, options. A mistake in it can stop a machine from booting, which is why
+        changes must be checked before rebooting. The recording shows the mount point, type and options
+        of each line:
+    - kind: show
+      id: fstab-show
+      run: "grep -Ev '^(#|$)' /etc/fstab | awk '{print $2, $3, $4}'"
+      notice: |
+        Two filters in a pipe. `grep -Ev '^(#|$)'` drops comment lines and empty lines: `-v` keeps the lines that
+        do *not* match, and `-E` lets `|` mean "or" in the pattern. `awk '{print $2, $3, $4}'` prints the second,
+        third and fourth whitespace-separated fields of each remaining line. Four filesystems and one swap entry,
+        whose mount point is `none`.
+    - kind: teach
+      id: fstab-check
+      body: |
+        `findmnt --verify` checks `/etc/fstab` without changing anything: it reads every line, and tests that
+        the mount point and the source exist. (A privileged `mount -a` goes further and tries to mount what is
+        not yet mounted, but it skips filesystems that are already mounted and ignores swap lines, so it can
+        succeed without testing an edited option. After editing fstab on a real system you also run
+        `systemctl daemon-reload` and test the intended mount.)
+    - kind: show
+      id: fstab-verify
+      run: "findmnt --verify 2>&1"
+      notice: |
+        `0 parse errors, 0 errors`: every line of `/etc/fstab` is well formed and its mount point and source
+        exist. The warnings say that an ordinary user cannot read the filesystem type from the disk, so that
+        part was not checked; run as an administrator, it can. Notice the `none` line: that is the swap entry,
+        which `mount -a` would skip. The summary line comes first here only because of how the recorder captured
+        the output; on a terminal it comes last, after the warnings.
+    - kind: ask
+      id: which-check
+      prompt: "You edited `/etc/fstab` on a machine and are not logged in as root. Which command checks the file without mounting or changing anything?"
+      choices:
+        - text: "`findmnt --verify`"
+          why: "It reads `/etc/fstab` and checks the mount points and sources without touching any mount, as the recording showed."
+        - text: "`mount -a`"
+          why: "It tries to mount every missing entry, which changes live mount state and needs root; it also skips swap lines."
+        - text: "`df -h`"
+          why: "`df` reports space on what is mounted now; it never reads `/etc/fstab`."
+      answer: 0
+    - kind: teach
+      id: df
+      title: "Two things that can run out"
+      body: |
+        `df -h` shows each filesystem's size, used and available space, in human units. But a filesystem keeps two
+        budgets. Besides blocks of data, every file and directory needs an **inode**, the record that holds its
+        owner, permissions and where its data is (you met inodes with hard links). A filesystem has a fixed or
+        limited number of inodes. `df -i` shows them.
+    - kind: show
+      id: df-h
+      run: "df -hT / /boot"
+      notice: "On the `/` row, `Use%` is 18%, so this filesystem has free data space. Now the second budget."
+    - kind: try
+      id: try-df-i
+      body: "Show the inode usage of the root filesystem `/`."
+      accept: ["df -i /", "df -i", "df -hi /", "df -ih /", "df -i / /boot", "df --inodes /"]
+      hints:
+        - match: "^df -h /?$"
+          say: "That is space. Inodes are shown with a different option: `-i`."
+        - match: "^du "
+          say: "`du` adds up file sizes. The inode counters of a filesystem come from `df`."
+        - match: "^ls -i"
+          say: "`ls -i` shows the inode number of each file, not how many are left. Ask `df`."
+      hint: "`df` with the option for inodes, `-i`."
+      run: "df -i / /boot"
+      then: "One percent of the inodes used on `/`: no danger here. The next step shows a filesystem where it is the other way round."
+    - kind: ask
+      id: guess-inodes
+      guess: true
+      prompt: "A filesystem has only 12 inodes: room for about ten files of any size. A script creates empty files until it fails. What does `df -h` then say?"
+      choices:
+        - text: "100 % used"
+          why: "That is the usual meaning of full. The next step shows what `df -h` reports here."
+        - text: "Almost nothing used"
+          why: "See the next step."
+        - text: "An error"
+          why: "`df` works normally. The next step shows what it reports."
+      answer: 1
+    - kind: show
+      id: inodes
+      body: "The supplied script `inodes.sh` (see \"Before you start: source files\") creates a 1 MiB memory filesystem (tmpfs) that can hold 12 inodes, and creates empty files on it. It runs inside `unshare -rm`: like the private network of the networking lesson, `-m` gives the command a private set of mounts and `-r` makes you root only inside it, so it may mount a filesystem without touching the machine's disks:"
+      run: "unshare -rm bash inodes.sh 2>&1"
+      highlight: ["No space left", "100%"]
+      notice: |
+        Files 1 to 10 were created, and file 11 failed with "No space left on device", yet `df -h` shows 0 % of the
+        space used: empty files use no data blocks. `df -i` tells the truth: all 12 inodes are used, by the 10 files
+        and by the filesystem itself, starting with its top directory. The same message, two different budgets.
+    - kind: show
+      id: space
+      body: "For comparison, the supplied script `space.sh` fills the same size of filesystem with one big file:"
+      run: "unshare -rm bash space.sh 2>&1"
+      notice: "This time the space ran out: 100 % used. Same error message, other cause."
+    - kind: ask
+      id: which-full
+      prompt: "A cache directory with millions of tiny files fails with \"No space left on device\", yet `df -h` shows 40 % used. What do you check next?"
+      choices:
+        - text: "`df -i`: the inodes are probably used up"
+          why: "Millions of files use millions of inodes. When those run out, writes fail although space remains."
+        - text: "The disk's hardware, with `lsblk`"
+          why: "A failing disk gives I/O errors. This message, with space left, points at the inode budget."
+        - text: "The size of the largest file"
+          why: "Large files use space, which is not the problem here: 60 % is still free."
+      answer: 0
+    - kind: teach
+      id: deleted
+      title: "Deleted, but still taking space"
+      body: |
+        Deleting a file removes its **name**. The data is freed only when nothing uses the file
+        any more: if a running program still has it open, for example a service writing to its log, the space stays
+        taken, and `du` (which adds up the files it can see by name) disagrees with `df` (which asks the
+        filesystem).
+
+        A program refers to each file it has open by a number, a **file descriptor**. `ls -l /proc/PID/fd` lists
+        them for a process, and `lsof +L1` lists the open files that no longer have any name (link count below
+        1), with the process that holds each one. In the next recording, the supplied script `deleted.sh` makes
+        a shell open `app.log` as descriptor 3, then deletes the file.
+    - kind: show
+      id: du-dirs
+      body: "First, `du` on a named directory: `-x` stays on one filesystem, `--max-depth=1` shows one level, and `sort -rh | head` keeps the biggest five."
+      run: "du -xh --max-depth=1 /usr/lib/systemd 2>/dev/null | sort -rh | head -n 5"
+      notice: "The first line is the total for the directory, then its biggest subdirectories. This is how you find where space went, for files that still have a name."
+    - kind: show
+      id: deleted-show
+      run: "unshare -rm bash deleted.sh 2>&1"
+      notice: |
+        After `rm`, there are 0 files and `du` counts 0, but `df` still shows 600K used. The line `fd 3 ->
+        app.log (deleted)` is the open descriptor 3. On a normal system, `lsof +L1` names the process that holds the deleted
+        file (`COMMAND`, `PID`), its size (`SIZE/OFF`, in bytes) and, in `NLINK`, that the file has 0 names left; in
+        this recording's sandbox it printed nothing, so the descriptor line is the evidence here.
+        (Ordinary users can inspect their own processes this way; seeing other users' processes needs administrator
+        rights.) Once the descriptor is closed, the last `df` line shows the space freed.
+    - kind: ask
+      id: free-it
+      prompt: "Someone deleted a 30 GB log that a running service still writes to, and `df` still shows the disk full. What frees the space?"
+      choices:
+        - text: "Making the service close the file"
+          why: "The data is freed when the last process holding the deleted file closes it. A controlled restart, or a documented log-reopen operation of the service, does that; configured log rotation avoids the situation."
+        - text: "Deleting the file a second time"
+          why: "The name is already gone; there is nothing left to delete by name. The open descriptor holds the data."
+        - text: "Running `du` to recount"
+          why: "`du` only reports; and it cannot see a file without a name. Only closing the file frees it."
+      answer: 0
+    - kind: order
+      id: method
+      prompt: "A filesystem reports \"No space left on device\". Put the checks in a sensible order."
+      items:
+        - "`df -h` and `df -i`: which filesystem, and which budget is full?"
+        - "`du -xh --max-depth=1` on it: which directory uses the space? (If inodes ran out, look for the directory with huge numbers of files instead.)"
+        - "If `du` and `df` disagree: look for deleted files still open (`lsof +L1`)"
+        - "Free the space: remove or compress what is not needed, or make the holder close the file"
+      why: "Find the full filesystem and the budget first; then where the space went; then the invisible case of deleted open files; only then act."
+    - kind: reflect
+      id: explain-two-budgets
+      prompt: "Explain to a colleague how \"No space left on device\" can appear while `df -h` shows free space."
+      model: |
+        A filesystem has two budgets: blocks for data, and inodes, one per file or directory. Many small or empty
+        files can use up the inodes while most of the space is free; writes then fail with the same message. `df -i`
+        shows inode usage. Separately, a deleted file still open by a process keeps its space until the process
+        closes it, which makes `df` and `du` disagree.
+    - kind: teach
+      id: what-next
+      title: "What you can do now"
+      body: |
+        You can see which disk and filesystem hold a directory, check space and inodes, explain the two ways a
+        filesystem can be full, and find space held by a deleted file that is still open.
+
+        Containers get their files the same way: a container's root filesystem is mounted for it from its image,
+        and a volume, on one machine as on a cluster, is a directory or filesystem mounted into a container.
+
+        Next: scripts, to put commands you already know into a file and run them reliably.
+  sections:
+    - id: more-storage
+      title: "Sparse files, tmpfs and mount options"
+      depth: true
+      body: |
+        - `du` and `ls -l` can disagree for **sparse** files: `truncate -s 1G f` makes a file whose size is 1 GiB
+          but which uses almost no blocks until written. `du --apparent-size` shows the size `ls` shows.
+        - **tmpfs** is a filesystem in memory (`/run`, `/dev/shm`): fast, and empty after a reboot.
+        - Mount options in fstab change behaviour: `noexec` (no programs run from it), `nofail` (boot continues if
+          the device is missing), `ro` (read-only). `findmnt -n -o OPTIONS /` shows the options in use.
+        - `xfs` filesystems can grow but not shrink; LVM can add space to a logical volume (`lvextend -r`), which
+          is one reason RHEL installs use it.
+  review:
+    - q: "Which command shows disks, partitions, logical volumes and where they are mounted?"
+      a: "`lsblk` (with `-o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS`); `findmnt` shows the mount tree."
+    - q: "What are the two budgets of a filesystem, and how do you check each?"
+      a: "Space (`df -h`) and inodes, one per file or directory (`df -i`)."
+    - q: "Why can `df` show space used that `du` cannot find?"
+      a: "A deleted file still open by a process keeps its data until the process closes it."
+    - q: "Where are the filesystems mounted at boot listed?"
+      a: "In `/etc/fstab`; check changes with `findmnt --verify` (and a test mount) before rebooting."
+  commands:
+    - cmd: "lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS"
+      meaning: "disks, partitions, volumes and mount points"
+    - cmd: "findmnt -o TARGET,SOURCE,FSTYPE -t xfs,vfat"
+      meaning: "the mount tree"
+    - cmd: "grep -Ev '^(#|$)' /etc/fstab | awk '{print $2, $3, $4}'"
+      meaning: "what is mounted at boot"
+    - cmd: "findmnt --verify 2>&1"
+      meaning: "check /etc/fstab without changing anything"
+    - cmd: "df -hT / /boot"
+      meaning: "space"
+    - cmd: "df -i / /boot"
+      meaning: "inodes"
+    - cmd: "unshare -rm bash inodes.sh 2>&1"
+      meaning: "full of inodes, with space left"
+    - cmd: "unshare -rm bash space.sh 2>&1"
+      meaning: "full of data"
+    - cmd: "du -xh --max-depth=1 /usr/lib/systemd 2>/dev/null | sort -rh | head -n 5"
+      meaning: "where the space went, for files that still have a name"
+    - cmd: "unshare -rm bash deleted.sh 2>&1"
+      meaning: "a deleted file still open keeps its space"
+  files:
+    "inodes.sh": |
+      # A 1 MiB tmpfs that can hold only 12 inodes (files and directories): it runs out of inodes, not space.
+      mkdir -p mnt
+      mount -t tmpfs -o size=1M,nr_inodes=12 tmpfs mnt
+      for i in $(seq 1 20); do
+        touch mnt/file$i || { echo "stopped at file $i"; break; }
+      done
+      df -h --output=size,used,avail,pcent mnt
+      df --output=itotal,iused,iavail,ipcent mnt
+    "space.sh": |
+      # The same 1 MiB tmpfs filled with data: it runs out of space.
+      mkdir -p mnt
+      mount -t tmpfs -o size=1M tmpfs mnt
+      dd if=/dev/zero of=mnt/big bs=64K count=32 2>&1 | head -1
+      df -h --output=size,used,avail,pcent mnt
+    "deleted.sh": |
+      # A log file deleted while a process still holds it open: du cannot see it, df still counts it.
+      mkdir -p mnt
+      mount -t tmpfs -o size=1M tmpfs mnt
+      head -c 600K /dev/zero > mnt/app.log
+      exec 3< mnt/app.log          # this shell keeps the file open, like a running application
+      rm mnt/app.log
+      echo "ls: $(ls mnt | wc -l) files"; du -sh mnt; df -h --output=used,avail mnt
+      ls -l /proc/$$/fd/3 | sed 's|.*-> .*/|fd 3 -> |'
+      lsof +L1 mnt 2>/dev/null
+      exec 3<&-                    # close it: now the space is released
+      df -h --output=used,avail mnt
+  references:
+    - {title: "Linux man-pages: df(1)", url: "https://man7.org/linux/man-pages/man1/df.1.html"}
+    - {title: "Linux man-pages: lsblk(8)", url: "https://man7.org/linux/man-pages/man8/lsblk.8.html"}
+    - {title: "Linux man-pages: findmnt(8)", url: "https://man7.org/linux/man-pages/man8/findmnt.8.html"}
+    - {title: "Linux man-pages: fstab(5)", url: "https://man7.org/linux/man-pages/man5/fstab.5.html"}
+    - {title: "Linux man-pages: inode(7)", url: "https://man7.org/linux/man-pages/man7/inode.7.html"}
+    - {title: "RHEL 9: Managing file systems", url: "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_file_systems/index"}

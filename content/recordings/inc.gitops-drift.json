@@ -1,0 +1,132 @@
+{
+ "lab": "inc.gitops-drift",
+ "kind": "incident",
+ "lab_hash": "4426e09f41269dca",
+ "recorded_at": "2026-10-14T17:18:44+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "investigate",
+   "cmd": "oc get deploy,pods -n academy-inc-drift",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\ndeployment.apps/web   0/0     0            0           22s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "investigate",
+   "cmd": "oc diff -f lab/desired/web.yaml -n academy-inc-drift",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "diff -u -N /tmp/LIVE-1084427043/apps.v1.Deployment.academy-inc-drift.web /tmp/MERGED-3898463575/apps.v1.Deployment.academy-inc-drift.web\n--- /tmp/LIVE-1084427043/apps.v1.Deployment.academy-inc-drift.web\t2026-10-14 17:19:11.904419365 +0000\n+++ /tmp/MERGED-3898463575/apps.v1.Deployment.academy-inc-drift.web\t2026-10-14 17:19:11.905419369 +0000\n@@ -6,7 +6,7 @@\n     kubectl.kubernetes.io/last-applied-configuration: |\n       {\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{},\"labels\":{\"app\":\"web\"},\"name\":\"web\",\"namespace\":\"academy-inc-drift\"},\"spec\":{\"replicas\":0,\"selector\":{\"matchLabels\":{\"app\":\"web\"}},\"template\":{\"metadata\":{\"labels\":{\"app\":\"web\"}},\"spec\":{\"containers\":[{\"env\":[{\"name\":\"PORTAL_MODE\",\"value\":\"maintenance\"}],\"image\":\"registry.access.redhat.com/ubi9/httpd-24:latest\",\"name\":\"httpd\",\"ports\":[{\"containerPort\":8080}],\"readinessProbe\":{\"httpGet\":{\"path\":\"/healthz\",\"port\":8080},\"periodSeconds\":5},\"resources\":{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}},\"volumeMounts\":[{\"mountPath\":\"/var/www/html\",\"name\":\"content\"}]}],\"volumes\":[{\"configMap\":{\"name\":\"web-content\"},\"name\":\"content\"}]}}}}\n   creationTimestamp: \"2026-10-14T17:18:48Z\"\n-  generation: 1\n+  generation: 2\n   labels:\n     app: web\n   name: web\n@@ -15,7 +15,7 @@\n   uid: 5cf57d13-d984-46e6-85a4-c66e2e921fa0\n spec:\n   progressDeadlineSeconds: 600\n-  replicas: 0\n+  replicas: 2\n   revisionHistoryLimit: 10\n   selector:\n     matchLabels:\n@@ -33,7 +33,7 @@\n       containers:\n       - env:\n         - name: PORTAL_MODE\n-          value: maintenance\n+          value: live\n         image: registry.access.redhat.com/ubi9/httpd-24:latest\n         imagePullPolicy: Always\n         name: httpd\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc apply -f lab/desired/web.yaml -n academy-inc-drift",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web configured\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc rollout status deploy/web -n academy-inc-drift --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"web\" rollout to finish: 0 of 2 updated replicas are available...\nWaiting for deployment \"web\" rollout to finish: 1 of 2 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc diff -f lab/desired/web.yaml -n academy-inc-drift",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "replicas",
+    "title": "web runs 2 ready replicas",
+    "expect": "2/2",
+    "status": "fail",
+    "observed": "spec.replicas 0, ready 0/2, updated 0, total 0, observedGeneration current: True"
+   },
+   {
+    "id": "mode",
+    "title": "PORTAL_MODE is live again",
+    "expect": "live",
+    "status": "fail",
+    "observed": "spec.template.spec.containers[0].env[?name=PORTAL_MODE].value = 'maintenance'"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "fail",
+    "observed": "http://web-academy-inc-drift.apps-crc.testing/ → HTTP 503 · Application is not available The application is currently not serving requests at this endpoint. It may not have been st"
+   }
+  ],
+  "at": 1791998349.1445801
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "replicas",
+    "title": "web runs 2 ready replicas",
+    "expect": "2/2",
+    "status": "pass",
+    "observed": "spec.replicas 2, ready 2/2, updated 2, total 2, observedGeneration current: True"
+   },
+   {
+    "id": "mode",
+    "title": "PORTAL_MODE is live again",
+    "expect": "live",
+    "status": "pass",
+    "observed": "spec.template.spec.containers[0].env[?name=PORTAL_MODE].value = 'live'"
+   },
+   {
+    "id": "route-ok",
+    "title": "The Route serves the portal",
+    "expect": "HTTP 200",
+    "status": "pass",
+    "observed": "http://web-academy-inc-drift.apps-crc.testing/ → HTTP 200 · payments portal"
+   }
+  ],
+  "at": 1791998361.7626576
+ },
+ "seconds": 37,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-inc-drift: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

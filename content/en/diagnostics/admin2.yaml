@@ -1,0 +1,910 @@
+track: admin2
+title: "Platform administration: find your gaps"
+intro: >-
+  Thirty-eight questions on running a shared cluster: identity and RBAC, SCCs and ServiceAccounts, access reviews,
+  network policy and certificates, quotas, declarative delivery with Kustomize and Helm, operators and updates. Most
+  take under a minute; many ask you to read real output from OpenShift Local. Nothing is marked complete: the results
+  only suggest which lessons to start with.
+minutes: 37
+items:
+  - id: health-round-no-metrics
+    targets: [n.cluster-admin-health, c.openshift-extends]
+    prompt: >-
+      Before a change, an administrator runs the health round on OpenShift Local. `oc adm top nodes` fails as shown.
+      What should they conclude, and what do they read instead?
+    evidence: |
+      $ oc adm top nodes
+      error: Metrics API not available
+      $ oc get apiservice v1beta1.metrics.k8s.io
+      Error from server (NotFound): apiservices.apiregistration.k8s.io "v1beta1.metrics.k8s.io" not found
+    choices:
+      - "The node is failing; restart its kubelet before going on with the round."
+      - "No metrics API is served here; read node conditions and the kubelet's summary."
+      - "Their user lacks a permission; ask for cluster-admin and run it again."
+      - "Metrics are still being collected; wait a minute and run it again."
+    answer: 1
+    feedback:
+      - "Nothing here concerns the node: the client could not find the metrics API at all. `oc get nodes` and `oc describe node` show whether the node is healthy."
+      - "The APIService is not registered because the monitoring stack, which serves it, is not running. Node conditions (pressure, Ready) and the kubelet's summary API still give health and usage."
+      - "A missing permission is reported as Forbidden. NotFound means the API does not exist on this cluster."
+      - "Collection delays give empty or partial numbers, not a missing APIService."
+    explain: >-
+      `oc adm top` needs the metrics API from the monitoring stack. Without it, read `oc describe node` for pressure
+      and allocated requests, and the kubelet's own summary for usage.
+  # ---------------------------------------------------------------- b2-authn-authz
+  - id: oauth-claim-second-provider
+    targets: [c.auth, n.htpasswd-users]
+    prompt: >-
+      Users already log in through an HTPasswd identity provider named `local`. You add an LDAP provider named `corp`,
+      also with `mappingMethod: claim`. Alice has an account in both. When she logs in through `corp`, the login fails.
+      Why?
+    choices:
+      - "Only one identity provider can be active at a time, so the second is ignored until the first one is removed from the list."
+      - "LDAP users must first be synchronised into OpenShift Group objects before they can log in."
+      - "With `claim`, the name `alice` is already mapped to `local:alice`, so the login fails; `add` would attach it."
+      - "Her two passwords differ, and the OAuth server rejects a login when providers disagree."
+    answer: 2
+    feedback:
+      - "`identityProviders` is a list: several providers can be active together, and the login page offers each of them."
+      - "Group sync is about group membership for RBAC. Logging in needs no group at all."
+      - "One User can have several Identities (`provider:login`), but only if the mapping method allows a new identity to attach to an existing User. `claim` refuses; `add` attaches."
+      - "Each provider checks its own credentials. The OAuth server never compares passwords across providers."
+    explain: >-
+      A login creates or reuses an Identity (`<provider>:<login>`) linked to a User. With the default `claim`, a
+      second provider cannot reuse a user name that another identity already owns.
+
+  - id: htpasswd-secret-key
+    targets: [n.htpasswd-idp, n.htpasswd-users]
+    prompt: >-
+      You configure an HTPasswd provider that points at the Secret `htpass-secret`, created as shown. The
+      authentication operator settles, but no HTPasswd login works. What is wrong?
+    evidence: |
+      $ htpasswd -c -B -b users.htpasswd alice '********'
+      $ oc create secret generic htpass-secret --from-file=users.htpasswd -n openshift-config
+      secret/htpass-secret created
+
+      # oauth.config.openshift.io/cluster (excerpt)
+        identityProviders:
+        - name: local-users
+          mappingMethod: claim
+          type: HTPasswd
+          htpasswd:
+            fileData:
+              name: htpass-secret
+    choices:
+      - "The Secret must be created in `openshift-authentication`, the namespace where the OAuth server pods actually run."
+      - "The key is `users.htpasswd`, but the provider reads the key `htpasswd` (`--from-file=htpasswd=users.htpasswd`)."
+      - "Files hashed with bcrypt (`-B`) are not accepted; HTPasswd providers need MD5 hashes."
+      - "`fileData.name` must be the file name `users.htpasswd`, not the name of the Secret."
+    answer: 1
+    feedback:
+      - "Identity provider Secrets are read from `openshift-config`; that part is correct."
+      - "`--from-file=<file>` names the key after the file. The documented form names the key explicitly: `--from-file=htpasswd=<file>`."
+      - "The documented procedure uses `htpasswd -B` (bcrypt). The hash format is not the problem."
+      - "`fileData.name` refers to a Secret in `openshift-config`; the file name inside it is irrelevant except as the key."
+    explain: >-
+      The HTPasswd provider reads the key `htpasswd` from a Secret in `openshift-config`. A wrong key name is the
+      classic silent failure.
+
+  - id: htpasswd-remove-user-token
+    targets: [n.htpasswd-users, l.access-can-come-back]
+    prompt: >-
+      You removed bob's line from the htpasswd file and updated the Secret. An hour later the audit log shows bob still
+      running `oc` commands successfully. What explains it, and what completes the removal?
+    choices:
+      - "His OAuth token stays valid until it expires: delete his User and Identity, and review his bindings."
+      - "The authentication operator reloads the Secret only once a day; restart the OAuth server pods to apply the change now."
+      - "Removing the line only blocks new passwords; his account is locked once you delete his RoleBindings."
+      - "bob is a cluster administrator, and cluster administrators are not checked against the identity provider."
+    answer: 0
+    feedback:
+      - "The file only controls new logins. Red Hat's procedure deletes the User and the Identity, otherwise the user keeps a valid token until it expires. Bindings and groups stay behind and need their own clean-up."
+      - "The operator rolls out Secret changes promptly. bob is not logging in again; he is using a token he already has."
+      - "RoleBindings decide what he may do, not whether he is authenticated. His token is what still works."
+      - "Every request is authenticated, administrators included. Being cluster-admin changes authorisation, not authentication."
+    explain: >-
+      Removing a person means removing the credential, the User and the Identity, then reviewing bindings and groups,
+      which RBAC keeps by name.
+
+  - id: group-access-impersonation
+    targets: [o2.groups, l.access-paths]
+    prompt: >-
+      You granted `view` to the group `academy-auditors` in project `academy-groups` (see the bindings). You are a
+      cluster administrator but not a member of the group. Which command checks what a member can do there?
+    evidence: |
+      $ oc get rolebindings -n academy-groups -o wide
+      NAME                    ROLE                               USERS       GROUPS                                  SERVICEACCOUNTS
+      admin                   ClusterRole/admin                  developer
+      system:image-pullers    ClusterRole/system:image-puller                system:serviceaccounts:academy-groups
+      view                    ClusterRole/view                               academy-auditors
+    choices:
+      - "`oc auth can-i list pods -n academy-groups --as=academy-auditors`"
+      - "`oc get group academy-auditors -o yaml`"
+      - "`oc auth can-i list pods -n academy-groups --as=system:serviceaccounts:academy-auditors`"
+      - "`oc auth can-i list pods -n academy-groups --as=someone --as-group=academy-auditors`"
+    answer: 3
+    feedback:
+      - "`--as` impersonates a user. No binding names a user called `academy-auditors`, so this tests the wrong subject and answers no."
+      - "This lists the group's members. It says nothing about what the group may do."
+      - "That is the naming pattern of a virtual ServiceAccount group, and passed to `--as` it is still read as a user name."
+      - "Impersonate any user name and add the group with `--as-group`; the API server evaluates every binding that names the group (the recorded lab answers yes for list and no for delete)."
+    explain: >-
+      Access that comes through a group can only be tested with the group: `--as=<user> --as-group=<group>`.
+
+  - id: rbac-pods-log-subresource
+    targets: [f.rbac]
+    prompt: >-
+      A pipeline ServiceAccount has the Role below. Listing pods works, but reading a pod's logs fails as shown. What is
+      missing?
+    evidence: |
+      rules:
+      - apiGroups: [""]
+        resources: [pods]
+        verbs: [get, list, watch]
+
+      $ oc logs api-7c9d8-x2k4p -n shop --as=system:serviceaccount:shop:ci-bot
+      Error from server (Forbidden): pods "api-7c9d8-x2k4p" is forbidden: User "system:serviceaccount:shop:ci-bot"
+      cannot get resource "pods/log" in API group "" in the namespace "shop"
+    choices:
+      - "Logs are the subresource `pods/log`, which a `pods` rule does not cover; add it with `get`."
+      - "Reading logs also requires `list` on events in the namespace, because `oc logs` checks the pod's events first."
+      - "Logs belong to the `apps` API group, because the pods were created by a Deployment."
+      - "ServiceAccounts cannot read logs at all; only human users can."
+    answer: 0
+    feedback:
+      - "Subresources such as `pods/log` and `pods/exec` are authorised separately; list them explicitly in the rule's resources."
+      - "Events are a separate resource and are not involved; the error names exactly what was denied."
+      - "Pods are in the core group (`\"\"`), whoever created them. The error even says `API group \"\"`."
+      - "RBAC treats ServiceAccounts like any other subject. The challenge in the practice track grants exactly this to a pipeline."
+    explain: >-
+      RBAC rules name resources precisely: `pods` does not include `pods/log` or `pods/exec`. Read the denied resource
+      in the error and grant that, nothing broader.
+
+  - id: rbac-escalation-prevention
+    targets: [f.rbac]
+    prompt: >-
+      Dana holds the `admin` role in project `shop`. She tries to create a RoleBinding in `shop` that grants the
+      `cluster-admin` ClusterRole to a colleague, and the API refuses. Why?
+    choices:
+      - "A RoleBinding can only reference a Role in its namespace, never a ClusterRole."
+      - "The colleague has never logged in, so there is no User object to bind."
+      - "RBAC prevents escalation: she can only bind permissions she holds there (or roles she may `bind`)."
+      - "`cluster-admin` may only be granted through a ClusterRoleBinding; schema validation rejects a RoleBinding that names it."
+    answer: 2
+    feedback:
+      - "RoleBindings routinely reference ClusterRoles such as `view`, `edit` and `admin`; the permissions then apply in that namespace only."
+      - "Bindings refer to subjects by name and do not check that they exist. A binding to a user who has never logged in is accepted."
+      - "Creating a binding is checked against your own permissions in that scope, unless you have the `bind` verb on the role. This is why a project admin can hand out `view` or `edit`, but not more than she has."
+      - "A RoleBinding to `cluster-admin` is valid and grants full control of that one namespace, when created by someone who already holds those permissions."
+    explain: >-
+      RBAC never lets you grant what you do not hold (without `bind`), and never lets you write a role broader than
+      yourself (without `escalate`).
+
+  # ---------------------------------------------------------------- b3-workload-security
+  - id: scc-bare-pod-vs-deployment
+    targets: [f.scc, o2.service-accounts]
+    prompt: >-
+      A cluster administrator tests a vendor pod spec that sets `runAsUser: 0` with `oc create -f pod.yaml`, and it runs
+      as root. The same spec in a Deployment produces no pods and this event (trimmed). What explains the difference?
+    evidence: |
+      LAST SEEN   TYPE      REASON         OBJECT                             MESSAGE
+      1s          Warning   FailedCreate   replicaset/needs-root-67bbb6688b   Error creating: pods "needs-root-67bbb6688b-" is
+      forbidden: unable to validate against any security context constraint: [provider "anyuid": Forbidden: not usable
+      by user or serviceaccount, provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the
+      ranges: [1003180000, 1003189999], ...]
+    choices:
+      - "Controller-created pods are checked only against their ServiceAccount's SCCs, not against the admin's `anyuid`."
+      - "Pods created by Deployments always use `restricted-v2`, whatever SCCs their ServiceAccount has been allowed to use."
+      - "The ReplicaSet controller strips `runAsUser` from the template and then rejects the incomplete pod spec it produced."
+      - "SCCs are checked when the container starts, and the node then refuses any root container that a controller started."
+    answer: 0
+    feedback:
+      - "A bare pod is checked against the SCCs of its creator and its ServiceAccount; a pod created by a workload controller only against its ServiceAccount. `anyuid` says `not usable by user or serviceaccount`: the `default` ServiceAccount has no access to it."
+      - "A Deployment's pods can use any SCC their ServiceAccount is granted; granting `anyuid` to a dedicated ServiceAccount is exactly how a reviewed exception works."
+      - "The template is passed through unchanged; the event quotes the `runAsUser: 0` it contains."
+      - "SCC admission happens when the pod object is created. That is why there is no pod to describe and the error sits on the ReplicaSet."
+    explain: >-
+      SCC admission for workload pods uses only the ServiceAccount. Read the event in two halves: `not usable` means no
+      RBAC grant; any other message means the SCC was tried and the spec broke its rules.
+
+  - id: scc-arbitrary-uid-image
+    targets: [f.scc]
+    prompt: >-
+      Under `restricted-v2`, a pod in this project runs as shown. Its image creates `/opt/app/data` owned by `1001:1001`
+      with mode `755`, and the application fails to write there. Which change makes it work with no SCC exception?
+    evidence: |
+      $ oc get project shop -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}'
+      1003180000/10000
+      $ oc exec deploy/app -n shop -- id
+      uid=1003180000(1003180000) gid=0(root) groups=0(root),1003180000
+    choices:
+      - "Add `USER 1001` to the image, so the container runs as the owner of the directory."
+      - "Set `runAsUser: 1001` in the pod's securityContext."
+      - "Set `fsGroup: 1001` in the pod's securityContext, so the directory becomes writable for the pod."
+      - "Build the image with the directory group-owned by 0 and group-writable (`chgrp 0`, `chmod g=u`)."
+    answer: 3
+    feedback:
+      - "`restricted-v2` assigns a UID from the project's range (here the first one, 1003180000) and that overrides the image's `USER`."
+      - "1001 is outside the project's range, so admission rejects the pod (`must be in the ranges`)."
+      - "`fsGroup` must also come from the project's allowed range under `restricted-v2`, and it changes ownership of mounted volumes, not of directories baked into the image."
+      - "The UID is arbitrary but the group is always 0, so files the application writes should be group-owned by 0 and group-writable. Red Hat's UBI images are built this way."
+    explain: >-
+      On OpenShift, design images for an arbitrary UID with group 0: group-own writable paths by 0 and give the group the
+      owner's permissions.
+
+  - id: sa-default-anyuid-blast-radius
+    targets: [o2.service-accounts, f.scc]
+    prompt: >-
+      To run one vendor image as root, an administrator ran `oc adm policy add-scc-to-user anyuid -z default -n shop`.
+      Apart from that one workload, what changed?
+    choices:
+      - "Nothing else: the grant applies only to the Deployment that was being rejected at the moment the command ran."
+      - "Every pod in `shop` without its own ServiceAccount can now run under `anyuid` as its image's user."
+      - "Every ServiceAccount named `default`, in every namespace of the cluster, can now use the `anyuid` SCC."
+      - "The project's UID range annotation was removed, so all new pods in `shop` start as UID 0 by default."
+    answer: 1
+    feedback:
+      - "SCC grants go to subjects, not to workloads. Every pod that runs as `default` is affected."
+      - "Pods without `serviceAccountName` run as `default`. `anyuid` has priority 10, so it is tried before `restricted-v2` and admits them, and they run as their image's user. Use a dedicated ServiceAccount for the exception."
+      - "With `-z` and `-n`, the command binds the ServiceAccount `shop/default` only (the recorded lab shows a RoleBinding in that namespace)."
+      - "The range annotation is untouched. `anyuid` simply does not enforce it, so pods run as the image's user."
+    explain: >-
+      An SCC grant follows the ServiceAccount. Granting to `default` silently widens every workload in the namespace
+      that did not choose its own identity.
+
+  - id: sa-scc-chosen-at-admission
+    targets: [o2.service-accounts]
+    prompt: >-
+      The Deployment no longer asks for root, and you removed the temporary `anyuid` exception from its ServiceAccount.
+      `can-i` confirms the removal, but the running pod still shows `anyuid`. Why, and what finishes the job?
+    evidence: |
+      $ oc adm policy remove-scc-from-user anyuid -z rooty -n shop
+      clusterrole.rbac.authorization.k8s.io/system:openshift:scc:anyuid removed: "rooty"
+      $ oc auth can-i use securitycontextconstraints/anyuid --as=system:serviceaccount:shop:rooty -n shop
+      no
+      $ oc get pods -l app=needs-root -n shop -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc'
+      NAME                          SCC
+      needs-root-86648c7f99-vk885   anyuid
+    choices:
+      - "RBAC changes take up to an hour to reach the SCC admission plugin; wait and check again."
+      - "The annotation is left over from the grant; the pod has already switched to `restricted-v2`."
+      - "The SCC is chosen at admission and running pods keep it: roll the workload out again."
+      - "The `anyuid` SCC still lists the ServiceAccount in its `users` field; edit the SCC to remove it."
+    answer: 2
+    feedback:
+      - "RBAC changes apply to the very next request; `can-i` already answers no. The pod simply was not admitted again."
+      - "The annotation records the SCC the pod was admitted with, and a running pod never changes SCC."
+      - "SCC admission happens once, at pod creation. A grant or a removal takes effect for new pods only, so restart the workload to apply it."
+      - "`add-scc-to-user` uses RBAC (the `system:openshift:scc:anyuid` ClusterRole), and `can-i` already shows the `use` permission is gone."
+    explain: >-
+      RBAC is checked on every request, SCCs only at pod admission. After changing an SCC grant, replace the pods.
+
+  # ---------------------------------------------------------------- b4-network-security
+  - id: netpol-and-versus-or
+    targets: [d.networkpolicy-ovn]
+    prompt: >-
+      This ingress rule, in a policy in namespace `api`, was meant to allow only the frontend pods of namespace `shop`.
+      Which sources does it actually allow?
+    evidence: |
+      ingress:
+      - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: shop}
+        - podSelector:
+            matchLabels: {app: frontend}
+    choices:
+      - "Any pod in namespace `shop`, or any pod labelled `app=frontend` in namespace `api`."
+      - "Only pods labelled `app=frontend` that run in namespace `shop`."
+      - "Only pods labelled `app=frontend`, in any namespace of the cluster."
+      - "Nothing: a rule that combines a namespace selector and a pod selector is rejected when applied."
+    answer: 0
+    feedback:
+      - "Two list items are ORed: every pod in `shop`, plus frontend pods in the policy's own namespace. Remove the second dash to get the AND you intended."
+      - "That would need both selectors in the same list item (one dash). Here each has its own dash."
+      - "A `podSelector` on its own in `from` selects pods in the policy's own namespace, not across the cluster."
+      - "Both forms are valid. The danger is that the wrong one applies without any error."
+    explain: >-
+      In a `from` entry, `namespaceSelector` and `podSelector` in one item mean AND; as two items (two dashes) they mean
+      OR. `oc describe networkpolicy` shows how the API read it.
+
+  - id: netpol-egress-dns
+    targets: [d.networkpolicy-ovn]
+    prompt: >-
+      A project receives a default-deny egress policy plus one rule allowing egress to the `db` pods on TCP 5432. The
+      application now logs `could not translate host name "db"`. What is missing?
+    choices:
+      - "Nothing in the policies: CoreDNS has failed, so check the DNS operator first."
+      - "An egress rule with an `ipBlock` for the cluster DNS Service address on port 53."
+      - "An ingress rule that lets the `db` pods' replies back into the application pods."
+      - "An egress rule to the `openshift-dns` namespace on UDP and TCP port 5353."
+    answer: 3
+    feedback:
+      - "The timing points at the policy: default-deny egress drops DNS queries too. Lookups that time out look like a DNS outage but are not."
+      - "Policies match pods and their ports. Whether a Service's virtual IP is rewritten before or after policy evaluation is left undefined by Kubernetes, so do not rely on it; the queries end at DNS pods on 5353."
+      - "Replies to an allowed connection are allowed automatically. The problem is the query that never leaves."
+      - "Allow egress to the `openshift-dns` namespace (by its `kubernetes.io/metadata.name` label) on 5353, UDP and TCP, and test name resolution after applying."
+    explain: >-
+      Default-deny egress also blocks DNS. On OpenShift the DNS pods listen on 5353; allow that, then test resolution
+      from inside a pod.
+
+  - id: tls-service-ca-hostname
+    targets: [o2.tls-exposure]
+    prompt: >-
+      The `web` Service in `shop` serves a certificate issued by the service CA (annotation
+      `service.beta.openshift.io/serving-cert-secret-name`). A client pod gets this error. What is the fix?
+    evidence: |
+      $ oc exec deploy/client -n shop -- curl -sS --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt https://web:8443/
+      curl: (60) SSL: no alternative certificate subject name matches target host name 'web'
+    choices:
+      - "Give the client the service CA bundle: the error means curl does not trust the issuer yet."
+      - "Call `https://web.shop.svc:8443/`: the certificate names `<service>.<namespace>.svc`."
+      - "Recreate the Secret: the certificate was issued for the pod IP, which changed after a restart."
+      - "Add `-k` to the client: certificates from the service CA cannot be verified by ordinary clients."
+    answer: 1
+    feedback:
+      - "The CA is already passed with `--cacert`, and an untrusted issuer gives a different error (for the service CA, `self-signed certificate in certificate chain`). This one is about the name."
+      - "The service CA certificate names the Service's internal DNS name. Call that name, and keep verifying with the bundle mounted in every pod."
+      - "Service CA certificates name the Service, never a pod IP, and they are renewed automatically."
+      - "They verify fine with the right CA and the right name. Turning verification off removes the protection TLS was added for."
+    explain: >-
+      The service CA issues certificates for `<service>.<namespace>.svc`; clients must use that name and trust the
+      bundle in `service-ca.crt`.
+
+  - id: expose-plain-tcp-service
+    targets: [n.loadbalancer-services, o2.tls-exposure]
+    prompt: >-
+      A legacy service speaks its own plain-text TCP protocol on port 9000 (no HTTP, no TLS). Clients outside the
+      cluster need a stable address on port 9000. The cluster runs on bare metal with the MetalLB Operator and an
+      address pool configured. What do you create?
+    choices:
+      - "An edge Route: the router terminates the connection and forwards the bytes to the Service."
+      - "A passthrough Route: the router forwards the raw TCP stream without reading it."
+      - "A Service of type NodePort with `nodePort: 9000`, so every node listens on port 9000."
+      - "A LoadBalancer Service on port 9000, which MetalLB gives an address from the pool."
+    answer: 3
+    feedback:
+      - "Edge Routes carry HTTP: the router must parse the requests after decrypting them."
+      - "Passthrough still needs TLS with SNI, because the router chooses the Route from the server name in the TLS handshake. Plain TCP has none."
+      - "Node ports come from 30000-32767 by default, so 9000 is rejected; and clients would have to know node addresses."
+      - "Routes carry HTTP(S) and TLS with SNI. Anything else uses a LoadBalancer Service, which MetalLB implements on bare metal (without it, the external IP stays `<pending>`)."
+    explain: >-
+      Not HTTP? Not a Route. Use a LoadBalancer Service, provided by a cloud or by MetalLB, or a NodePort behind an
+      external load balancer.
+
+  - id: ingress-default-certificate-renewal
+    targets: [n.ingress-dns-certs]
+    prompt: >-
+      A cluster installed almost two years ago still serves its Routes with the wildcard certificate generated at
+      installation. Who renews that certificate before it expires?
+    choices:
+      - "Nobody: it is never rotated; replace it via the IngressController's `defaultCertificate`."
+      - "The service CA operator, which renews every certificate the platform uses, including the router's."
+      - "The ingress operator, which reissues it from its own CA every year."
+      - "The cert-manager Operator, which every cluster includes and enables by default."
+    answer: 0
+    feedback:
+      - "The documentation calls the generated certificates placeholders, valid for two years and never rotated. An expired ingress certificate breaks every application at once."
+      - "The service CA handles in-cluster serving certificates for Services, not the router's default certificate."
+      - "Red Hat states the ingress operator rotates neither its signing certificate nor the default certificates it generates."
+      - "cert-manager is an optional operator you install yourself; it does nothing until configured."
+    explain: >-
+      OpenShift rotates its internal PKI, but the certificates users see are yours: replace the ingress placeholder and
+      monitor its expiry.
+
+  # ---------------------------------------------------------------- b5-governance
+  - id: quota-scale-beyond-limit
+    targets: [o2.quotas-limits]
+    prompt: >-
+      Three pods of `app` run in `shop`, with the quota below. You run `oc scale deploy/app --replicas=5`. What happens?
+    evidence: |
+      $ oc describe quota compute -n shop
+      Resource         Used   Hard
+      --------         ----   ----
+      limits.memory    384Mi  1Gi
+      pods             3      3
+      requests.cpu     150m   500m
+      requests.memory  192Mi  512Mi
+    choices:
+      - "`oc scale` itself is rejected with 403 Forbidden, so the Deployment keeps its 3 replicas."
+      - "Five pods are created, and two of them stay Pending until the scheduler finds room in the quota."
+      - "The quota controller evicts the two oldest pods so that the two newer ones can start."
+      - "The Deployment accepts 5, but 2 pods are refused at creation (FailedCreate on the ReplicaSet)."
+    answer: 3
+    feedback:
+      - "The quota counts pods, not Deployments. Changing `replicas` is accepted; the refusal happens when the ReplicaSet tries to create pods."
+      - "A quota acts at admission: an over-quota pod is never created, so it cannot be Pending."
+      - "Quotas never remove running objects; they only refuse new ones."
+      - "The ReplicaSet keeps trying and the events explain why. Look for FailedCreate on the controller, not on pods."
+    explain: >-
+      ResourceQuota is checked when an object is created. Exceeding it shows up as FailedCreate on the controller; the
+      workload object itself is accepted.
+
+  - id: cluster-quota-requester
+    targets: [n.cluster-quotas, o2.quotas-limits]
+    prompt: >-
+      A developer's new project has no ResourceQuota, yet a pod there is refused with
+      `exceeded quota: dev-budget`. What explains it?
+    choices:
+      - "The project request template adds a quota that `oc get quota` does not list."
+      - "The quota of the developer's previous project is copied into each new project."
+      - "The node is full, and the scheduler reports it as a quota."
+      - "A ClusterResourceQuota selects every project the developer requested, and their total is used up."
+    answer: 3
+    feedback:
+      - "Template objects are ordinary objects; `oc get quota` lists them."
+      - "Quotas are never copied between projects."
+      - "A full node leaves a Pending pod with a scheduling event, not an admission refusal naming a quota."
+      - "A requester-annotation ClusterResourceQuota counts all those projects together; `oc describe appliedclusterresourcequota -n <project>` shows it."
+    explain: >-
+      A ClusterResourceQuota selected by openshift.io/requester is one budget across all of that user's projects,
+      including new ones without a quota of their own.
+  - id: privileged-grant-refused
+    targets: [n.privileged-workloads, f.scc]
+    prompt: >-
+      The administrator of the project `team-a` runs
+      `oc adm policy add-scc-to-user privileged -z node-agent -n team-a` and gets the error below. What does it mean?
+    evidence: |
+      Error from server (Forbidden): rolebindings.rbac.authorization.k8s.io "system:openshift:scc:privileged" is forbidden: user "developer" (groups=["system:authenticated:oauth" "system:authenticated"]) is attempting to grant RBAC permissions not currently held:
+      {APIGroups:["security.openshift.io"], Resources:["securitycontextconstraints"], ResourceNames:["privileged"], Verbs:["use"]}
+    choices:
+      - "The ServiceAccount node-agent does not exist yet."
+      - "RBAC refuses it: nobody may grant the use of an SCC they do not hold, so a cluster administrator must do it."
+      - "The privileged SCC is disabled on this cluster."
+      - "The command needs --dry-run=server first."
+    answer: 1
+    feedback:
+      - "A binding may name a ServiceAccount that does not exist; the refusal is about the permission being granted."
+      - "Granting an SCC is granting `use` on it, and RBAC's escalation check refuses grants of permissions the granter lacks."
+      - "The message names the permission being granted, not a disabled SCC."
+      - "A dry run would not change who may grant the permission."
+    explain: >-
+      Using an SCC is an RBAC permission (`use` on the SCC). A project administrator who does not hold it cannot grant
+      it; a cluster administrator grants it narrowly, to one ServiceAccount in one project.
+  - id: shard-route-still-on-default
+    targets: [n.ingress-sharding, n.ingress-dns-certs]
+    prompt: >-
+      You added an IngressController `internal` with `routeSelector` `exposure=internal`, labelled the Route
+      `payroll` with `exposure=internal`, and left the default IngressController unchanged. Which routers admit the Route?
+    choices:
+      - "Both `default` and `internal`: the default controller has no selector, so it still admits every Route."
+      - "Only `internal`: a matching selector moves the Route to that router."
+      - "Only `default`: a Route stays with the router that admitted it first."
+      - "Neither until the router pods are restarted."
+    answer: 0
+    feedback:
+      - "Each router decides with its own selectors. To finish sharding, give the default controller a selector that excludes the label, in a planned change."
+      - "Selectors do not compete; nothing tells the default router to drop the Route."
+      - "Routers re-evaluate Routes continuously; the shard admits it within seconds."
+      - "Routers watch Routes and pick up label changes without a restart."
+    explain: >-
+      Every IngressController whose selectors match admits the Route; read status.ingress, and exclude the label from
+      the default controller to complete the shard.
+  - id: project-template-scope
+    targets: [n.project-templates, o2.quotas-limits]
+    prompt: >-
+      You add a ResourceQuota and a LimitRange to a project request template and point
+      `project.config.openshift.io/cluster` at it. Which projects get the guardrails?
+    choices:
+      - "Every project, existing and new, within one reconciliation cycle of the project controller."
+      - "Only projects requested from now on; existing ones and plain namespaces are untouched."
+      - "Existing projects at their next change, and new projects immediately."
+      - "Only projects requested by members of the `self-provisioners` group."
+    answer: 1
+    feedback:
+      - "Templates are not reconciled: they are instantiated once, when a project is requested."
+      - "The template runs at project request time only. Bring existing projects in line another way (GitOps is the usual answer), and remember that a plain `oc create namespace` bypasses the template."
+      - "Nothing watches existing projects for the template; changing them later does not apply it."
+      - "`self-provisioners` decides who may request projects, not which template applies; every request uses the configured template."
+    explain: >-
+      The project request template shapes projects created afterwards. Existing projects need their guardrails added
+      separately.
+
+  # ---------------------------------------------------------------- b1-declarative
+  - id: kustomize-commonlabels-selector
+    targets: [o2.kustomize-helm]
+    prompt: >-
+      Your team adds `commonLabels: {team: shop}` to the production overlay of an application that has been running
+      for months. `oc apply -k` now fails on the Deployment with a `field is immutable` error. What is the most likely
+      reason?
+    choices:
+      - "Kustomize cannot label objects that were first created with `oc create`; they must be deleted and recreated."
+      - "`commonLabels` also adds the label to `spec.selector`, which is immutable on an existing Deployment."
+      - "Labels added by an overlay must also be declared in the base, otherwise the merged result is rejected."
+      - "Labels applied by a tool need a domain prefix such as `example.com/team`, and plain keys are refused."
+    answer: 1
+    feedback:
+      - "How an object was created does not matter: `oc apply -k` can change labels on any object. The error comes from one specific field."
+      - "`commonLabels` adds the label to selectors as well as metadata, and a Deployment's selector is immutable. The newer `labels` field leaves selectors alone by default."
+      - "Overlays exist to add things the base does not have; nothing requires the base to declare them first."
+      - "Unprefixed label keys such as `team` are valid. The failure is about where the label is written, not its name."
+    explain: >-
+      `commonLabels` (deprecated) rewrites selectors, and Deployment selectors are immutable. Use `labels`, which by
+      default (`includeSelectors: false`) only adds metadata labels.
+
+  - id: helm-rollback-new-revision
+    targets: [o2.kustomize-helm]
+    prompt: >-
+      Revision 2 of release `demo` changed the message and scaled to two replicas. You then ran
+      `helm rollback demo 1`, and `helm history` shows the output below. Which statement describes the result?
+    evidence: |
+      $ helm history demo -n academy-declarative
+      REVISION  UPDATED                   STATUS      CHART          DESCRIPTION
+      1         Tue Oct 13 21:07:09 2026  superseded  greeter-0.1.0  Install complete
+      2         Tue Oct 13 21:07:16 2026  superseded  greeter-0.1.0  Upgrade complete
+      3         Tue Oct 13 21:07:17 2026  deployed    greeter-0.1.0  Rollback to 1
+    choices:
+      - "Revision 2 was discarded and the release is back at revision 1, so the next upgrade will be revision 2 again."
+      - "The objects now match revision 1, and data written to the release's volumes since then has been restored too."
+      - "Revision 3 re-applies revision 1's objects; volume and database contents are not rolled back."
+      - "Only the values were reverted; the templates stay at revision 2 until you upgrade with the old chart version."
+    answer: 2
+    feedback:
+      - "Helm never rewrites history: the rollback is recorded as a new revision, and revision 2 stays in the list as superseded."
+      - "A rollback re-applies manifests. Data in PersistentVolumes or databases is untouched; restoring it needs a backup."
+      - "`Rollback to 1` is revision 3. Only the Kubernetes objects go back; any data the application wrote stays as it is."
+      - "A revision stores the complete rendered release, templates and values together; the rollback re-applies all of it."
+    explain: >-
+      Helm records every change, a rollback included, as a new revision. Like `oc rollout undo`, it restores manifests,
+      never application data.
+
+  - id: oc-diff-drift-direction
+    targets: [gx.declarative, o2.kustomize-helm]
+    prompt: >-
+      A nightly job runs `oc diff` against the declared file of the portal. It records the excerpt below and exit code
+      1. What does it tell you?
+    evidence: |
+      $ oc diff -f desired/web.yaml -n shop
+      --- /tmp/LIVE-2014421869/apps.v1.Deployment.shop.web
+      +++ /tmp/MERGED-1411427954/apps.v1.Deployment.shop.web
+      @@ -15,7 +15,7 @@
+       spec:
+         progressDeadlineSeconds: 600
+      -  replicas: 0
+      +  replicas: 2
+      ...
+             - env:
+               - name: PORTAL_MODE
+      -          value: maintenance
+      +          value: live
+    choices:
+      - "The live object has drifted (0 replicas, maintenance); applying the file restores 2 replicas in live mode."
+      - "The live Deployment runs 2 replicas in live mode, and applying the file would scale it down to 0 in maintenance mode."
+      - "The command failed: exit code 1 means an error, so nothing can be concluded about the cluster."
+      - "Live and declared state match; the diff only shows defaults that the server adds."
+    answer: 0
+    feedback:
+      - "The `-` side is LIVE and the `+` side is what the object would look like after applying the file. Exit code 1 means differences were found."
+      - "This reads the diff backwards. The first file (`LIVE`, the `-` lines) is the cluster; the second (`MERGED`, the `+` lines) is the result of applying the file."
+      - "For `oc diff`, 0 means no differences, 1 means differences, and only codes above 1 mean an error. That is what makes it usable in a pipeline."
+      - "Server defaults are already included on both sides, because `oc diff` asks the API server for a dry run. A changed `replicas` value is real drift."
+    explain: >-
+      `oc diff` shows live (`-`) against what applying would produce (`+`), and exits 1 when they differ: a cheap drift
+      detector. Re-applying the declared file is the repair.
+
+  # ---------------------------------------------------------------- b6-operators-maintenance
+  - id: olm-manual-approval-namespace
+    targets: [c.olm, n.operators-lifecycle]
+    prompt: >-
+      In namespace `ops-operators`, operator A's Subscription uses `installPlanApproval: Manual` and operator B's uses
+      `Automatic`. A new version of B appears in its channel, but B is not updated. What is the most likely explanation?
+    choices:
+      - "B's catalog has not been refreshed yet, because catalog sources are only polled once a week."
+      - "Automatic approval only works for operators installed in the global `openshift-operators` namespace."
+      - "One Manual Subscription in a namespace makes all its operators update through approved InstallPlans."
+      - "OLM updates at most one operator per namespace per day, and operator A was updated first."
+    answer: 2
+    feedback:
+      - "OLM has no weekly cycle, and this explanation ignores the one fact that matters here: a Manual Subscription shares the namespace."
+      - "Approval strategy is per Subscription, in any namespace. The interaction comes from sharing one."
+      - "Red Hat documents that Manual approval in a namespace makes every operator there update together. Look for an InstallPlan with APPROVED false, and put operators that must update independently in separate namespaces."
+      - "There is no such rate limit; updates follow InstallPlan approval."
+    explain: >-
+      Approval strategy leaks across a namespace: one Manual Subscription means every update there waits for an approved
+      InstallPlan.
+
+  - id: operator-removed-before-operands
+    targets: [n.operators-lifecycle]
+    prompt: >-
+      You uninstalled the OpenShift GitOps operator (Subscription and CSV deleted). Now `oc delete argocd example -n
+      team-gitops` never finishes: the object has a `deletionTimestamp` and still lists a finalizer. Why?
+    choices:
+      - "Its finalizer is cleared by the operator, which is gone; delete operands before the operator."
+      - "Custom resources cannot be deleted while their CRD exists; delete the CRD first."
+      - "OLM blocks operand deletion for a day after an uninstall, in case the operator is reinstalled."
+      - "The `ArgoCD` kind is cluster-scoped, so a request with `-n` waits indefinitely."
+    answer: 0
+    feedback:
+      - "An object with finalizers stays terminating until the controller responsible removes them. Remove operands first, then the Subscription and CSV."
+      - "Deleting a CRD deletes every instance of that kind cluster-wide, and those instances would wait on the same finalizer."
+      - "OLM has no such delay. The object waits for a controller that no longer exists."
+      - "The object was found and marked for deletion, so the namespace was right. The wait is the finalizer."
+    explain: >-
+      Uninstalling is not the reverse of installing: delete operands while their controller can still clean up, then the
+      operator; CRDs are a separate, cluster-wide decision.
+
+  - id: job-fail-fast-policy
+    targets: [o2.jobs-cronjobs]
+    prompt: >-
+      A data-import Job exits with code 2 whenever its input file is malformed, which no retry can fix. With default
+      settings it keeps creating new pods for over ten minutes before failing. Which change ends the Job at the first
+      such failure?
+    choices:
+      - "Set `restartPolicy: OnFailure`, so the kubelet restarts the container instead of creating new pods."
+      - "Set `activeDeadlineSeconds: 1`, so the Job stops as soon as anything goes wrong."
+      - "Add a `podFailurePolicy` rule (`FailJob` on exit code 2), keeping `restartPolicy: Never`."
+      - "Set `concurrencyPolicy: Forbid`, so no second pod starts after the first one fails."
+    answer: 2
+    feedback:
+      - "The container would still be retried, now in place, and a `podFailurePolicy` would be rejected: it requires `Never`."
+      - "That kills every run after one second, successful ones included. A deadline caps total time; it does not recognise a hopeless failure."
+      - "The policy's rules are checked for each failed pod; `FailJob` on exit code 2 ends the Job immediately with reason `PodFailurePolicy`, while other failures still retry."
+      - "`concurrencyPolicy` belongs to CronJobs and decides whether scheduled runs may overlap, not how a Job retries."
+    explain: >-
+      Retries use exponential back-off up to `backoffLimit` (default 6). For failures that can never succeed, a
+      `podFailurePolicy` with `FailJob` stops at once.
+
+  - id: mcp-stalled-by-pdb
+    targets: [c.machineconfig-upgrades, n.cluster-updates]
+    prompt: >-
+      The control plane finished updating hours ago, but the worker pool looks like this (columns trimmed). What is the
+      most likely cause?
+    evidence: |
+      $ oc get mcp worker
+      NAME     UPDATED   UPDATING   DEGRADED   MACHINECOUNT   UPDATEDMACHINECOUNT
+      worker   False     True       False      3              2
+      $ oc get nodes -l node-role.kubernetes.io/worker
+      NAME       STATUS                     ROLES    AGE   VERSION
+      worker-0   Ready                      worker   90d   v1.34.5
+      worker-1   Ready                      worker   90d   v1.34.5
+      worker-2   Ready,SchedulingDisabled   worker   90d   v1.33.6
+      $ oc get pdb -n payments
+      NAME     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+      ledger   1               N/A               0                     200d
+    choices:
+      - "worker-2 lost contact with the API server, and the Machine Config Operator waits for it to come back."
+      - "The drain cannot evict `ledger`: its PodDisruptionBudget allows 0 disruptions."
+      - "Worker nodes are only updated after an administrator runs `oc adm uncordon` on each one."
+      - "The worker pool is paused; a paused pool keeps one node cordoned until it is unpaused."
+    answer: 1
+    feedback:
+      - "worker-2 is Ready; it is cordoned (SchedulingDisabled), which is the first step of the drain."
+      - "A drain evicts pods through the eviction API, which respects PodDisruptionBudgets. `minAvailable: 1` on a single replica allows no eviction, so the drain retries forever and the pool stalls."
+      - "The Machine Config Operator cordons, drains, reboots and uncordons nodes itself."
+      - "A paused pool does not start updating nodes at all, so no node would be cordoned for the update."
+    explain: >-
+      "Cluster updated" is not "every node updated". Check MachineConfigPools, and make sure every PodDisruptionBudget
+      allows at least one eviction.
+
+  - id: upgradeable-overrides-scope
+    targets: [n.cluster-updates]
+    prompt: >-
+      This is `oc adm upgrade` on OpenShift Local (4.21.8), trimmed. Without removing the cause of the condition, which
+      update is still possible?
+    evidence: |
+      $ oc adm upgrade
+      Cluster version is 4.21.8
+
+      Upgradeable=False
+
+        Reason: ClusterVersionOverridesSet
+        Message: Disabling ownership via cluster version overrides prevents upgrades. Please remove overrides before continuing.
+
+      Channel: stable-4.21
+
+      Recommended updates:
+
+        VERSION     IMAGE
+        4.21.36     quay.io/openshift-release-dev/ocp-release@sha256:d00a0008...
+        4.21.35     quay.io/openshift-release-dev/ocp-release@sha256:1f8f4234...
+    choices:
+      - "None: Upgradeable=False blocks every update until the overrides are removed."
+      - "Only an update to 4.22, because minor updates do not consult this condition."
+      - "Any update, as long as it is started with `--allow-not-recommended`."
+      - "A 4.21.z patch release: Upgradeable=False blocks only minor updates."
+    answer: 0
+    feedback:
+      - "Right: the reason is ClusterVersionOverridesSet. The cluster-version operator refuses even a patch update within 4.21 while an override is set; the offered 4.21.z releases cannot be applied until the overrides are removed."
+      - "It is the reverse: Upgradeable=False exists to stop updates to the next minor, and here the overrides stop patch updates as well."
+      - "That flag accepts updates that are supported but not recommended for your cluster's configuration. It has nothing to do with Upgradeable or with overrides."
+      - "That is true for most reasons of Upgradeable=False, which block only the next minor. This reason is different: with cluster version overrides set, the operator refuses patch updates too."
+    explain: >-
+      Upgradeable=False usually blocks only the next minor. Read the reason: ClusterVersionOverridesSet (deliberate on
+      OpenShift Local) makes the cluster-version operator refuse every update, patch releases included, until the
+      overrides are removed.
+
+  - id: not-recommended-update-flag
+    targets: [n.cluster-updates]
+    prompt: >-
+      `oc adm upgrade --include-not-recommended` lists 4.21.35 as supported but not recommended, because of a known issue
+      affecting a feature your cluster does not use. After review, the team decides to take it. Which command matches
+      that decision?
+    choices:
+      - "`oc adm upgrade --to=4.21.35 --force`"
+      - "`oc adm upgrade --to=4.21.35 --include-not-recommended`"
+      - "`oc adm upgrade --to=4.21.35 --allow-not-recommended`"
+      - "`oc adm upgrade channel fast-4.21`, then `oc adm upgrade --to-latest`"
+    answer: 2
+    feedback:
+      - "`--force` pushes past cluster-side guards such as release signature verification and Upgradeable conditions. The CLI reserves it for unsigned test images or known CVO bugs."
+      - "`--include-not-recommended` only displays such updates; it does not allow starting one."
+      - "`--allow-not-recommended` accepts a target that is supported but flagged for clusters matching a condition. Record why the risk does not apply to you."
+      - "`fast` and `stable` carry the same releases (stable after a delay), and conditional risks are evaluated the same way in both."
+    explain: >-
+      Conditional updates are a documented decision: review the risk, then use `--allow-not-recommended`. Never reach for
+      `--force` to get past a warning.
+
+  # ---------------------------------------------------------------- l1-access
+  - id: access-virtual-group-path
+    targets: [l.access-paths]
+    prompt: >-
+      No binding names the user `developer`, and `oc get groups` shows no group containing that user. Yet
+      `oc auth can-i create projectrequests` answers yes for them. Where does the permission come from?
+    evidence: |
+      $ oc auth can-i create projectrequests
+      yes
+      $ oc get clusterrolebinding self-provisioners -o jsonpath='{.roleRef.name}{" <- "}{.subjects}'
+      self-provisioner <- [{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated:oauth"}]
+    choices:
+      - "Creating projects is not governed by RBAC, so every user can do it."
+      - "From the `admin` role the user holds in their own projects, which includes creating new projects."
+      - "From a cached answer that `can-i` keeps for the user until they log out."
+      - "The virtual group `system:authenticated:oauth`, bound by `self-provisioners`."
+    answer: 3
+    feedback:
+      - "It is plain RBAC: the `self-provisioner` ClusterRole allows creating `projectrequests`, and administrators can remove that binding."
+      - "`admin` is bound per namespace; creating projects is a cluster-scoped request that a namespaced binding cannot grant."
+      - "`can-i` asks the API server every time; there is no client-side cache of permissions."
+      - "Virtual groups are assigned at authentication and never appear in `oc get groups`, but bindings to them are real grants. An access review must include them."
+    explain: >-
+      Effective permission is the union of every path, including paths through virtual groups such as
+      `system:authenticated:oauth` and `system:serviceaccounts:<ns>`.
+
+  - id: stale-binding-resurrected
+    targets: [l.access-can-come-back, f.rbac]
+    prompt: >-
+      The `scanner` tool was decommissioned by deleting its ServiceAccount in `tools`. Later, someone creates a new
+      ServiceAccount with the same name. What does this output show?
+    evidence: |
+      $ oc delete serviceaccount scanner -n tools
+      serviceaccount "scanner" deleted from tools namespace
+      $ oc get rolebindings -n finance -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECT_NS:.subjects[*].namespace,SUBJECT:.subjects[*].name
+      NAME   ROLE   SUBJECT_NS   SUBJECT
+      view   view   tools        scanner
+      $ oc create serviceaccount scanner -n tools
+      serviceaccount/scanner created
+      $ oc auth can-i list pods --as=system:serviceaccount:tools:scanner -n finance
+      yes
+    choices:
+      - "Nothing to worry about: `can-i --as` answers from a cache that expires within the hour."
+      - "Deleting the ServiceAccount revoked its tokens, so the leftover binding can never be used again."
+      - "The binding names the subject, not its UID: the new account inherited `view` at once."
+      - "The binding is tied to the old ServiceAccount's UID, so only restoring that object from a backup could use it."
+    answer: 2
+    feedback:
+      - "Authorisation is evaluated on every request; the yes reflects a binding that really applies."
+      - "The old tokens did stop working, but the new ServiceAccount gets new tokens, and the binding applies to any subject with that name."
+      - "Bindings refer to subjects by name. A grant in another namespace survives the subject and comes back with the name, with no new approval."
+      - "RBAC subjects carry no UID; the recreated account (with a different UID) already has the access."
+    explain: >-
+      Decommission by removing grants first: ClusterRoleBindings and bindings in other namespaces outlive their subjects
+      and can be resurrected by reusing a name.
+
+  - id: cross-namespace-image-pull
+    targets: [l.image-pullers]
+    prompt: >-
+      A Deployment in `academy-img-use` runs an image that lives in the internal registry under project
+      `academy-img-src`. Its pod shows this event (trimmed). What is the narrowest fix?
+    evidence: |
+      Failed to pull image "image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:latest": ...
+      reading manifest latest in image-registry.openshift-image-registry.svc:5000/academy-img-src/minimal:
+      authentication required
+    choices:
+      - "Grant `edit` in `academy-img-src` to the consuming ServiceAccount, so it can read the image stream."
+      - "Grant `system:image-puller` in `academy-img-src` to the ServiceAccount that the consuming pods run as."
+      - "Grant `system:image-puller` in `academy-img-src` to the group `system:serviceaccounts`."
+      - "Create a pull secret in `academy-img-use` from your own `oc whoami -t` token and link it to the ServiceAccount."
+    answer: 1
+    feedback:
+      - "`edit` would work but also allows reading Secrets and pushing images into the source project; far more than a pull needs."
+      - "The internal registry authorises pulls as RBAC `get` on `imagestreams/layers` in the source project. Binding `system:image-puller` there to the consumer's ServiceAccount is exactly enough (the recorded lab then rolls out)."
+      - "That lets every workload on the cluster pull from the project: acceptable only for a deliberately public base-image project."
+      - "Your token expires and carries your rights, not the workload's. Bindings, not pull secrets, govern the internal registry."
+    explain: >-
+      Registry access is RBAC: `system:image-puller` (pull) or `system:image-builder` (pull and push) in the source
+      project, granted to the narrowest subject.
+
+  - id: selinux-denial-evidence
+    targets: [n.selinux-node]
+    prompt: "A process in group 0 gets Permission denied reading a file that `ls -ln` shows as `-rw-rw---- 1002400000 0`. The files on this volume were last used by pods of another project. UID, group and mode all allow the read. Which lock most likely refused, and where is the proof?"
+    choices:
+      - "SELinux, due to another project's MCS labels; proof: AVC records on the node"
+      - "seccomp blocked the read system call; the proof is a warning event on the pod itself"
+      - "A capability was dropped; the proof is the error message in `oc logs` of the pod"
+      - "SCC admission refused access to the file; the proof is a FailedCreate event"
+    answer: 0
+    feedback:
+      - "Each project has its own SELinux categories (annotation openshift.io/sa.scc.mcs). Files labelled for another project fail the MCS check even when DAC allows the access, and the kernel logs the denial on the node."
+      - "RuntimeDefault seccomp blocks unusual system calls, never an ordinary read. Events also come from Kubernetes components, not from the kernel."
+      - "Reading a file that DAC allows needs no capability. And the application only sees 'Permission denied'; its logs cannot tell which lock refused."
+      - "Admission checks pod specs before they are stored. It never sees files, and a running pod has long passed admission."
+    explain: "DAC, capabilities, seccomp and SELinux are checked independently. A Permission denied that mode bits cannot explain is often SELinux; the evidence is an AVC record on the node, read by an administrator."
+  - id: seccomp-exception-scope
+    targets: [n.selinux-node, a.container-security]
+    prompt: "An administrator confirms that the RuntimeDefault seccomp profile blocks a system call that a reviewed diagnostic tool genuinely needs. What is the appropriate change?"
+    choices:
+      - "Set SELinux to permissive on the nodes where the tool is scheduled"
+      - "Run the tool's pod as root by setting runAsUser: 0 in its pod template"
+      - "A reviewed exception for that tool only, via its own ServiceAccount"
+      - "Switch every pod in the cluster to the Unconfined seccomp profile"
+    answer: 2
+    feedback:
+      - "SELinux is a different lock and disabling it is unsupported on RHCOS. It would also remove isolation between every tenant on those nodes."
+      - "Running as root does not lift a seccomp filter, and restricted-v2 refuses UID 0 anyway."
+      - "Keep the default for everyone and grant the exception to one workload, through a ServiceAccount used only by that tool, after review."
+      - "That removes a protection from every workload to satisfy one tool. Exceptions should be as small as the need."
+    explain: "OpenShift turns on all four locks by default. When a workload truly needs more, the exception is scoped to that workload's ServiceAccount and reviewed, never applied cluster-wide."
+
+  # ---------- f2-kubernetes ----------
+
+  - id: scc-rejects-root
+    targets: [f.scc, inc.scc-root, a.container-security]
+    prompt: "A Deployment never gets a pod. Its pod template sets `runAsUser: 0`. What is the right fix?"
+    evidence: |
+      $ oc get deploy,rs,pods -n academy-inc-scc
+      NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+      deployment.apps/web   0/1     0            0           21s
+
+      NAME                             DESIRED   CURRENT   READY   AGE
+      replicaset.apps/web-6c966884bf   1         0         0       21s
+
+      $ oc get events -n academy-inc-scc --field-selector reason=FailedCreate
+      ... replicaset/web-6c966884bf  Error creating: pods "web-6c966884bf-" is forbidden: unable to validate against
+      any security context constraint: [provider "anyuid": Forbidden: not usable by user or serviceaccount,
+      provider restricted-v2: .containers[0].runAsUser: Invalid value: 0: must be in the ranges: [1002400000, 1002409999], ...]
+    choices:
+      - "Grant the anyuid SCC to the project's default ServiceAccount so that root is allowed"
+      - "Remove runAsUser and make the image work with any UID in group 0"
+      - "Delete the ReplicaSet so that the Deployment creates a fresh one and tries again"
+      - "Set runAsUser to 1001 instead, the non-root user that the image itself declares"
+    answer: 1
+    feedback:
+      - "That widens the security posture of every pod using the default ServiceAccount, to work around a setting the app does not need. Exceptions go to a dedicated ServiceAccount, with a reason."
+      - "Let restricted-v2 pick a UID from the project's range; images built for OpenShift make writable paths group 0 and group-writable. The recorded fix removed runAsUser and the pod ran as 1002400000."
+      - "The Deployment recreates an identical ReplicaSet with the same template, and admission rejects it again."
+      - "1001 is outside the project's range [1002400000, 1002409999], so restricted-v2 rejects it exactly like 0."
+    explain: "SCC admission runs in the API server before a pod is stored, so a refused pod never exists and the error is a FailedCreate event on the ReplicaSet. Fix the request, not the policy."
+
+  - id: restricted-v2-picks-uid
+    targets: [f.scc, a.container-security]
+    prompt: "The image declares `USER 1001`. The pod template sets no runAsUser, and the pod is admitted by restricted-v2 in this project. Which UID does the container run as?"
+    evidence: |
+      $ oc get project academy-inc-scc -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}'
+      1002400000/10000
+    choices:
+      - "1001, the user declared by the image"
+      - "0, because nothing in the pod asked for another user"
+      - "A different random UID for each pod of the project"
+      - "1002400000, the first UID of the project's range"
+    answer: 3
+    feedback:
+      - "restricted-v2 uses MustRunAsRange: the image's USER is replaced by a UID from the project's range."
+      - "An unset runAsUser does not mean root. The SCC fills it in, and root is outside every project range."
+      - "The UID is chosen per project, not per pod: every pod of the project gets the same first UID unless it asks for another one inside the range."
+      - "The recorded pod in this project ran with uid=1002400000. Another project has another range, so images must not depend on the number."
+    explain: "Under restricted-v2 the container's UID is the first one of the project's range (annotation openshift.io/sa.scc.uid-range), with primary group 0, whatever the image declares."
+
+  - id: console-update-warning
+    targets: [n.console-admin, n.cluster-updates]
+    prompt: "On OpenShift Local, Administration > Cluster Settings warns that the cluster should not be updated to the next minor version. What is the reason it gives?"
+    choices:
+      - "There is no Red Hat subscription"
+      - "Cluster version overrides disable ownership of some components"
+      - "The cluster has a single node"
+      - "The monitoring stack is not installed"
+    answer: 1
+    feedback:
+      - "The page links to OpenShift Cluster Manager for the subscription, but the warning names the overrides."
+      - "OpenShift Local switches some components off with cluster version overrides, and those block updates."
+      - "One node is a reason for other limits; the warning on Cluster Settings is about the overrides."
+      - "Missing monitoring empties the alerts, but the update warning names the overrides."
+    explain: "OpenShift Local disables some components through cluster version overrides; the console warns that they prevent upgrades. Install a newer OpenShift Local instead of updating it."

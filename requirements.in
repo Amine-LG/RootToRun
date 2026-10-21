@@ -1,0 +1,9 @@
+# Runtime dependencies (ranges). The lock file requirements.txt is generated with:
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.12
+fastapi>=0.143,<1
+starlette>=1.8
+anyio>=4.15.1
+uvicorn>=0.54,<1
+pydantic>=2.14,<3
+pyyaml>=6.0.3,<7
+# Optional sign-in (OIDC) is off by default; its dependencies are in requirements-accounts.txt.

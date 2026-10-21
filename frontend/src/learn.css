@@ -1,0 +1,135 @@
+/* ============================================================================================================
+   The Learn page (/learn) and the course pages (/learn/<course>). Read top to bottom:
+     1. .ln-now    where to continue: one calm strip, one button
+     2. .ln-route  your route: one select, one progress line
+     3. .ln-map    the courses in the order they build, one row each (JourneyMap)
+   Every rule is scoped under .learn so it wins over the shared sheets whatever the load order. Colour tokens only;
+   a course's own tone arrives as --tc / --tc-soft from its .t-<accent> class. Motion is limited to hover tints.
+   ============================================================================================================ */
+.learn { --node: 44px; --pad: 18px; --gap: 12px; }
+
+/* ------------------------------------------------------------------ 1. where to continue: one calm strip, one button */
+.learn .ln-now {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'eyebrow eyebrow' 'title action' 'lesson action' 'text action';
+  column-gap: 32px; align-items: center; margin: 4px 0 28px; padding: clamp(22px, 3vw, 32px);
+  border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1);
+}
+.learn .ln-now .eyebrow { grid-area: eyebrow; }
+.learn .ln-now h1 { grid-area: title; font-size: var(--fs-2xl); max-width: 24ch; margin: 2px 0 6px; }
+.learn .ln-lesson { grid-area: lesson; display: grid; gap: 2px; margin: 0; max-width: 60ch; }
+.learn .ln-lesson strong { font-size: var(--fs-lg); font-weight: 650; line-height: 1.3; color: var(--text); }
+.learn .ln-lesson span { color: var(--muted); font-size: var(--fs-sm); }
+.learn .ln-text { grid-area: text; margin: 0; max-width: 56ch; color: var(--text-2); }
+.learn .ln-now > .btn { grid-area: action; }
+
+/* ------------------------------------------------------------------ 2. your route */
+.learn .ln-route { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 10px 32px; align-items: center; padding: 4px 2px 24px; border-bottom: 1px solid var(--line); }
+.learn .ln-route-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.learn .ln-route-pick label { font-weight: 700; color: var(--text); }
+.learn .ln-route select {
+  min-height: 44px; max-width: 100%; padding: 8px 12px; border-radius: var(--radius); font-size: 1rem; font-family: inherit;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--text);
+}
+.learn .ln-quiet { color: var(--muted); font-size: 0.92rem; text-decoration: underline; text-underline-offset: 3px; padding: 6px 2px; }
+.learn .ln-quiet:hover { color: var(--text); }
+.learn .ln-route-prog { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+.learn .ln-route-n { color: var(--text-2); font-size: 0.95rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.learn .ln-help { grid-column: 1 / -1; margin: 0; max-width: 72ch; color: var(--muted); font-size: 0.95rem; }
+
+/* ------------------------------------------------------------------ 3. the courses, in the order they build */
+.learn .ln-map { margin-top: 30px; }
+.learn .ln-map h2 { margin: 0 0 4px; font-size: var(--fs-xl); }
+.learn .ln-sub { margin: 0; color: var(--text-2); }
+.learn .ln-time-note { margin: 4px 0 20px; color: var(--muted); font-size: var(--fs-sm); max-width: 72ch; }
+.learn .jmap { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--gap); }
+.learn .jm-row {
+  position: relative; display: grid; grid-template-columns: var(--node) minmax(0, 1fr) auto; gap: 4px 18px; align-items: start;
+  padding: var(--pad); border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line);
+  transition: background-color var(--dur-2), border-color var(--dur-2), box-shadow var(--dur-2), transform var(--dur-2) var(--ease);
+}
+.learn .jm-row:hover { border-color: var(--line-2); box-shadow: var(--shadow-2); }
+.learn .jm-stop:not(:last-child)::before { /* the line the courses hang on: one course builds on the one above it */
+  content: ''; position: absolute; z-index: 1; width: 2px; margin-left: -1px; background: var(--line-2);
+  left: calc(var(--pad) + var(--node) / 2); top: calc(var(--pad) + var(--node)); bottom: calc(-1 * (var(--gap) + var(--pad) + 2px));
+}
+.learn .jm-node {
+  position: relative; z-index: 2; width: var(--node); height: var(--node); border-radius: 50%; display: grid; place-items: center;
+  font: 700 1rem/1 var(--sans); color: var(--text-2); background: var(--surface); border: 1.5px solid var(--line-2); font-variant-numeric: tabular-nums;
+}
+.learn .jm-row.here .jm-node { color: var(--accent); border-color: var(--accent); }
+.learn .jm-row.off .jm-node { color: var(--muted); border-color: var(--line-2); background: transparent; }
+.learn .jm-row.part .jm-node { background: var(--accent-soft); }
+.learn .jm-row.on .jm-node { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.learn .jm-row.done .jm-node { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.learn .jm-body { min-width: 0; }
+.learn .jm-t { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 2px 0 4px; font-size: var(--fs-lg); line-height: 1.25; letter-spacing: -0.01em; }
+.learn .jm-t a { color: var(--text); text-decoration: none; }
+.learn .jm-t a::after { content: ''; position: absolute; inset: 0; z-index: 0; border-radius: 16px; } /* the whole row is the link */
+.learn .jm-row:hover .jm-t a { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
+.learn .jm-t a:focus-visible { outline: none; }
+.learn .jm-t a:focus-visible::after { outline: 3px solid var(--accent); outline-offset: 2px; }
+.learn .jm-tag { font: 600 var(--fs-xs)/1 var(--sans); padding: 5px 10px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); }
+.learn .jm-row.here .jm-tag { background: var(--accent); color: var(--accent-ink); }
+.learn .jm-p { margin: 0 0 4px; color: var(--text-2); max-width: 56ch; }
+.learn .jm-from { margin: 0; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.learn .jm-prog { display: grid; justify-items: end; align-content: start; gap: 8px; min-width: 150px; padding-top: 6px; text-align: right; }
+.learn .jm-n { color: var(--text-2); font-size: 0.92rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.learn .jm-bar { display: block; width: 150px; max-width: 100%; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line-2); }
+.learn .jm-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width var(--dur-3) var(--ease); }
+.learn .jm-practice { margin-top: 30px; }
+/* a chosen route: its courses are tinted and filled, the others stay open but quiet (dashed, never faded) */
+.learn .has-route .jm-row.on, .learn .has-route .jm-row.part { background: var(--surface); border-color: var(--accent-line); }
+.learn .has-route .jm-row.off { background: transparent; border-style: dashed; border-color: var(--line-2); }
+.learn .has-route .jm-row.off .jm-t a { color: var(--text-2); }
+.learn .has-route .jm-row.off .jm-p { color: var(--muted); }
+.learn .has-route .jm-row.off:hover { border-color: var(--line-2); }
+.learn .jm-row.here { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* ------------------------------------------------------------------ a course page */
+.learn .ln-back { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 14px; padding: 4px 0; color: var(--muted); font-weight: 600; text-decoration: none; }
+.learn .ln-back:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.learn .ln-course-h { margin: 0 0 28px; padding: 0 0 28px; border-bottom: 1px solid var(--line); }
+.learn .ln-course-top { display: flex; align-items: center; gap: 16px; }
+.learn .ln-course-icon { flex: none; width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.learn .ln-course-h .eyebrow { color: var(--muted); }
+.learn .ln-course-h h1 { margin: 2px 0 0; font-size: var(--fs-2xl); }
+.learn .ln-course-h .lede { margin: 16px 0 6px; font-size: var(--fs-lg); color: var(--text-2); max-width: 60ch; }
+.learn .ln-time { display: flex; flex-wrap: wrap; gap: 10px 36px; margin: 0 0 24px; }
+.learn .ln-time dt { font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+.learn .ln-time dd { margin: 2px 0 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.learn .ln-from { margin: 0 0 22px; color: var(--text-2); font-size: 0.95rem; }
+.learn .ln-from a { color: var(--text); text-underline-offset: 3px; }
+.learn .ln-course-go { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.learn .ln-upnext { margin: 16px 0 0; color: var(--text-2); font-size: 0.95rem; }
+.learn .ln-nextcourse {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 28px 0 8px; padding: 18px 22px;
+  border-radius: var(--radius-lg); border: 1px solid var(--line); background: var(--surface); color: var(--text); text-decoration: none;
+  transition: border-color var(--dur-2), box-shadow var(--dur-2);
+}
+.learn .ln-nextcourse:hover { border-color: var(--line-2); box-shadow: var(--shadow-2); text-decoration: none; }
+.learn .ln-nextcourse small { display: block; color: var(--muted); font-size: 0.86rem; }
+.learn .ln-nextcourse strong { font-size: var(--fs-lg); }
+
+/* ------------------------------------------------------------------ narrow screens */
+@media (max-width: 760px) {
+  .learn { --node: 40px; --pad: 14px; }
+  .learn .ln-route { grid-template-columns: minmax(0, 1fr); }
+  .learn .ln-route-prog { justify-content: flex-start; }
+  .learn .ln-route select { width: 100%; }
+  .learn .jm-row { grid-template-columns: var(--node) minmax(0, 1fr); column-gap: 14px; }
+  .learn .jm-prog { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px 12px; min-width: 0; padding-top: 6px; text-align: left; }
+  .learn .jm-bar { width: 120px; }
+  .learn .jm-t { font-size: 1.18rem; }
+}
+@media (max-width: 760px) {
+  .learn .ln-now { grid-template-columns: 1fr; grid-template-areas: 'eyebrow' 'title' 'lesson' 'text' 'action'; row-gap: 4px; }
+  .learn .ln-now > .btn { margin-top: 16px; }
+}
+@media (max-width: 480px) {
+  .learn .ln-now { padding: 22px 18px; }
+  .learn .ln-now .btn.primary { width: 100%; justify-content: center; }
+  .learn .ln-course-go .btn { flex: 1 1 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .learn .jm-row, .learn .ln-nextcourse { transition: none; }
+}

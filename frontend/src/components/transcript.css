@@ -1,0 +1,105 @@
+/* Higher-specificity scoped rules allow integration without editing global styles.css. */
+.transcript.tx, .transcript.screen { display: flex; flex-direction: column; min-width: 0; background: var(--term-bg); color: var(--term-text); border: 1px solid var(--term-line); border-radius: var(--radius); overflow: clip; box-shadow: var(--shadow-1); font: .875rem/1.6 var(--mono); animation: none; }
+.transcript.screen { margin-top: .75rem; }
+.transcript .tx-head, .transcript .screen-bar { display: flex; flex-wrap: wrap; align-items: center; padding: .5rem .75rem; border-bottom: 1px solid var(--term-line); background: var(--term-bar); color: var(--term-text); font: .875rem/1.5 var(--sans); gap: .5rem; }
+.transcript .tx-title { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; flex: 1 1 10rem; min-width: 0; color: var(--term-text); font-size: .875rem; }
+.transcript .screen-src { flex: 1 1 6rem; }
+.transcript .tx-head .icon-btn, .transcript .screen-bar .icon-btn { min-width: 36px; min-height: 36px; }
+.transcript .tx-body { position: relative; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: auto; max-height: 32rem; min-height: 10rem; padding: .75rem; color: var(--term-text); }
+.transcript .tx-entry { padding: .25rem 0 .75rem; }
+.transcript .tx-entry + .tx-entry { border-top: 1px dashed var(--term-line); padding-top: .75rem; }
+.transcript.hero-term .tx-body { max-height: none; overflow: visible; min-height: 0; }
+.transcript .tx-inner, .transcript.wrap .tx-inner, .transcript .screen-body { width: auto; min-width: 0; overflow: visible; }
+.transcript .screen-body { padding: .75rem; }
+.transcript .tx-cmdline { display: flex; align-items: start; gap: .5rem; flex-wrap: wrap; min-width: 0; color: var(--term-text); }
+.transcript .tx-cmdline .cmd, .transcript .typed { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; flex: 1 1 10rem; }
+.transcript .tx-meta { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; font: .875rem var(--sans); flex-wrap: wrap; white-space: normal; padding: 0; }
+.transcript .tx-prompt, .transcript .tx-node a, .transcript .tx-node .linkish { color: var(--term-text); }
+.transcript .tx-tag { border: 1px solid var(--term-line); border-radius: var(--radius-sm); padding: .125rem .375rem; font: .75rem/1.4 var(--sans); color: var(--term-text); }
+.transcript .tx-tag.rec, .transcript .tx-tag.live, .transcript .tx-tag.warn { color: var(--term-text); font-size: .75rem; white-space: normal; }
+.transcript .tx-head select, .transcript .tx-in input, .transcript .tx-search input { background: var(--term-bar); color: var(--term-text); }
+.transcript .tx-head .icon-btn, .transcript .screen-bar .icon-btn { color: var(--term-text); }
+.transcript .tx-info, .transcript .tx-nomatch, .transcript .tx-hint, .transcript .tx-node { margin: .25rem 0; color: var(--term-text); white-space: pre-wrap; overflow-wrap: anywhere; font: .875rem/1.6 var(--sans); }
+.transcript .tx-node ul { margin: .25rem 0; padding-left: 1.25rem; }
+.transcript .tx-search, .transcript .tx-in, .transcript .tx-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .75rem; border-top: 1px solid var(--term-line); background: var(--term-bar); }
+.transcript .tx-search input, .transcript .tx-in input { flex: 1; min-width: 0; border: 0; min-height: 36px; font-family: var(--mono); }
+.transcript .tx-search .count { font: .875rem var(--sans); color: var(--term-muted); }
+.transcript .tx-in input { font-size: 1rem; }
+.transcript .tx-in:focus-within { box-shadow: inset 0 2px 0 var(--term-text); }
+.transcript .tx-in .btn.primary { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.transcript .tx-suggest button, .transcript .starters button { color: var(--term-text); background: var(--term-bar); border-color: var(--term-line); font-size: .875rem; white-space: normal; overflow-wrap: anywhere; }
+.transcript .starters .icon { color: var(--term-text); }
+.transcript :focus-visible, .transcript-stream :focus-visible { outline: 2px solid var(--term-text); outline-offset: 2px; box-shadow: none; }
+.transcript .h-bin, .transcript .h-verb, .transcript .h-flag, .transcript .h-str, .transcript .h-ph, .transcript .h-arg, .transcript .h-op { color: var(--term-text); }
+.transcript .h-bin, .transcript .h-verb { font-weight: 700; }
+.transcript-command.cmdblock { min-width: 0; }
+.transcript-command .cmd-row .cmd-text { font: .875rem/1.6 var(--mono); overflow-wrap: anywhere; word-break: normal; }
+.transcript-command .cmd-text :is(.h-bin,.h-verb,.h-flag,.h-str,.h-ph,.h-arg,.h-op) { color: var(--text); }
+:root[data-theme] .transcript-command .cmd-text :is(.h-bin,.h-verb,.h-flag,.h-str,.h-ph,.h-arg,.h-op) { color: var(--text); }
+.transcript-command .cmd-text .h-bin, .transcript-command .cmd-text .h-verb { font-weight: 700; }
+.transcript .screen-foot .linkish { color: var(--term-text); }
+.transcript .screen-foot { padding: .75rem; border-top: 1px solid var(--term-line); font: .875rem/1.5 var(--sans); }
+.transcript .tx-jump-wrap { position: relative; }
+.transcript .tx-jump { padding: .5rem .75rem; border: 1px solid var(--term-line); border-radius: var(--radius-sm); background: var(--term-bar); color: var(--term-text); font: .875rem var(--sans); }
+.transcript .yaml-in { display: block; width: 100%; min-height: 10rem; padding: .75rem; color: var(--term-text); background: var(--term-bg); border: 1px solid var(--term-line); font: .875rem/1.5 var(--mono); }
+.transcript-stream { min-width: 0; max-width: 100%; color: var(--term-text); font: .875rem/1.6 var(--mono); }
+.transcript-stream [hidden] { display: none !important; }
+.transcript-stream .transcript-stream-tools { display: flex; gap: .5rem; align-items: center; justify-content: space-between; color: var(--term-muted); font: .75rem/1.5 var(--sans); }
+.transcript-stream .transcript-stream-tools .icon-btn { color: var(--term-text); }
+body .transcript-stream .tx-out, body .transcript-stream .tx-err { margin: .25rem 0; max-width: 100%; font: .875rem/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; overflow: visible; border: 0; background: transparent; padding: 0; color: var(--term-text); }
+body .transcript-stream .tx-out .ln, body .transcript-stream .tx-err .ln { display: block; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; max-width: 100%; }
+.transcript-stream .tx-table-wrap { max-width: 100%; margin: .5rem 0; overflow: visible !important; }
+.transcript-stream .tx-table { font: .875rem/1.55 var(--mono); width: 100%; max-width: 100%; border-collapse: collapse; color: var(--term-text); }
+.transcript-stream .tx-table thead th { font: 600 .875rem/1.55 var(--mono); color: var(--term-text); white-space: nowrap; padding: .25rem .5rem .25rem 0; letter-spacing: 0; }
+.transcript-stream .tx-table tbody td { padding: .25rem .5rem .25rem 0; border-top: 1px solid var(--term-line); vertical-align: top; }
+.transcript-stream .tx-table tbody td.tx-short { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.transcript-stream .tx-table tbody td.tx-long { white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+.transcript-stream .transcript-row-cards { display: grid; gap: .75rem; list-style: none; padding: 0; margin: .5rem 0; }
+.transcript-stream .transcript-row-cards > li { list-style: none; min-width: 0; }
+.transcript-stream .transcript-row-cards dl { display: grid; grid-template-columns: minmax(0,1fr); gap: .25rem; border: 1px solid var(--term-line); border-radius: var(--radius-sm); padding: .75rem; margin: 0; }
+.transcript-stream .transcript-row-cards dt { color: var(--term-muted); font: 600 .75rem/1.5 var(--sans); overflow-wrap: normal; }
+.transcript-stream .transcript-row-cards dd { margin: 0 0 .5rem; min-width: 0; }
+.transcript-stream .transcript-row-cards dd.tx-short { white-space: nowrap; overflow-wrap: normal; }
+.transcript-stream .transcript-row-cards dd.tx-long { white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript-stream .o-err, .transcript-stream .o-warn { color: var(--term-text); font-weight: 600; }
+.transcript-stream mark { color: inherit; background: color-mix(in srgb, var(--term-text) 22%, var(--term-bg)); }
+.transcript-stream .tx-more { color: var(--term-text); border-color: var(--term-line); background: var(--term-bar); padding: .5rem; min-height: 36px; font-size: .875rem; }
+.transcript-stream .transcript-preview-note { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; color: var(--term-muted); font: .875rem/1.5 var(--sans); }
+.transcript .transcript-note, .transcript-stream .transcript-note { margin: .5rem 0; color: var(--term-muted); font: .875rem/1.5 var(--sans); overflow-wrap: anywhere; }
+.transcript-reference .transcript-note { margin: .5rem 0; color: var(--term-muted); font: .875rem/1.5 var(--sans); overflow-wrap: anywhere; }
+.transcript .transcript-reel-controls { display: flex; gap: .5rem; padding: .5rem .75rem; }
+@media (prefers-reduced-motion: reduce) { .transcript *, .transcript-stream * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+.transcript-stream .tx-token { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+
+.transcript .tx-head .icon-btn:hover, .transcript .tx-head .icon-btn[aria-pressed='true'], .transcript .screen-bar .icon-btn:hover, .transcript .screen-bar .icon-btn[aria-pressed='true'] { color: var(--term-text); background: var(--term-bar); border-color: var(--term-line); }
+.transcript .tx-head select { border: 1px solid var(--term-line); border-radius: var(--radius-sm); padding: .25rem .5rem; font-size: .875rem; }
+.transcript .tx-title { font-weight: 600; }
+.transcript .tx-tag { text-transform: none; letter-spacing: 0; }
+.transcript .tx-prompt { font-weight: 700; user-select: none; }
+.transcript .tx-node { max-width: none; }
+.transcript .tx-hint { max-width: none; }
+.transcript .tx-jump-wrap { height: auto; }
+.transcript .tx-jump { position: static; box-shadow: none; animation: none; cursor: pointer; }
+.transcript .tx-suggest button { border: 1px solid var(--term-line); border-radius: var(--radius-sm); padding: .375rem .5rem; max-width: 100%; overflow: visible; text-overflow: clip; font-family: var(--mono); cursor: pointer; }
+.transcript .tx-suggest button:hover, .transcript .starters button:hover { color: var(--term-text); background: var(--term-bar); border-color: var(--term-text); }
+.transcript .yaml-in { margin: 0; border-radius: var(--radius-sm); resize: vertical; }
+.transcript-stream .tx-more { margin-top: .5rem; border: 1px solid var(--term-line); border-radius: var(--radius-sm); cursor: pointer; font-family: var(--sans); }
+.transcript-stream .tx-more:hover { background: var(--term-bar); border-color: var(--term-text); }
+.transcript-stream .tx-table th, .transcript-stream .tx-table td { text-align: left; background: transparent; }
+.transcript-stream .tx-table th { border: 0; vertical-align: top; }
+.transcript-command .typed .tx-prompt { margin-right: .5rem; }
+.transcript-command .cmd-text { flex: 1 1 17rem; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--text); white-space: pre-wrap; }
+.transcript .exit { font: .75rem/1.5 var(--mono); padding: .125rem .375rem; border: 1px solid var(--term-line); border-radius: var(--radius-sm); color: var(--term-text); background: var(--term-bar); white-space: nowrap; }
+
+.transcript .transcript-reel-controls .btn { color: var(--term-text); background: var(--term-bar); border-color: var(--term-line); }
+
+.transcript.tx.live, .transcript.screen.live { border-color: var(--term-line); }
+.transcript .tx-head .icon-btn, .transcript .screen-bar .icon-btn { width: 36px; height: 36px; }
+.transcript .tx-body { scrollbar-color: var(--term-line) var(--term-bg); }
+.transcript .screen-body { font: .875rem/1.6 var(--mono); overscroll-behavior-x: auto; scrollbar-color: var(--term-line) var(--term-bg); }
+.transcript-command .cmd-row .cmd-text { word-break: normal; }
+.transcript .h-ph, .transcript-command .cmd-text .h-ph { font-style: normal; }
+.transcript.tx.wrap .tx-cmdline .cmd { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+.transcript .tx-node .linkish { color: var(--term-text); }
+.transcript.hero-term { min-height: 0; }

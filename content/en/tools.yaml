@@ -1,0 +1,106 @@
+# The tools a learner needs to practise outside the website, in the order the course introduces them. Which lessons
+# and labs use a tool is derived from their commands (backend/academy/tools.py), never written by hand. Every
+# installation link points at the tool's own documentation; check `verify` there before changing it.
+- id: linux
+  name: "A Linux shell"
+  what: "Bash and the standard tools every Linux distribution ships: coreutils (`ls`, `cat`, `base64`, `diff`…), `ip` and `ss`, `systemctl` and `journalctl`, `tar`, `unshare`, the OpenSSH client."
+  commands: [base64, diff, tar, sha256sum, getent, systemctl, journalctl, nc, ip, ss, unshare, ssh, ssh-keygen]
+  install:
+    - {title: "Bash reference manual", url: "https://www.gnu.org/software/bash/manual/"}
+    - {title: "Windows: install Linux with WSL", url: "https://learn.microsoft.com/en-us/windows/wsl/install"}
+  verify: "bash --version"
+  notes: "The Linux lessons were recorded on Red Hat Enterprise Linux 9 family systems. Linux: already there. Windows: install a Linux distribution with WSL. macOS: use a Linux virtual machine, because `systemctl`, `ip`, `ss` and `unshare` are Linux-only and macOS's own shell tools differ. `nc` and `rsync` come from separate packages on some distributions (`nmap-ncat` and `rsync` on RHEL)."
+- id: podman
+  name: "Podman"
+  what: "Runs and builds containers without a daemon; the container lessons use it throughout."
+  commands: [podman]
+  install:
+    - {title: "Podman installation instructions", url: "https://podman.io/docs/installation"}
+    - {title: "podman machine (macOS and Windows)", url: "https://docs.podman.io/en/latest/markdown/podman-machine.1.html"}
+  verify: "podman --version"
+  notes: "The container lessons were recorded with rootless Podman 5.8 on Linux. On macOS and Windows, Podman runs containers in a Linux virtual machine (on Windows a WSL 2 distribution) that you create and start once with `podman machine init` and `podman machine start`. Commands that look at a container from the host (`ps` with the container's process ID, comparing `uname -r`) then show that virtual machine, not your computer: run them inside it with `podman machine ssh`."
+- id: skopeo
+  name: "Skopeo"
+  what: "Inspects and copies images in registries without pulling them."
+  commands: [skopeo]
+  install:
+    - {title: "Installing Skopeo", url: "https://github.com/podman-container-tools/skopeo/blob/main/install.md"}
+  verify: "skopeo --version"
+- id: jq
+  name: "jq"
+  what: "Filters and reshapes JSON; several recordings use it to keep only the fields that matter."
+  commands: [jq]
+  install:
+    - {title: "Download jq", url: "https://jqlang.org/download/"}
+  verify: "jq --version"
+- id: curl
+  name: "curl"
+  what: "Sends HTTP requests from the command line, to test services, Routes and certificates."
+  commands: [curl]
+  install:
+    - {title: "curl downloads", url: "https://curl.se/download.html"}
+  verify: "curl --version"
+  notes: "Preinstalled on most Linux distributions and on macOS."
+- id: kubectl
+  name: "kubectl"
+  what: "The Kubernetes command-line client, used by the Kubernetes lessons."
+  commands: [kubectl]
+  install:
+    - {title: "Kubernetes: Install tools", url: "https://kubernetes.io/docs/tasks/tools/"}
+  verify: "kubectl version --client"
+  notes: "`oc` includes the `kubectl` commands, so `oc` works wherever a lesson shows `kubectl`, with one difference to know: `oc apply` and `oc create` do not validate fields by default (a misspelt field is silently dropped), while `kubectl` refuses it. To see the same error as a lesson that uses `kubectl`, use `kubectl`, or add `--validate=strict` to `oc`. The OpenShift client archive (see `oc` below) also contains a `kubectl` binary."
+- id: oc
+  name: "oc, the OpenShift CLI"
+  what: "OpenShift's command-line client: every `kubectl` command, plus Routes, projects, builds and administration."
+  commands: [oc]
+  install:
+    - {title: "OpenShift 4.21: Installing the OpenShift CLI", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/cli_tools/openshift-cli-oc#cli-installing-cli_cli-developer-commands"}
+  verify: "oc version --client"
+  notes: "The recordings used `oc` 4.21. Ways to get it without a subscription: OpenShift Local ships one (`crc oc-env` prints how to put it on your `PATH`); any cluster's web console offers it under ? → Command Line Tools; on macOS, Homebrew's `openshift-cli` package. The Customer Portal download needs a Red Hat login. Use a client of the same minor version as your cluster when you can."
+- id: crc
+  name: "OpenShift Local (crc)"
+  what: "Runs a single-node OpenShift cluster in a virtual machine on your computer; the course's recordings were made on it. Its `crc` command creates, starts and stops the cluster."
+  commands: [crc]
+  install:
+    - {title: "Red Hat OpenShift Local", url: "https://developers.redhat.com/products/openshift-local/overview"}
+    - {title: "CRC documentation: installing", url: "https://crc.dev/docs/installing/"}
+  verify: "crc version"
+  notes: "Needs a Red Hat account to download the pull secret that `crc start` asks for. Minimum for the OpenShift preset: 4 physical CPU cores, 10.5 GB of free memory and 35 GB of disk, with hardware virtualisation (it does not run nested). Supported hosts: Windows 11 (not Home), macOS 15 or later, recent RHEL, CentOS and Fedora; Ubuntu and Debian are not supported. What it cannot show: more than one node (no spreading, draining or failover), cluster updates, and monitoring, whose operator it disables by default. Log in as `developer` for everything except the steps marked admin, which use `kubeadmin`; `crc console --credentials` prints both passwords."
+- id: openssl
+  name: "OpenSSL"
+  what: "Creates keys and certificates and opens test TLS connections."
+  commands: [openssl]
+  install:
+    - {title: "OpenSSL documentation", url: "https://docs.openssl.org/3.0/man1/openssl/"}
+  verify: "openssl version"
+  notes: "Preinstalled on most Linux distributions; otherwise install your distribution's `openssl` package. The certificate lessons were recorded with OpenSSL 3 and use options added in OpenSSL 3.0 (for example `openssl x509 -req … -copy_extensions copy`). On macOS the built-in `openssl` is LibreSSL, which does not offer all of them: install OpenSSL 3 with a package manager if a command is refused."
+- id: htpasswd
+  name: "htpasswd"
+  what: "Writes the password file of OpenShift's HTPasswd identity provider."
+  commands: [htpasswd]
+  install:
+    - {title: "OpenShift 4.21: Configuring an htpasswd identity provider", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/configuring-identity-providers"}
+    - {title: "Apache HTTP Server: htpasswd", url: "https://httpd.apache.org/docs/2.4/programs/htpasswd.html"}
+  verify: "command -v htpasswd"
+  notes: "On Red Hat Enterprise Linux and Fedora it comes with the `httpd-tools` package; Debian and Ubuntu call the package `apache2-utils`. On Windows, `htpasswd.exe` is in the `bin` folder of Apache httpd distributions (OpenShift's identity-provider documentation describes both)."
+- id: helm
+  name: "Helm"
+  what: "Renders and installs packaged Kubernetes applications (charts)."
+  commands: [helm]
+  install:
+    - {title: "Installing Helm", url: "https://helm.sh/docs/intro/install/"}
+  verify: "helm version"
+- id: git
+  name: "Git"
+  what: "Keeps the history of the manifests in the GitOps lessons."
+  commands: [git]
+  install:
+    - {title: "Git downloads", url: "https://git-scm.com/downloads"}
+  verify: "git --version"
+- id: cosign
+  name: "Cosign"
+  what: "Signs and verifies container images (Sigstore)."
+  commands: [cosign]
+  install:
+    - {title: "Installing Cosign", url: "https://docs.sigstore.dev/cosign/system_config/installation/"}
+  verify: "cosign version"

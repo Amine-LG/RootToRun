@@ -1,0 +1,608 @@
+# Synchronise groups from LDAP (generated from one command list; edit with care)
+- id: p.ldap-group-sync
+  title: Synchronise groups from LDAP
+  subtitle: Preview, conflicts, movers and leavers, prune, and a scheduled sync
+  module: p5-identity
+  mode: REAL_LAB
+  minutes: 35
+  level: 3
+  supports: 'OpenShift 4.21 `oc adm groups sync` and `oc adm prune groups` with an RFC 2307 LDAPSyncConfig, against a glauth 2.3.2 directory running
+    in a project. Every command was run on OpenShift Local 4.21 by the ordinary user developer and the cluster administrator (experiment X-AUTH-05);
+    the groups, the cluster role and its binding were removed afterwards. The cluster''s identity provider was not changed: nobody logs in through
+    this directory here.'
+  concepts:
+  - ocp.auth
+  - sec.rbac
+  - ocp.users-identities
+  prerequisites:
+  - p.ldap-oidc
+  - o2.groups
+  record_on: cluster-admin
+  files:
+    glauth.cfg: "[ldap]\n  enabled = true\n  listen = \"0.0.0.0:3893\"\n[ldaps]\n  enabled = false\n[backend]\n  datastore = \"config\"\n  baseDN\
+      \ = \"dc=example,dc=com\"\n[behaviors]\n  IgnoreCapabilities = false\n# the account OpenShift binds as to search (password reader-pw, a\
+      \ value for this throwaway directory only)\n[[users]]\n  name = \"reader\"\n  uidnumber = 5001\n  primarygroup = 5501\n  passsha256 = \"\
+      c9847961e9bac211c57a09795fe11e392fc3e08285a3c0cd71431998548b63d1\"\n  [[users.capabilities]]\n    action = \"search\"\n    object = \"*\"\
+      \n[[users]]\n  name = \"ann\"\n  uidnumber = 5002\n  primarygroup = 5502\n  othergroups = [5503]\n[[users]]\n  name = \"ben\"\n  uidnumber\
+      \ = 5003\n  primarygroup = 5502\n[[groups]]\n  name = \"svcaccts\"\n  gidnumber = 5501\n[[groups]]\n  name = \"payments\"\n  gidnumber =\
+      \ 5502\n[[groups]]\n  name = \"auditors\"\n  gidnumber = 5503\n"
+    glauth-v2.cfg: "[ldap]\n  enabled = true\n  listen = \"0.0.0.0:3893\"\n[ldaps]\n  enabled = false\n[backend]\n  datastore = \"config\"\n \
+      \ baseDN = \"dc=example,dc=com\"\n[behaviors]\n  IgnoreCapabilities = false\n# the account OpenShift binds as to search (password reader-pw,\
+      \ a value for this throwaway directory only)\n[[users]]\n  name = \"reader\"\n  uidnumber = 5001\n  primarygroup = 5501\n  passsha256 =\
+      \ \"c9847961e9bac211c57a09795fe11e392fc3e08285a3c0cd71431998548b63d1\"\n  [[users.capabilities]]\n    action = \"search\"\n    object =\
+      \ \"*\"\n[[users]]\n  name = \"ann\"\n  uidnumber = 5002\n  primarygroup = 5502\n[[users]]\n  name = \"ben\"\n  uidnumber = 5003\n  primarygroup\
+      \ = 5504\n[[groups]]\n  name = \"svcaccts\"\n  gidnumber = 5501\n[[groups]]\n  name = \"payments\"\n  gidnumber = 5502\n[[groups]]\n  name\
+      \ = \"contractors\"\n  gidnumber = 5504\n"
+    sync.template: "kind: LDAPSyncConfig\napiVersion: v1\nurl: LDAP_URL\ninsecure: true          # this lab directory has no TLS; a real one uses\
+      \ ldaps:// or StartTLS with ca:\nbindDN: cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\nbindPassword:\n  file: PASSWORD_FILE   # an absolute\
+      \ path\nrfc2307:\n  groupsQuery:\n    baseDN: ou=users,dc=example,dc=com\n    scope: sub\n    derefAliases: never\n    filter: (objectClass=posixGroup)\n\
+      \    pageSize: 0\n  groupUIDAttribute: dn\n  groupNameAttributes: [cn]\n  groupMembershipAttributes: [uniqueMember]\n  usersQuery:\n   \
+      \ baseDN: ou=users,dc=example,dc=com\n    scope: sub\n    derefAliases: never\n    pageSize: 0\n  userUIDAttribute: dn\n  userNameAttributes:\
+      \ [uid]\n  tolerateMemberNotFoundErrors: false\n  tolerateMemberOutOfScopeErrors: false\n"
+    sync-mapped.template: "kind: LDAPSyncConfig\ngroupUIDNameMapping:\n  \"ou=auditors,ou=users,dc=example,dc=com\": ldap-auditors\napiVersion:\
+      \ v1\nurl: LDAP_URL\ninsecure: true          # this lab directory has no TLS; a real one uses ldaps:// or StartTLS with ca:\nbindDN: cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\n\
+      bindPassword:\n  file: PASSWORD_FILE   # an absolute path\nrfc2307:\n  groupsQuery:\n    baseDN: ou=users,dc=example,dc=com\n    scope:\
+      \ sub\n    derefAliases: never\n    filter: (objectClass=posixGroup)\n    pageSize: 0\n  groupUIDAttribute: dn\n  groupNameAttributes: [cn]\n\
+      \  groupMembershipAttributes: [uniqueMember]\n  usersQuery:\n    baseDN: ou=users,dc=example,dc=com\n    scope: sub\n    derefAliases: never\n\
+      \    pageSize: 0\n  userUIDAttribute: dn\n  userNameAttributes: [uid]\n  tolerateMemberNotFoundErrors: false\n  tolerateMemberOutOfScopeErrors:\
+      \ false\n"
+    reader-password: reader-pw
+    whitelist.txt: 'ou=payments,ou=users,dc=example,dc=com
+
+      ou=auditors,ou=users,dc=example,dc=com
+
+      '
+    whitelist-payments.txt: 'ou=payments,ou=users,dc=example,dc=com
+
+      '
+    sync-rbac.yaml: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: academy-ldap-group-syncer\nrules:\n- apiGroups:\
+      \ [user.openshift.io]\n  resources: [groups]\n  verbs: [get, list, create]      # create cannot be limited by name\n- apiGroups: [user.openshift.io]\n\
+      \  resources: [groups]\n  resourceNames: [payments]        # the only existing groups it may change\n  verbs: [update, patch]\n---\napiVersion:\
+      \ rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: academy-ldap-group-syncer\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n\
+      \  kind: ClusterRole\n  name: academy-ldap-group-syncer\nsubjects:\n- kind: ServiceAccount\n  name: ldap-sync\n  namespace: NAMESPACE\n"
+    cronjob.yaml: "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: ldap-sync\nspec:\n  schedule: \"*/30 * * * *\"\n  concurrencyPolicy:\
+      \ Forbid\n  jobTemplate:\n    spec:\n      backoffLimit: 0\n      template:\n        spec:\n          serviceAccountName: ldap-sync\n  \
+      \        restartPolicy: Never\n          containers:\n          - name: sync\n            image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest\n\
+      \            command: [oc, adm, groups, sync, --sync-config=/etc/ldap-sync/sync.yaml, --whitelist=/etc/ldap-sync/whitelist.txt, --confirm]\n\
+      \            volumeMounts:\n            - {name: config, mountPath: /etc/ldap-sync, readOnly: true}\n          volumes:\n          - name:\
+      \ config\n            secret: {secretName: ldap-sync}\n"
+  objective: |
+    Write an LDAPSyncConfig for a directory's layout, preview and confirm a group sync limited by a whitelist,
+    resolve a conflict with an existing group without breaking its bindings, follow a mover and a retired group
+    with sync and prune, and run sync on a schedule with a ServiceAccount that may change only the groups it syncs.
+  flow:
+  - kind: ask
+    id: recall-sync
+    recalls: p.ldap-oidc
+    prompt: LDAP is the cluster's identity provider. A person logs in. Does that create the OpenShift Groups their directory groups describe?
+    choices:
+    - text: 'No: group synchronisation is a separate job'
+      why: Login creates a User and an Identity. Groups come from `oc adm groups sync`, run by an administrator or on a schedule.
+    - text: Yes, at the first login
+      why: The LDAP identity provider does not read group membership.
+    - text: 'Only with mappingMethod: add'
+      why: mappingMethod decides how identities map to Users; it does nothing for groups.
+    answer: 0
+  - kind: teach
+    id: situation
+    title: The directory owns membership
+    body: |
+      The payments team's members are listed in the company directory. RoleBindings in OpenShift should name
+      the group `payments`, so that people who join or leave the team gain or lose access without anyone editing a
+      binding. That works only if OpenShift's Group objects follow the directory: that is **group
+      synchronisation**.
+
+      The lab cluster has no company directory, so developer runs a small LDAP server, glauth, in a project. Its
+      whole content is one file. The administrator ran the syncs, as on a real cluster; each prompt says who ran
+      what.
+  - kind: show
+    id: glauth-file
+    code: "[ldap]\n  enabled = true\n  listen = \"0.0.0.0:3893\"\n[ldaps]\n  enabled = false\n[backend]\n  datastore = \"config\"\n  baseDN =\
+      \ \"dc=example,dc=com\"\n[behaviors]\n  IgnoreCapabilities = false\n# the account OpenShift binds as to search (password reader-pw, a value\
+      \ for this throwaway directory only)\n[[users]]\n  name = \"reader\"\n  uidnumber = 5001\n  primarygroup = 5501\n  passsha256 = \"c9847961e9bac211c57a09795fe11e392fc3e08285a3c0cd71431998548b63d1\"\
+      \n  [[users.capabilities]]\n    action = \"search\"\n    object = \"*\"\n[[users]]\n  name = \"ann\"\n  uidnumber = 5002\n  primarygroup\
+      \ = 5502\n  othergroups = [5503]\n[[users]]\n  name = \"ben\"\n  uidnumber = 5003\n  primarygroup = 5502\n[[groups]]\n  name = \"svcaccts\"\
+      \n  gidnumber = 5501\n[[groups]]\n  name = \"payments\"\n  gidnumber = 5502\n[[groups]]\n  name = \"auditors\"\n  gidnumber = 5503\n"
+    caption: glauth.cfg
+    origin: file
+    body: 'Three groups: `payments` (ann and ben), `auditors` (ann) and `svcaccts` (the account OpenShift binds as).'
+  - kind: show
+    id: directory
+    run: oc project -q > ns.txt && oc create configmap glauth --from-file=config.cfg=glauth.cfg && oc create deployment ldap --image=docker.io/glauth/glauth:v2.3.2
+      --port=3893 && oc set volume deploy/ldap --add --name=cfg --configmap-name=glauth --mount-path=/app/config >/dev/null && oc create service
+      nodeport ldap --tcp=3893:3893 --node-port=30389 && oc rollout status deploy/ldap --timeout=180s
+    notice: 'The directory runs, from the public glauth image, with `glauth.cfg` (one of the lesson''s source files) as its
+      whole content. A NodePort Service publishes it on port 30389 of the node; in the recording, the administrator''s
+      commands on the workstation reached it at `127.0.0.1:30389`. That address depends on how your OpenShift Local
+      instance forwards ports, and other setups differ: the preview below is the connection test (it lists groups
+      only when it reaches the directory). If it cannot connect, forward a free local port to the `ldap` Service with
+      oc''s port-forward subcommand in a second terminal, keep that terminal open while you sync, and put that port in
+      `LDAP_URL`. That alternative was not recorded here.'
+  - kind: teach
+    id: sync-config
+    title: Tell sync how this directory is laid out
+    body: |
+      An **LDAPSyncConfig** says where the directory is, how to bind, and which of three schemas it follows:
+      `rfc2307` (group entries list their members), `activeDirectory` (user entries list their groups in
+      `memberOf`) or `augmentedActiveDirectory` (both). In this directory each group entry is a `posixGroup` whose
+      `uniqueMember` values are the members' DNs, so it is `rfc2307`: find groups with a filter, read members from
+      `uniqueMember`, name each group from `cn` and each user from `uid`. Those user names must equal the names
+      people get when they log in, or the grants will not reach them.
+  - kind: ask
+    id: which-schema
+    prompt: In another directory, each person's entry has `memberOf` values naming their groups, and the group entries list no members. Which
+      schema fits?
+    choices:
+    - text: activeDirectory
+      why: It reads membership from users' memberOf; augmentedActiveDirectory also queries groups for names.
+    - text: rfc2307
+      why: rfc2307 reads members from the group entries, which list none here.
+    - text: 'Either: sync detects the layout'
+      why: Sync reads only what the configuration tells it to.
+    answer: 0
+  - kind: show
+    id: sync-file
+    code: "kind: LDAPSyncConfig\napiVersion: v1\nurl: LDAP_URL\ninsecure: true          # this lab directory has no TLS; a real one uses ldaps://\
+      \ or StartTLS with ca:\nbindDN: cn=reader,ou=svcaccts,ou=users,dc=example,dc=com\nbindPassword:\n  file: PASSWORD_FILE   # an absolute path\n\
+      rfc2307:\n  groupsQuery:\n    baseDN: ou=users,dc=example,dc=com\n    scope: sub\n    derefAliases: never\n    filter: (objectClass=posixGroup)\n\
+      \    pageSize: 0\n  groupUIDAttribute: dn\n  groupNameAttributes: [cn]\n  groupMembershipAttributes: [uniqueMember]\n  usersQuery:\n   \
+      \ baseDN: ou=users,dc=example,dc=com\n    scope: sub\n    derefAliases: never\n    pageSize: 0\n  userUIDAttribute: dn\n  userNameAttributes:\
+      \ [uid]\n  tolerateMemberNotFoundErrors: false\n  tolerateMemberOutOfScopeErrors: false\n"
+    caption: sync.template (LDAP_URL and PASSWORD_FILE are filled in next)
+    origin: file
+  - kind: show
+    id: render
+    run: sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#' -e "s#PASSWORD_FILE#$PWD/reader-password#" sync.template > sync.yaml && sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#'
+      -e "s#PASSWORD_FILE#$PWD/reader-password#" sync-mapped.template > sync-mapped.yaml && grep -E '^(url|bindDN):' sync.yaml
+    notice: '`sed` turns the two templates (source files) into `sync.yaml` and `sync-mapped.yaml`, with the directory''s
+      address and the absolute path of `reader-password`, the lesson''s file holding the reader''s password. `grep`
+      prints the two lines that locate the directory and the account sync binds as.'
+  - kind: show
+    id: relative
+    body: 'Why an absolute path? Here is the same file with a relative one:'
+    run: 'sed ''s#^  file: .*#  file: reader-password#'' sync.yaml > sync-relative.yaml && oc adm groups sync --sync-config=sync-relative.yaml'
+    notice: On oc 4.21 a relative `bindPassword.file` is looked up under the configuration file's own path (`sync-relative.yaml/reader-password`)
+      and the whole configuration is rejected. Use an absolute path.
+  - kind: ask
+    id: guess-preview
+    guess: true
+    prompt: The administrator runs `oc adm groups sync --sync-config=sync.yaml` with no other option. What changes on the cluster?
+    choices:
+    - text: 'Nothing: without --confirm it only prints'
+      why: Sync and prune preview by default; `--confirm` is what writes.
+    - text: All three groups are created
+      why: That needs --confirm.
+    - text: Only groups that already exist are updated
+      why: Without --confirm nothing is written, new or existing.
+    answer: 0
+  - kind: show
+    id: preview
+    run: oc adm groups sync --sync-config=sync.yaml | grep -E '^ +(name|openshift.io/ldap.uid):|^  users:|^  - '
+    notice: Three Groups, named from `cn`, with the members' `uid`s. Each carries the directory entry it came from (`openshift.io/ldap.uid`);
+      sync uses these marks later to recognise its own groups.
+  - kind: teach
+    id: whitelist
+    title: Sync only what you mean to
+    body: |
+      A directory has far more groups than a cluster needs, including service accounts like `svcaccts`. A
+      **whitelist** file lists the group entries to sync, one DN per line; a blacklist excludes some. Here:
+      payments and auditors.
+
+      But a team member had already created a local Group called `auditors`, by hand:
+  - kind: show
+    id: local
+    run: oc adm groups new auditors && oc get group auditors -o jsonpath='{.metadata.labels}{" "}{.metadata.annotations}{"\n"}'
+    notice: 'A plain Group: no labels, no annotations saying where it came from.'
+  - kind: show
+    id: conflict
+    run: oc adm groups sync --sync-config=sync.yaml --whitelist=whitelist.txt --confirm; oc get groups
+    notice: 'payments was created (two users); auditors was refused: `openshift.io/ldap.host label did not match sync host`, because a Group of
+      that name exists without the marks that sync puts on its own groups. Sync never takes over a group it did not create; the local `auditors`
+      is unchanged.'
+  - kind: ask
+    id: fix-conflict
+    prompt: The local `auditors` group is used by bindings the team relies on. How do you sync the directory's auditors without breaking them?
+    choices:
+    - text: Map it to another name
+      why: The synced group gets its own name; the local one and its bindings stay as they are. The team can move its bindings later.
+    - text: Delete the local group, then sync again
+      why: That works, but every binding naming `auditors` changes meaning silently. Check them first.
+    - text: Run the sync again with --force
+      why: There is no such option; sync refuses to take over groups it did not create.
+    answer: 0
+  - kind: show
+    id: mapped-file
+    code: "groupUIDNameMapping:\n  \"ou=auditors,ou=users,dc=example,dc=com\": ldap-auditors\n"
+    caption: added at the top of sync-mapped.yaml
+    origin: file
+  - kind: show
+    id: mapped
+    run: oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist.txt --confirm && oc get groups
+    notice: '`ldap-auditors` holds ann; the local `auditors` is untouched; `payments` was already in step.'
+  - kind: try
+    id: try-confirm
+    body: As the administrator, write the groups listed in `teams.txt`, using the configuration `corp-sync.yaml`.
+    accept:
+    - oc adm groups sync --sync-config=corp-sync.yaml --whitelist=teams.txt --confirm
+    - oc adm groups sync --whitelist=teams.txt --sync-config=corp-sync.yaml --confirm
+    - oc adm groups sync --sync-config corp-sync.yaml --whitelist teams.txt --confirm
+    - oc adm groups sync --confirm --sync-config=corp-sync.yaml --whitelist=teams.txt
+    hints:
+    - match: ^(?!.*--confirm).*$
+      say: Without `--confirm` sync only previews.
+    - match: ^(?!.*--whitelist).*$
+      say: Limit the run to the groups in `teams.txt` with `--whitelist=teams.txt`.
+    - match: prune
+      say: 'Prune deletes groups; this task writes them: `oc adm groups sync`.'
+    hint: '`oc adm groups sync` with `--sync-config`, `--whitelist` and `--confirm`.'
+  - kind: show
+    id: grant
+    body: 'developer, admin of the project, grants the team read access through the group:'
+    run: oc policy add-role-to-group view payments && oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'
+    notice: '`payments` is now among the groups that may read pods here. Nobody will need to edit this binding when the team changes.'
+  - kind: teach
+    id: movers
+    title: Movers and leavers
+    body: |
+      In the directory, ben moves from payments to the contractors group, and the auditors group is retired.
+      Nothing changes in OpenShift until sync runs again.
+  - kind: show
+    id: move
+    run: oc create configmap glauth --from-file=config.cfg=glauth-v2.cfg --dry-run=client -o yaml | oc replace -f - && oc rollout restart deploy/ldap
+      && oc rollout status deploy/ldap --timeout=180s
+    notice: The ConfigMap now holds `glauth-v2.cfg` (another source file), and the directory is restarted, because glauth
+      reads its file when it starts. The directory changed; OpenShift's Groups have not.
+  - kind: ask
+    id: guess-resync
+    guess: true
+    prompt: Sync runs again for payments. What happens to the access ben had through the payments group?
+    choices:
+    - text: It ends with the sync
+      why: Sync replaces the Group's member list with the directory's; the binding names the group, so the access ben had through payments goes
+        with it (other bindings that name ben himself are not affected).
+    - text: It stays until someone removes the binding
+      why: The binding never named ben; it named the group.
+    - text: 'It stays: sync only adds members'
+      why: Sync makes the list match the directory, removals included.
+    answer: 0
+  - kind: show
+    id: resync
+    run: oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist-payments.txt --confirm && oc get group payments ldap-auditors
+    notice: 'payments now lists only ann. `ldap-auditors` still exists, although its directory group is gone: sync does not delete groups.'
+  - kind: show
+    id: gone-dn
+    body: 'Sync never deletes a group. Before deleting one, check the evidence: the administrator asks the directory
+      for the retired group''s entry. This sync is expected to fail.'
+    run: printf 'ou=auditors,ou=users,dc=example,dc=com\n' > auditors.txt && oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=auditors.txt
+    notice: 'The directory no longer has `ou=auditors`: sync cannot find it.'
+  - kind: show
+    id: prune-preview
+    title: Prune what the directory retired
+    body: '`oc adm prune groups` deletes the groups sync created whose directory entry has gone. It works on
+      **OpenShift** groups, so its whitelist lists OpenShift group names (here `ldap-auditors`), not directory DNs as
+      sync''s does. The administrator first reads which entry the group came from, then previews, without `--confirm`:'
+    run: oc get group ldap-auditors -o jsonpath='{.metadata.annotations.openshift\.io/ldap\.uid}{"\n"}' && printf 'ldap-auditors\n' > prune.txt
+      && oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt
+    notice: 'The group came from `ou=auditors,ou=users,dc=example,dc=com`, the entry the directory no longer has. The
+      preview names `group/ldap-auditors` as the group prune would delete; without `--confirm`, nothing changed.'
+  - kind: show
+    id: prune
+    body: 'Nothing was deleted yet. With `--confirm`, prune deletes, and the administrator lists what is left:'
+    run: oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt --confirm && oc get groups
+    notice: '`group/ldap-auditors` was deleted. `payments`, whose entry still exists, and the local `auditors`, which
+      was not in the whitelist, remain. A scheduled prune does the same for every whitelisted group.'
+  - kind: try
+    id: try-prune-preview
+    body: As the administrator, preview which of the OpenShift groups named in `groups.txt` prune would delete, using `corp-sync.yaml`, without
+      deleting anything.
+    accept:
+    - oc adm prune groups --sync-config=corp-sync.yaml --whitelist=groups.txt
+    - oc adm prune groups --whitelist=groups.txt --sync-config=corp-sync.yaml
+    - oc adm prune groups --sync-config corp-sync.yaml --whitelist groups.txt
+    hints:
+    - match: --confirm
+      say: With `--confirm` prune deletes. Leave it out to preview.
+    - match: groups sync
+      say: Sync writes groups; deleting the ones whose entry is gone is `oc adm prune groups`.
+    hint: '`oc adm prune groups` with `--sync-config` and `--whitelist` (a file of OpenShift group names), and no `--confirm`.'
+  - kind: teach
+    id: on-schedule
+    title: Keep it in step on a schedule
+    body: |
+      People join and leave every day, so sync runs on a schedule: a CronJob running `oc adm groups sync
+      --confirm` inside the cluster. Its ServiceAccount needs to read and write Group objects, which are
+      cluster-scoped, so the administrator gives it a ClusterRole for groups, bound to that one account. Changing
+      the members of any group would let a compromised job add itself to a group bound to an administrator role,
+      so updates are limited by name to the synced groups and the job gets no delete; pruning stays a separate,
+      reviewed task. `create` cannot be limited by name: never bind powerful roles to group names that do not
+      exist yet.
+  - kind: show
+    id: rbac-file
+    code: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: academy-ldap-group-syncer\nrules:\n- apiGroups: [user.openshift.io]\n\
+      \  resources: [groups]\n  verbs: [get, list, create]      # create cannot be limited by name\n- apiGroups: [user.openshift.io]\n  resources:\
+      \ [groups]\n  resourceNames: [payments]        # the only existing groups it may change\n  verbs: [update, patch]\n---\napiVersion: rbac.authorization.k8s.io/v1\n\
+      kind: ClusterRoleBinding\nmetadata:\n  name: academy-ldap-group-syncer\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n\
+      \  name: academy-ldap-group-syncer\nsubjects:\n- kind: ServiceAccount\n  name: ldap-sync\n  namespace: NAMESPACE\n"
+    caption: sync-rbac.yaml (NAMESPACE is filled in)
+    origin: file
+  - kind: ask
+    id: why-cluster-role
+    prompt: Why does the sync job need a ClusterRole rather than a Role in its project?
+    choices:
+    - text: Groups are cluster-scoped objects
+      why: A Role only grants access inside a namespace; Groups belong to no namespace.
+    - text: CronJobs can only use ClusterRoles
+      why: A CronJob's ServiceAccount can hold any binding; the target objects decide.
+    - text: To read the LDAP Secret
+      why: The Secret is in its own project; a Role would do for that.
+    answer: 0
+  - kind: show
+    id: schedule-rbac
+    run: sed "s/NAMESPACE/$(cat ns.txt)/" sync-rbac.yaml | oc apply -f -
+  - kind: show
+    id: cron-file
+    code: "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: ldap-sync\nspec:\n  schedule: \"*/30 * * * *\"\n  concurrencyPolicy: Forbid\n\
+      \  jobTemplate:\n    spec:\n      backoffLimit: 0\n      template:\n        spec:\n          serviceAccountName: ldap-sync\n          restartPolicy:\
+      \ Never\n          containers:\n          - name: sync\n            image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest\n\
+      \            command: [oc, adm, groups, sync, --sync-config=/etc/ldap-sync/sync.yaml, --whitelist=/etc/ldap-sync/whitelist.txt, --confirm]\n\
+      \            volumeMounts:\n            - {name: config, mountPath: /etc/ldap-sync, readOnly: true}\n          volumes:\n          - name:\
+      \ config\n            secret: {secretName: ldap-sync}\n"
+    caption: cronjob.yaml
+    origin: file
+    body: The job runs the `oc` client from the `cli` image the cluster provides; inside the cluster it reaches the directory through its Service.
+  - kind: show
+    id: schedule
+    run: sed -e "s#LDAP_URL#ldap://ldap.$(oc project -q).svc:3893#" -e 's#PASSWORD_FILE#/etc/ldap-sync/reader-password#' sync-mapped.template
+      > sync-incluster.yaml && oc create serviceaccount ldap-sync && oc create secret generic ldap-sync --from-file=sync.yaml=sync-incluster.yaml
+      --from-file=whitelist.txt=whitelist-payments.txt --from-file=reader-password=reader-password && oc apply -f cronjob.yaml
+    notice: The configuration, whitelist and password are in a Secret mounted at /etc/ldap-sync.
+  - kind: ask
+    id: guess-job
+    guess: true
+    prompt: The job runs the same sync, from inside the cluster, against `ldap.<project>.svc:3893` instead of `127.0.0.1:30389`. Will it update
+      payments?
+    choices:
+    - text: 'No: the group belongs to another directory address'
+      why: Each synced Group records the host it came from in the `openshift.io/ldap.host` label, and sync refuses groups from another host. The
+        next step shows the refusal.
+    - text: 'Yes: it is the same directory'
+      why: Sync cannot know two addresses lead to the same server; it compares the recorded host.
+    - text: Yes, but only with --confirm
+      why: The job already passes --confirm.
+    answer: 0
+  - kind: show
+    id: run-now
+    run: oc create job ldap-sync-now --from=cronjob/ldap-sync && oc wait job/ldap-sync-now --for=condition=Failed --timeout=180s && oc logs job/ldap-sync-now
+      | tail -1
+    notice: '`openshift.io/ldap.host label did not match sync host`: the group was synced from the workstation''s address, `127.0.0.1`. Use one
+      address for every sync of a directory.'
+  - kind: show
+    id: regroup
+    body: 'The administrator moves ownership to the scheduled job by deleting the group; the RoleBinding names the group, so it stays:'
+    run: oc delete group payments
+  - kind: show
+    id: run-again
+    run: oc create job ldap-sync-again --from=cronjob/ldap-sync && oc wait job/ldap-sync-again --for=condition=Complete --timeout=180s && oc logs
+      job/ldap-sync-again
+    notice: The scheduled sync, run by hand, created payments from inside the cluster with its own ServiceAccount.
+  - kind: show
+    id: owner
+    run: oc get group payments --show-labels
+    notice: Its `openshift.io/ldap.host` label now names the in-cluster address, and ann is its only member.
+  - kind: ask
+    id: guess-binding
+    guess: true
+    prompt: developer bound `view` to payments before the group was deleted and re-created. Does the group still have read access?
+    choices:
+    - text: 'Yes: the binding names the group'
+      why: A RoleBinding's subject is a group name, not a reference to an object, so a re-created group of that name is covered.
+    - text: 'No: deleting a group deletes its bindings'
+      why: Nothing cascades from a Group to the bindings that name it.
+    - text: Only after developer binds it again
+      why: The binding never changed; it still names payments.
+    answer: 0
+  - kind: show
+    id: still-bound
+    run: oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'
+    notice: 'The group''s access survived: bindings refer to group names, not to Group objects.'
+  - kind: order
+    id: order-sync
+    prompt: Put the steps of bringing a directory's groups into a cluster in order.
+    items:
+    - Write an LDAPSyncConfig matching the directory's schema
+    - Preview with oc adm groups sync (no --confirm)
+    - Resolve name conflicts with existing groups
+    - Write the whitelisted groups with --confirm
+    - Bind roles to the groups
+    - Schedule sync and prune
+    why: Preview and conflicts come before anything is written; bindings name the groups once they exist; the schedule keeps them true.
+  - kind: show
+    id: cleanup
+    run: oc delete group payments auditors --ignore-not-found && oc delete clusterrolebinding academy-ldap-group-syncer && oc delete clusterrole
+      academy-ldap-group-syncer
+  - kind: reflect
+    id: explain-leaver
+    prompt: A colleague asks why a person removed from the payments group in the directory could still deploy for an hour. Explain.
+    model: |
+      OpenShift does not watch the directory. The Group payments only changes when sync runs; until the next
+      scheduled run the person is still a member and the group's bindings still apply to them. Shorter sync
+      intervals, or a sync triggered by the directory change, close the window; prune removes groups that
+      disappeared from the directory. Once the group changes, its grants stop applying to their existing sessions
+      too; the tokens themselves stay valid for anything else the person may still do.
+  - kind: teach
+    id: what-next
+    title: What you can do now
+    body: |
+      You can describe a directory to sync with an LDAPSyncConfig, preview and confirm a sync limited by a
+      whitelist, resolve a name conflict without breaking existing bindings, follow movers and leavers, prune
+      retired groups, and run sync on a schedule with a ServiceAccount that may change only the groups it syncs
+      (creating groups, and listing them all, cannot be limited by name).
+
+      Next, [Credentials in kubeconfig files](/lesson/p.kubeconfig-credentials) covers the identities that do not log
+      in through a directory at all: jobs, tools and break-glass access.
+  sections:
+  - id: reference
+    title: Reference
+    depth: true
+    body: |
+      | Task | Command |
+      |---|---|
+      | preview | `oc adm groups sync --sync-config=<file>` |
+      | write | `oc adm groups sync --sync-config=<file> --confirm` |
+      | only some groups | `--whitelist=<file of DNs>` or `--blacklist=<file>` |
+      | re-sync groups already synced from this directory | `oc adm groups sync --type=openshift --sync-config=<file> --confirm` |
+      | delete synced groups whose entry is gone | `oc adm prune groups --sync-config=<file> [--whitelist=<file of OpenShift group names>] --confirm` |
+
+      | Schema | Membership read from | Typical directory |
+      |---|---|---|
+      | `rfc2307` | the group entry (`member`, `uniqueMember`, `memberUid`) | OpenLDAP, 389 Directory Server |
+      | `activeDirectory` | the user entry (`memberOf`) | Active Directory, with groups named from those DNs |
+      | `augmentedActiveDirectory` | the user entry, plus a group query for names | Active Directory, readable group names |
+
+      Conflicts: sync refuses a Group of the same name that lacks its `openshift.io/ldap.*` marks. Map the directory
+      group to another name (`groupUIDNameMapping`), or remove the local group after checking its bindings.
+  review:
+  - q: What does `oc adm groups sync` do without --confirm?
+    a: It prints the Groups it would write; nothing changes.
+  - q: Why can sync refuse to write a group?
+    a: A Group of that name exists that sync did not create (no openshift.io/ldap.* marks); map the directory group to another name or remove
+      the local one.
+  - q: Does sync delete groups that disappeared from the directory?
+    a: 'No: oc adm prune groups does, for groups sync created.'
+  - q: What does a scheduled sync's ServiceAccount need, and no more?
+    a: 'A ClusterRole on groups (user.openshift.io): get, list and create, plus update and patch limited by resourceNames to the synced groups;
+      no delete (prune separately). Bound to that account only.'
+  references:
+  - title: 'OpenShift 4.21: Syncing LDAP groups (sync, prune, whitelists, CronJob)'
+    url: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/authentication_and_authorization/ldap-syncing
+  - title: 'Kubernetes: Using RBAC authorization (resourceNames)'
+    url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+  - title: 'Kubernetes: CronJob (concurrencyPolicy)'
+    url: https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+  - title: glauth, the directory server used in the lab
+    url: https://github.com/glauth/glauth
+  labs: []
+  limits: |
+    glauth is a small directory server whose group entries sit under ou=users; real directories differ, which is
+    why the sync configuration is written per directory. Logins through LDAP were not set up: changing the
+    cluster's OAuth configuration is shown in the HTPasswd lessons and described in the LDAP and OIDC lesson.
+  enterprise: |
+    Platform teams sync a whitelisted set of directory groups every few minutes from a CronJob, prune on a slower
+    schedule, and bind roles only to synced groups so that joiners, movers and leavers are handled in the directory.
+  commands:
+  - cmd: oc project -q > ns.txt && oc create configmap glauth --from-file=config.cfg=glauth.cfg && oc create deployment ldap --image=docker.io/glauth/glauth:v2.3.2
+      --port=3893 && oc set volume deploy/ldap --add --name=cfg --configmap-name=glauth --mount-path=/app/config >/dev/null && oc create service
+      nodeport ldap --tcp=3893:3893 --node-port=30389 && oc rollout status deploy/ldap --timeout=180s
+    as: developer
+    meaning: a small LDAP directory in developer's project, reachable from the workstation on port 30389
+    timeout: 210
+  - cmd: sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#' -e "s#PASSWORD_FILE#$PWD/reader-password#" sync.template > sync.yaml && sed -e 's#LDAP_URL#ldap://127.0.0.1:30389#'
+      -e "s#PASSWORD_FILE#$PWD/reader-password#" sync-mapped.template > sync-mapped.yaml && grep -E '^(url|bindDN):' sync.yaml
+    as: admin
+    meaning: the sync configuration, with this directory's address and an absolute password-file path
+  - cmd: 'sed ''s#^  file: .*#  file: reader-password#'' sync.yaml > sync-relative.yaml && oc adm groups sync --sync-config=sync-relative.yaml'
+    as: admin
+    meaning: a relative password-file path is refused (oc 4.21)
+    expect: fail
+  - cmd: oc adm groups sync --sync-config=sync.yaml | grep -E '^ +(name|openshift.io/ldap.uid):|^  users:|^  - '
+    as: admin
+    meaning: 'the preview: what sync would write, nothing written'
+  - cmd: oc adm groups new auditors && oc get group auditors -o jsonpath='{.metadata.labels}{" "}{.metadata.annotations}{"\n"}'
+    as: admin
+    meaning: someone already made a local group named auditors
+  - cmd: oc adm groups sync --sync-config=sync.yaml --whitelist=whitelist.txt --confirm; oc get groups
+    as: admin
+    meaning: sync refuses to take over a group it did not create
+    expect: any
+  - cmd: oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist.txt --confirm && oc get groups
+    as: admin
+    meaning: the directory's auditors group mapped to the name ldap-auditors
+  - cmd: oc policy add-role-to-group view payments && oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'
+    as: developer
+    meaning: developer gives the payments group read access to the project
+  - cmd: oc create configmap glauth --from-file=config.cfg=glauth-v2.cfg --dry-run=client -o yaml | oc replace -f - && oc rollout restart deploy/ldap
+      && oc rollout status deploy/ldap --timeout=180s
+    as: developer
+    meaning: in the directory, ben moves to contractors and the auditors group is retired
+    timeout: 210
+  - cmd: oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=whitelist-payments.txt --confirm && oc get group payments ldap-auditors
+    as: admin
+    meaning: sync updates payments; ldap-auditors is untouched
+  - cmd: printf 'ou=auditors,ou=users,dc=example,dc=com\n' > auditors.txt && oc adm groups sync --sync-config=sync-mapped.yaml --whitelist=auditors.txt
+    as: admin
+    meaning: 'ask the directory for that group: it no longer exists'
+    expect: fail
+  - cmd: oc get group ldap-auditors -o jsonpath='{.metadata.annotations.openshift\.io/ldap\.uid}{"\n"}' && printf 'ldap-auditors\n' > prune.txt
+      && oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt
+    as: admin
+    meaning: the directory entry the group came from, and a prune preview limited to that OpenShift group
+  - cmd: oc adm prune groups --sync-config=sync-mapped.yaml --whitelist=prune.txt --confirm && oc get groups
+    as: admin
+    meaning: prune deletes the group whose directory entry is gone
+  - cmd: sed "s/NAMESPACE/$(cat ns.txt)/" sync-rbac.yaml | oc apply -f -
+    as: admin
+    meaning: the cluster role a sync job needs, bound to one ServiceAccount
+  - cmd: sed -e "s#LDAP_URL#ldap://ldap.$(oc project -q).svc:3893#" -e 's#PASSWORD_FILE#/etc/ldap-sync/reader-password#' sync-mapped.template
+      > sync-incluster.yaml && oc create serviceaccount ldap-sync && oc create secret generic ldap-sync --from-file=sync.yaml=sync-incluster.yaml
+      --from-file=whitelist.txt=whitelist-payments.txt --from-file=reader-password=reader-password && oc apply -f cronjob.yaml
+    as: developer
+    meaning: the configuration in a Secret, the ServiceAccount and the CronJob
+  - cmd: oc create job ldap-sync-now --from=cronjob/ldap-sync && oc wait job/ldap-sync-now --for=condition=Failed --timeout=180s && oc logs job/ldap-sync-now
+      | tail -1
+    as: developer
+    meaning: 'run the scheduled sync once, now: it fails'
+    timeout: 210
+  - cmd: oc delete group payments
+    as: admin
+    meaning: remove the group synced from the workstation's address
+  - cmd: oc create job ldap-sync-again --from=cronjob/ldap-sync && oc wait job/ldap-sync-again --for=condition=Complete --timeout=180s && oc logs
+      job/ldap-sync-again
+    as: developer
+    meaning: the scheduled sync re-creates it
+    timeout: 210
+  - cmd: oc get group payments --show-labels
+    as: admin
+    meaning: now owned by the in-cluster address
+  - cmd: oc policy who-can get pods | sed -n '/^Groups:/,/^$/p'
+    as: developer
+    meaning: the binding to payments never went away
+  - cmd: oc delete group payments auditors --ignore-not-found && oc delete clusterrolebinding academy-ldap-group-syncer && oc delete clusterrole
+      academy-ldap-group-syncer
+    as: admin
+    meaning: remove the groups and the cluster role
+  experiment:
+    id: X-AUTH-05
+    objective: developer runs a glauth directory in a project; the administrator previews and confirms LDAP group sync, meets a conflict with
+      a local group, maps the directory group to another name, re-syncs after a membership change, prunes a retired group, and grants a ServiceAccount
+      a groups-only ClusterRole for a scheduled sync; groups, cluster role and binding are deleted.
+    changes:
+    - Groups payments, auditors (local) and ldap-auditors (cluster-scoped; created, deleted)
+    - ClusterRole and ClusterRoleBinding academy-ldap-group-syncer (groups only, for one ServiceAccount; created, deleted)
+    - 'On the workstation: OpenShift Local''s crc daemon forward 127.0.0.1:30389 for the NodePort Service (removed in the rollback)'
+    - 'In developer''s temporary project: the glauth Deployment, ConfigMap, NodePort Service, a RoleBinding to group payments, a Secret, a ServiceAccount,
+      a CronJob and a Job (deleted with it)'
+    preflight:
+    - cmd: test -z "$(oc get groups -o name)"
+    - cmd: oc get clusterrole academy-ldap-group-syncer
+      expect: fail
+    - cmd: 'ports=$(oc get services -A -o jsonpath=''{range .items[*]}{range .spec.ports[*]}{.nodePort}{"\n"}{end}{end}'') || exit 1
+
+        ! printf ''%s\n'' "$ports" | grep -qx 30389'
+    - cmd: 'fw=$(curl -sf --max-time 5 --unix-socket "$HOME/.crc/crc-http.sock" http://localhost/network/services/forwarder/all) || exit 1
+
+        printf ''%s'' "$fw" | jq -e ''all(.[]; .local | test(":3[0-9]{4}$") | not)'' >/dev/null'
+    snapshot:
+    - oc get groups -o name
+    - oc get clusterroles -o name | grep -c academy- || true
+    - oc get clusterrolebindings -o name
+    - curl -sf --max-time 5 --unix-socket "$HOME/.crc/crc-http.sock" http://localhost/network/services/forwarder/all | jq -S '[.[].local] | sort'
+    rollback:
+    - oc delete group payments auditors ldap-auditors --ignore-not-found
+    - oc delete clusterrolebinding academy-ldap-group-syncer --ignore-not-found
+    - oc delete clusterrole academy-ldap-group-syncer --ignore-not-found
+    - "sleep 5\nfw=$(curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all) || exit\
+      \ 1\nfor l in $(printf '%s' \"$fw\" | jq -r '.[] | select(.protocol == \"tcp\") | .local | select(test(\"^127[.]0[.]0[.]1:3[0-9]{4}$\"))');\
+      \ do\n  curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" -X POST http://localhost/network/services/forwarder/unexpose -d\
+      \ \"{\\\"local\\\":\\\"$l\\\",\\\"protocol\\\":\\\"tcp\\\"}\" || exit 1\n  echo \"removed workstation forward $l\"\ndone"
+    verify:
+    - cmd: test -z "$(oc get groups -o name)"

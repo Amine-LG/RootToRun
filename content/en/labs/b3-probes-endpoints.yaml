@@ -1,0 +1,191 @@
+id: lab.probes-endpoints
+title: "Readiness, endpoints and traffic"
+summary: "Take a pod out of rotation without restarting it, watch the EndpointSlice change, and add a missing readiness probe."
+module: a2-apps
+mode: REAL_LAB
+minutes: 35
+level: 2
+supports: "Verified on CRC / OpenShift 4.21.8: exec and httpGet probes, discovery.k8s.io/v1 EndpointSlices, Route on *.apps-crc.testing."
+concepts: [k8s.probes, net.endpointslices, k8s.pod-lifecycle]
+prerequisites: [b.health-probes]
+namespace: academy-probes
+objective: |
+  Prove that readiness controls traffic, not restarts: flip one pod's readiness, observe the EndpointSlice and
+  the Route, then give an unprobed Deployment a proper readiness probe.
+background: |
+  The `web` pods start httpd with a small wrapper: `touch /tmp/ready && exec run-httpd`. Their readiness probe
+  is an **exec probe** `test -f /tmp/ready`, a common "maintenance flag" pattern: delete the file and the pod
+  drops out of the Service without being restarted. `exec run-httpd` makes httpd PID 1 so it receives SIGTERM
+  directly (the image's `run-httpd` script in turn execs httpd). A second Deployment, `api`, has **no readiness probe at all**: it is considered Ready as soon as its
+  container starts, even if the app is not serving yet.
+
+  **Where everything comes from.** The app creates the project `academy-probes` and applies the objects shown below:
+  `web` and `api` both run Red Hat's UBI 9 Apache httpd image (`registry.access.redhat.com/ubi9/httpd-24`) (no login
+  needed) and serve the page and `healthz` from the ConfigMap `web-content`; `web`'s wrapper command and its exec
+  readiness probe are written in its manifest. Clean up deletes the project.
+commands:
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes -o yaml", meaning: "every endpoint with its conditions (ready, serving, terminating) and the pod it points to (targetRef)"}
+  - {cmd: "oc get pods -n academy-probes -o wide", meaning: "READY column and restarts"}
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data:
+      index.html: "<h1>academy probes</h1>"
+      healthz: "ok"
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 2
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          terminationGracePeriodSeconds: 10
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            command: ["sh", "-c", "touch /tmp/ready && exec run-httpd"]
+            ports: [{containerPort: 8080}]
+            readinessProbe:
+              exec: {command: ["test", "-f", "/tmp/ready"]}
+              periodSeconds: 3
+              failureThreshold: 1
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: api, labels: {app: api}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: api}}
+      template:
+        metadata: {labels: {app: api}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+steps:
+  - id: baseline
+    title: "Baseline: two ready endpoints"
+    do: "Look at the EndpointSlice of `web` and fetch the Route."
+    commands:
+      - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes", meaning: "the ENDPOINTS column lists every address in the slice, ready or not; readiness is only visible in the conditions (-o yaml or jsonpath)"}
+      - {cmd: "oc get route web -n academy-probes", meaning: "the host name; open it in a browser or check it with Verify"}
+    observe: "Two endpoint IPs in one slice (both ready, as the `-o yaml` view and the lab's check confirm). The Route `web-academy-probes.apps-crc.testing` answers 200 with 'academy probes'."
+    checks: [two-ready, route-ok]
+    wait_for: [two-ready, route-ok]
+  - id: drain-one
+    title: "Take one pod out of rotation"
+    do: "Delete the readiness flag in **one** of the two pods, then give the kubelet a few seconds: the step's checks pass once exactly one endpoint is ready and the failed probe has been recorded."
+    commands:
+      - {cmd: "oc exec <one-web-pod> -n academy-probes -- rm /tmp/ready", run: "oc exec {pod:app=web} -n academy-probes -- rm /tmp/ready", meaning: "no output; readiness fails at the next probe, within ~3 s (periodSeconds 3, failureThreshold 1)"}
+    predict:
+      prompt: "What happens to that pod?"
+      choices: ["It is restarted", "It stays Running with 0/1 READY and its endpoint becomes ready=false", "It is deleted and replaced"]
+      answer: 1
+      explain: "Readiness never restarts anything; it only changes whether the pod receives Service traffic."
+      feedback:
+        - "Restarts come from a failing liveness probe (or a crashing process). A failing readiness probe never restarts a container."
+        - "Right: the container keeps running, the pod's Ready condition turns False, and its endpoint stays in the slice with ready=false."
+        - "Nothing deletes the pod: the ReplicaSet still counts it as an existing replica. Readiness only decides whether it receives Service traffic."
+    observe: "`rm` prints nothing. With `periodSeconds: 3` and `failureThreshold: 1`, a single failed probe is enough, so within about 3 s exactly one endpoint is ready and the kubelet has recorded the failure (the recording waited for both checks before the next step)."
+    checks: [one-ready]
+    wait_for: [one-ready, drained]
+  - id: drained
+    title: "Look at the drained pod"
+    do: "Look at the pods, the endpoints and the kubelet's events."
+    commands:
+      - {cmd: "oc get pods -n academy-probes -l app=web", meaning: "READY and RESTARTS"}
+      - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} {.addresses[0]} ready={.conditions.ready}{\"\\n\"}{end}'", meaning: "per-endpoint readiness, with the pod each endpoint points to"}
+      - {cmd: "oc get events -n academy-probes --field-selector reason=Unhealthy", meaning: "the kubelet's record of the failed probe"}
+    observe: "The pod whose flag was removed (`web-7dccfc8867-6wqvz` in the recording) is `0/1 Running` with 0 restarts; the other is `1/1`. Both endpoints are still in the slice, but the drained pod's is `ready=false` and the other `ready=true`. The kubelet's `Unhealthy` event reads `Readiness probe failed:` with no detail, because `test -f` prints nothing."
+    why: "The kubelet sets the pod's Ready condition to False; the EndpointSlice controller mirrors it into the endpoint's conditions. The router and OVN-Kubernetes only send traffic to ready endpoints, so requests through the Route now all reach the other pod. Nothing restarts the drained container: the RESTARTS column stays 0."
+    checks: [one-ready, drained]
+  - id: restore
+    title: "Put it back"
+    do: "Recreate the flag and confirm both endpoints are ready again."
+    commands:
+      - {cmd: "oc exec <the-same-pod> -n academy-probes -- touch /tmp/ready", run: "oc exec {pod:app=web} -n academy-probes -- touch /tmp/ready", meaning: "readiness passes on the next probe"}
+      - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-probes", meaning: "both addresses, as before; this view lists unready endpoints too, so rerun the jsonpath from the previous step (or rely on the check) to see both ready=true"}
+    observe: "The pod becomes 1/1 again without a restart; the step's check confirms that both endpoints are ready again."
+    checks: [two-ready]
+    wait_for: [two-ready]
+  - id: api
+    title: "The unprobed api Deployment"
+    do: |
+      `api` has no readiness probe. Add an httpGet readiness probe on `/healthz` port 8080, then confirm the new
+      pod becomes ready only after the probe succeeds.
+    commands:
+      - {cmd: "oc set probe deploy/api -n academy-probes --readiness --get-url=http://:8080/healthz --period-seconds=5", meaning: "add the probe (a rollout follows)"}
+      - {cmd: "oc describe deploy/api -n academy-probes", meaning: "Readiness: http-get http://:8080/healthz with defaults filled in (timeout=1s, #success=1, #failure=3), and a new ReplicaSet"}
+    predict:
+      prompt: "Without any readiness probe, when is a pod considered Ready?"
+      choices: ["Never", "As soon as its containers are running", "After 30 seconds"]
+      answer: 1
+      explain: "No probe means Ready on start: a slow-starting app would receive traffic it cannot serve yet."
+      feedback:
+        - "Without a probe there is nothing to wait for: Kubernetes treats a missing readiness probe as success, so the pod is Ready almost at once."
+        - "Right: with no readiness probe, a container counts as ready as soon as it is running, whether or not the app can serve yet."
+        - "There is no built-in readiness delay. Only a readiness or startup probe can hold readiness back. `minReadySeconds` on a Deployment is different: it waits after the pod is Ready before the Deployment counts it as available, while Service traffic can already reach it."
+    observe: |
+      Changing the probe changes the pod template, so a rollout replaces the api pod (it is not restarted). The describe
+      output, taken one second after the change, shows `NewReplicaSet: api-854df545c8` next to the old one and
+      `2 total | 1 available | 1 unavailable`: the new pod is not ready until its first /healthz probe answers 200, and
+      the old pod keeps serving meanwhile.
+    why: "Readiness turns 'process started' into 'can serve'. During rollouts it also stops a bad version from taking traffic."
+    checks: [api-probe, api-ready]
+    wait_for: [api-probe, api-ready]
+hints: []
+checks:
+  - {id: two-ready, title: "web has 2 ready endpoints", type: endpoints, service: web, op: eq, value: 2, expect_text: "2 ready addresses"}
+  - {id: one-ready, title: "Exactly one web endpoint is ready (one pod drained)", type: endpoints, service: web, op: eq, value: 1, final: false, expect_text: "1 ready address"}
+  - {id: drained, title: "A readiness failure really happened (kubelet event)", type: event, reason: Unhealthy, message_contains: "Readiness probe failed", object_prefix: web-, expect_text: "an Unhealthy event: Readiness probe failed"}
+  - {id: route-ok, title: "The Route serves the app", type: route_http, route: web, expect_status: 200, contains: "academy probes", expect_text: "HTTP 200"}
+  - {id: api-probe, title: "api has an httpGet readiness probe on /healthz", type: field, kind: deployment, name: api, path: "spec.template.spec.containers[0].readinessProbe.httpGet.path", op: eq, value: /healthz, expect_text: "/healthz"}
+  - {id: api-ready, title: "api is ready", type: deployment_ready, name: api, expect_text: "1/1 ready"}
+  - {id: no-restarts, title: "No web container was restarted", type: pods, selector: app=web, min: 2, max_restarts: 0, expect_text: "2 pods, 0 restarts"}
+variations:
+  - "Delete one web pod and immediately list the EndpointSlice with `-o yaml`: the terminating pod's endpoint stays in the slice with `ready: false` and `terminating: true`. Endpoint updates and the SIGTERM to the container happen in parallel, which is why some apps add a short preStop delay."
+  - "Remove the flag in *both* pods: what does the Route return now? (It is the 503 incident.)"
+  - "Add a liveness probe that checks /tmp/ready and remove the flag: compare restarts with the readiness-only case."
+troubleshooting:
+  - problem: "`oc exec <one-web-pod>`: what is the pod name?"
+    hint: "`oc get pods -n academy-probes -l app=web` and copy one NAME."
+questions:
+  - q: "Which object changes when a pod fails readiness, and who changes it?"
+    a: "The kubelet sets the pod's Ready condition to False; then the EndpointSlice controller sets that pod's endpoint in the Service's EndpointSlice to ready=false."
+  - q: "Why is 'no readiness probe' risky during rollouts?"
+    a: "New pods receive traffic as soon as the process starts, before the app can serve, and a broken version is never held back."
+  - q: "Verification found an 'Unhealthy: Readiness probe failed' event. Who emitted it, and why is it good evidence?"
+    a: "The kubelet, when the probe failed (here `Readiness probe failed:` with no detail, since `test -f` prints nothing). It proves a pod really went unready, which the final state alone (two ready endpoints) cannot show."
+enterprise: |
+  "Maintenance flag" readiness (and graceful drain) is how teams take an instance out of traffic for
+  debugging without restarting it. Platform teams often enforce "readiness probe required" through admission
+  policies, because missing probes make every rollout and node drain a small outage.
+references:
+  - {title: "Kubernetes: Configure probes", url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"}
+  - {title: "Kubernetes: EndpointSlices", url: "https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/"}

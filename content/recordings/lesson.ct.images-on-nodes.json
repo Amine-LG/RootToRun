@@ -1,0 +1,352 @@
+{
+ "lab": "lesson.ct.images-on-nodes",
+ "kind": "lesson",
+ "lab_hash": "a3fde1cc60c47995",
+ "recorded_at": "2026-10-16T17:33:18+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-ct-images-on-nodes",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc run pull-latest --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity; oc wait --for=condition=Ready pod/pull-latest --timeout=180s; oc get events --field-selector involvedObject.name=pull-latest",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/pull-latest created\npod/pull-latest condition met\nLAST SEEN   TYPE     REASON           OBJECT            MESSAGE\n4s          Normal   Scheduled        pod/pull-latest   Successfully assigned academy-lesson-ct-images-on-nodes/pull-latest to crc\n4s          Normal   AddedInterface   pod/pull-latest   Add eth0 [10.217.0.199/23] from ovn-kubernetes\n4s          Normal   Pulling          pod/pull-latest   Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n1s          Normal   Pulled           pod/pull-latest   Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 3.055s (3.055s including waiting). Image size: 108819904 bytes.\n1s          Normal   Created          pod/pull-latest   Created container: pull-latest\n1s          Normal   Started          pod/pull-latest   Started container pull-latest\n",
+   "stderr": "",
+   "combined": "pod/pull-latest created\npod/pull-latest condition met\nLAST SEEN   TYPE     REASON           OBJECT            MESSAGE\n4s          Normal   Scheduled        pod/pull-latest   Successfully assigned academy-lesson-ct-images-on-nodes/pull-latest to crc\n4s          Normal   AddedInterface   pod/pull-latest   Add eth0 [10.217.0.199/23] from ovn-kubernetes\n4s          Normal   Pulling          pod/pull-latest   Pulling image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\"\n1s          Normal   Pulled           pod/pull-latest   Successfully pulled image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" in 3.055s (3.055s including waiting). Image size: 108819904 bytes.\n1s          Normal   Created          pod/pull-latest   Created container: pull-latest\n1s          Normal   Started          pod/pull-latest   Started container pull-latest\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pod pull-latest -o jsonpath='{.spec.containers[0].image}{\"\\n\"}{.status.containerStatuses[0].imageID}{\"\\n\"}' | sed 's/^[^ ]*@/digest: /'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "registry.access.redhat.com/ubi9/ubi-minimal:latest\ndigest: sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n",
+   "stderr": "",
+   "combined": "registry.access.redhat.com/ubi9/ubi-minimal:latest\ndigest: sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "DIGEST=$(oc image info registry.access.redhat.com/ubi9/ubi-minimal:latest --filter-by-os=linux/amd64 | awk '/^Digest:/ {print $2}'); oc run pull-digest --image=registry.access.redhat.com/ubi9/ubi-minimal@$DIGEST -- sleep infinity; oc wait --for=condition=Ready pod/pull-digest --timeout=180s; oc get events --field-selector involvedObject.name=pull-digest",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/pull-digest created\npod/pull-digest condition met\nLAST SEEN   TYPE     REASON           OBJECT            MESSAGE\n1s          Normal   Scheduled        pod/pull-digest   Successfully assigned academy-lesson-ct-images-on-nodes/pull-digest to crc\n1s          Normal   AddedInterface   pod/pull-digest   Add eth0 [10.217.0.200/23] from ovn-kubernetes\n1s          Normal   Pulled           pod/pull-digest   Container image \"registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\" already present on machine\n1s          Normal   Created          pod/pull-digest   Created container: pull-digest\n1s          Normal   Started          pod/pull-digest   Started container pull-digest\n",
+   "stderr": "",
+   "combined": "pod/pull-digest created\npod/pull-digest condition met\nLAST SEEN   TYPE     REASON           OBJECT            MESSAGE\n1s          Normal   Scheduled        pod/pull-digest   Successfully assigned academy-lesson-ct-images-on-nodes/pull-digest to crc\n1s          Normal   AddedInterface   pod/pull-digest   Add eth0 [10.217.0.200/23] from ovn-kubernetes\n1s          Normal   Pulled           pod/pull-digest   Container image \"registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\" already present on machine\n1s          Normal   Created          pod/pull-digest   Created container: pull-digest\n1s          Normal   Started          pod/pull-digest   Started container pull-digest\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -o custom-columns=NAME:.metadata.name,POLICY:.spec.containers[0].imagePullPolicy",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME          POLICY\npull-digest   IfNotPresent\npull-latest   Always\n",
+   "stderr": "",
+   "combined": "NAME          POLICY\npull-digest   IfNotPresent\npull-latest   Always\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment fixed --image=registry.access.redhat.com/ubi9/ubi-minimal:9.5 -- sleep infinity; oc get deployment fixed -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}{\"\\n\"}'; oc set image deployment/fixed ubi-minimal=registry.access.redhat.com/ubi9/ubi-minimal:latest; oc get deployment fixed -o jsonpath='{.spec.template.spec.containers[0].image} {.spec.template.spec.containers[0].imagePullPolicy}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/fixed created\nIfNotPresent\ndeployment.apps/fixed image updated\nregistry.access.redhat.com/ubi9/ubi-minimal:latest IfNotPresent\n",
+   "stderr": "",
+   "combined": "deployment.apps/fixed created\nIfNotPresent\ndeployment.apps/fixed image updated\nregistry.access.redhat.com/ubi9/ubi-minimal:latest IfNotPresent\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run never --image=registry.access.redhat.com/ubi9/ubi-minimal:9.1 --image-pull-policy=Never -- sleep infinity; sleep 8; oc get pod never; oc get events --field-selector involvedObject.name=never,type=Warning",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/never created\nNAME    READY   STATUS              RESTARTS   AGE\nnever   0/1     ErrImageNeverPull   0          8s\nLAST SEEN   TYPE      REASON              OBJECT      MESSAGE\n6s          Warning   ErrImageNeverPull   pod/never   Container image \"registry.access.redhat.com/ubi9/ubi-minimal:9.1\" is not present with pull policy of Never\n6s          Warning   Failed              pod/never   Error: ErrImageNeverPull\n",
+   "stderr": "",
+   "combined": "pod/never created\nNAME    READY   STATUS              RESTARTS   AGE\nnever   0/1     ErrImageNeverPull   0          8s\nLAST SEEN   TYPE      REASON              OBJECT      MESSAGE\n6s          Warning   ErrImageNeverPull   pod/never   Container image \"registry.access.redhat.com/ubi9/ubi-minimal:9.1\" is not present with pull policy of Never\n6s          Warning   Failed              pod/never   Error: ErrImageNeverPull\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run bad-tag --image=registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag -- sleep infinity; sleep 15; oc get pod bad-tag; oc get events --field-selector involvedObject.name=bad-tag,type=Warning",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/bad-tag created\nNAME      READY   STATUS         RESTARTS   AGE\nbad-tag   0/1     ErrImagePull   0          16s\nLAST SEEN   TYPE      REASON   OBJECT        MESSAGE\n13s         Warning   Failed   pod/bad-tag   Failed to pull image \"registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag\": unable to pull image or OCI artifact: pull image err: initializing source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown; artifact err: get manifest: build image source: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown\n13s         Warning   Failed   pod/bad-tag   Error: ErrImagePull\n13s         Warning   Failed   pod/bad-tag   Error: ImagePullBackOff\n",
+   "stderr": "",
+   "combined": "pod/bad-tag created\nNAME      READY   STATUS         RESTARTS   AGE\nbad-tag   0/1     ErrImagePull   0          16s\nLAST SEEN   TYPE      REASON   OBJECT        MESSAGE\n13s         Warning   Failed   pod/bad-tag   Failed to pull image \"registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag\": unable to pull image or OCI artifact: pull image err: initializing source docker://registry.access.redhat.com/ubi9/ubi-minimal:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown; artifact err: get manifest: build image source: reading manifest no-such-tag in registry.access.redhat.com/ubi9/ubi-minimal: manifest unknown\n13s         Warning   Failed   pod/bad-tag   Error: ErrImagePull\n13s         Warning   Failed   pod/bad-tag   Error: ImagePullBackOff\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "ARM=$(oc image info registry.access.redhat.com/ubi9/ubi-minimal:latest 2>&1 | awk '/linux\\/arm64/ {print $2}'); oc run arm --restart=Never --image=registry.access.redhat.com/ubi9/ubi-minimal@$ARM -- uname -m; oc wait --for=jsonpath='{.status.phase}'=Failed pod/arm --timeout=180s; oc get pod arm",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/arm created\npod/arm condition met\nNAME   READY   STATUS   RESTARTS   AGE\narm    0/1     Error    0          3s\n",
+   "stderr": "",
+   "combined": "pod/arm created\npod/arm condition met\nNAME   READY   STATUS   RESTARTS   AGE\narm    0/1     Error    0          3s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs arm",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "exec container process `/usr/bin/uname`: Exec format error\n",
+   "stderr": "",
+   "combined": "exec container process `/usr/bin/uname`: Exec format error\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get --raw /api/v1/nodes/crc/proxy/configz | jq '.kubeletconfig | {imageGCHighThresholdPercent, imageGCLowThresholdPercent, imageMinimumGCAge, imageMaximumGCAge, evictionHard}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\n  \"imageGCHighThresholdPercent\": 85,\n  \"imageGCLowThresholdPercent\": 80,\n  \"imageMinimumGCAge\": \"2m0s\",\n  \"imageMaximumGCAge\": \"0s\",\n  \"evictionHard\": {\n    \"imagefs.available\": \"15%\",\n    \"imagefs.inodesFree\": \"5%\",\n    \"memory.available\": \"100Mi\",\n    \"nodefs.available\": \"10%\",\n    \"nodefs.inodesFree\": \"5%\"\n  }\n}\n",
+   "stderr": "",
+   "combined": "{\n  \"imageGCHighThresholdPercent\": 85,\n  \"imageGCLowThresholdPercent\": 80,\n  \"imageMinimumGCAge\": \"2m0s\",\n  \"imageMaximumGCAge\": \"0s\",\n  \"evictionHard\": {\n    \"imagefs.available\": \"15%\",\n    \"imagefs.inodesFree\": \"5%\",\n    \"memory.available\": \"100Mi\",\n    \"nodefs.available\": \"10%\",\n    \"nodefs.inodesFree\": \"5%\"\n  }\n}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get --raw /api/v1/nodes/crc/proxy/stats/summary | jq '.node | {capacity_GiB:(.fs.capacityBytes/1073741824*10|round/10), available_GiB:(.fs.availableBytes/1073741824*10|round/10), available_percent:(.fs.availableBytes*1000/.fs.capacityBytes|round/10), imagefs_available_GiB:(.runtime.imageFs.availableBytes/1073741824*10|round/10)}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\n  \"capacity_GiB\": 39.4,\n  \"available_GiB\": 6.4,\n  \"available_percent\": 16.3,\n  \"imagefs_available_GiB\": 6.4\n}\n",
+   "stderr": "",
+   "combined": "{\n  \"capacity_GiB\": 39.4,\n  \"available_GiB\": 6.4,\n  \"available_percent\": 16.3,\n  \"imagefs_available_GiB\": 6.4\n}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f node-debug-ns.yaml",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/academy-x-img-debug created\n",
+   "stderr": "",
+   "combined": "namespace/academy-x-img-debug created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-img-debug --image-stream=openshift/cli:latest -- chroot /host sh -c 'crictl images | grep -E \"^IMAGE|ubi9/ubi-minimal\"'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "IMAGE                                                                          TAG                 IMAGE ID            SIZE\nregistry.access.redhat.com/ubi9/ubi-minimal                                    <none>              6e74e4da2afca       112MB\nregistry.access.redhat.com/ubi9/ubi-minimal                                    9.5                 1510d272eb6cd       106MB\nregistry.access.redhat.com/ubi9/ubi-minimal                                    latest              1f074f64bbb70       109MB\n",
+   "stderr": "Starting pod/crc-debug-8pwbw ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-8pwbw ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nIMAGE                                                                          TAG                 IMAGE ID            SIZE\nregistry.access.redhat.com/ubi9/ubi-minimal                                    <none>              6e74e4da2afca       112MB\nregistry.access.redhat.com/ubi9/ubi-minimal                                    9.5                 1510d272eb6cd       106MB\nregistry.access.redhat.com/ubi9/ubi-minimal                                    latest              1f074f64bbb70       109MB\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-img-debug --image-stream=openshift/cli:latest -- chroot /host crictl inspecti -o go-template --template '{{range .status.repoTags}}tag    {{.}}{{\"\\n\"}}{{end}}{{range .status.repoDigests}}digest {{.}}{{\"\\n\"}}{{end}}size   {{.status.size}}{{\"\\n\"}}arch   {{.info.imageSpec.architecture}}{{\"\\n\"}}' registry.access.redhat.com/ubi9/ubi-minimal:latest",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "tag    registry.access.redhat.com/ubi9/ubi-minimal:latest\ndigest registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\ndigest registry.access.redhat.com/ubi9/ubi-minimal@sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661\nsize   108819904\narch   amd64\n\n",
+   "stderr": "Starting pod/crc-debug-b4r9z ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "Starting pod/crc-debug-b4r9z ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\ntag    registry.access.redhat.com/ubi9/ubi-minimal:latest\ndigest registry.access.redhat.com/ubi9/ubi-minimal@sha256:c2fcb1793e00a434470271be7f46eadc2462b39f8370e6a81c861c72fb8d38db\ndigest registry.access.redhat.com/ubi9/ubi-minimal@sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661\nsize   108819904\narch   amd64\n\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -n academy-x-img-debug; oc delete namespace academy-x-img-debug",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace \"academy-x-img-debug\" deleted\n",
+   "stderr": "No resources found in academy-x-img-debug namespace.\n",
+   "combined": "No resources found in academy-x-img-debug namespace.\nnamespace \"academy-x-img-debug\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman info --format 'driver={{.Store.GraphDriverName}} root={{.Store.GraphRoot}}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "driver=overlay root=/home/learner/.local/share/containers/storage\n",
+   "stderr": "",
+   "combined": "driver=overlay root=/home/learner/.local/share/containers/storage\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman pull -q registry.access.redhat.com/ubi9/ubi-minimal:latest >/dev/null && podman image inspect --format 'layers={{len .RootFS.Layers}} dir={{.GraphDriver.Data.UpperDir}}' registry.access.redhat.com/ubi9/ubi-minimal:latest",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "layers=1 dir=/home/learner/.local/share/containers/storage/overlay/a752d178298b43eaab9684a008e058f5ee6698a560a166419dd06b2a963b6fa0/diff\n",
+   "stderr": "",
+   "combined": "layers=1 dir=/home/learner/.local/share/containers/storage/overlay/a752d178298b43eaab9684a008e058f5ee6698a560a166419dd06b2a963b6fa0/diff\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman system df",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "TYPE           TOTAL       ACTIVE      SIZE        RECLAIMABLE\nImages         48          1           5.623GB     776.2MB (14%)\nContainers     1           0           43.67MB     43.67MB (100%)\nLocal Volumes  11          1           1.872GB     434.8MB (23%)\n",
+   "stderr": "",
+   "combined": "TYPE           TOTAL       ACTIVE      SIZE        RECLAIMABLE\nImages         48          1           5.623GB     776.2MB (14%)\nContainers     1           0           43.67MB     43.67MB (100%)\nLocal Volumes  11          1           1.872GB     434.8MB (23%)\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman build -q --build-arg RELEASE=1 -t localhost/academy-node:latest . && podman build -q --build-arg RELEASE=2 -t localhost/academy-node:latest .",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "f10bd94b86fe26b6fa6af48360de90414414a7c803f37c56ad66a75775732bcd\n5112fdf2d2b23a2ec344fe526c3884231f2bc25ede4384c3fcfce5b1a23d95ba\n",
+   "stderr": "",
+   "combined": "f10bd94b86fe26b6fa6af48360de90414414a7c803f37c56ad66a75775732bcd\n5112fdf2d2b23a2ec344fe526c3884231f2bc25ede4384c3fcfce5b1a23d95ba\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman images --filter label=academy.demo=images-on-nodes --format '{{.Repository}}:{{.Tag}} {{.ID}} dangling={{.Dangling}}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "localhost/academy-node:latest 5112fdf2d2b2 dangling=false\n<none>:<none> f10bd94b86fe dangling=true\n",
+   "stderr": "",
+   "combined": "localhost/academy-node:latest 5112fdf2d2b2 dangling=false\n<none>:<none> f10bd94b86fe dangling=true\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman image prune -f --filter label=academy.demo=images-on-nodes",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "f10bd94b86fe26b6fa6af48360de90414414a7c803f37c56ad66a75775732bcd\n",
+   "stderr": "",
+   "combined": "f10bd94b86fe26b6fa6af48360de90414414a7c803f37c56ad66a75775732bcd\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rmi localhost/academy-node:latest > /dev/null && podman images -a --filter label=academy.demo=images-on-nodes --format '{{.ID}}' | wc -l",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "0\n",
+   "stderr": "",
+   "combined": "0\n",
+   "ok": true
+  }
+ ],
+ "seconds": 119,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-IMG-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete namespace academy-x-img-debug --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-ct-images-on-nodes --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "found=$(oc get namespace academy-x-img-debug --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get namespace academy-x-img-debug --ignore-not-found -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/desiredConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable} {.spec.taints}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get machineconfigs -o name",
+    "same": true
+   }
+  ]
+ }
+}

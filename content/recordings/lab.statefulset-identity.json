@@ -1,0 +1,297 @@
+{
+ "lab": "lab.statefulset-identity",
+ "kind": "lab",
+ "lab_hash": "b632addbb78ab539",
+ "recorded_at": "2026-10-14T14:45:58+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "create",
+   "cmd": "oc apply -f - -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web created\nstatefulset.apps/web created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "create",
+   "cmd": "oc rollout status statefulset/web -n academy-sts-id --timeout=240s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for 3 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "create",
+   "cmd": "oc get pods -l app=web -o wide -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\nweb-0   1/1     Running   0          59s   10.217.1.18   crc    <none>           <none>\nweb-1   1/1     Running   0          45s   10.217.1.19   crc    <none>           <none>\nweb-2   1/1     Running   0          30s   10.217.1.20   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "create",
+   "cmd": "oc describe statefulset web -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:               web\nNamespace:          academy-sts-id\nCreationTimestamp:  Wed, 14 Oct 2026 14:46:21 +0000\nSelector:           app=web\nLabels:             <none>\nAnnotations:        <none>\nReplicas:           3 desired | 3 total\nUpdate Strategy:    RollingUpdate\n  Partition:        0\nPods Status:        3 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:  app=web\n  Containers:\n   app:\n    Image:      registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:        10m\n      memory:     16Mi\n    Environment:  <none>\n    Mounts:\n      /data from scratch (rw)\n  Volumes:\n   scratch:\n    Type:          EmptyDir (a temporary directory that shares a pod's lifetime)\n    Medium:        \n    SizeLimit:     <unset>\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nVolume Claims:     <none>\nEvents:\n  Type    Reason            Age   From                    Message\n  ----    ------            ----  ----                    -------\n  Normal  SuccessfulCreate  62s   statefulset-controller  create Pod web-0 in StatefulSet web successful\n  Normal  SuccessfulCreate  48s   statefulset-controller  create Pod web-1 in StatefulSet web successful\n  Normal  SuccessfulCreate  33s   statefulset-controller  create Pod web-2 in StatefulSet web successful\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "names",
+   "cmd": "oc exec web-0 -n academy-sts-id -- getent hosts web-1.web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.1.19     web-1.web.academy-sts-id.svc.cluster.local\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "names",
+   "cmd": "oc exec web-0 -n academy-sts-id -- getent ahostsv4 web",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "10.217.1.18     STREAM web.academy-sts-id.svc.cluster.local\n10.217.1.18     DGRAM  \n10.217.1.18     RAW    \n10.217.1.19     STREAM \n10.217.1.19     DGRAM  \n10.217.1.19     RAW    \n10.217.1.20     STREAM \n10.217.1.20     DGRAM  \n10.217.1.20     RAW    \n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "names",
+   "cmd": "oc get svc web -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)    AGE\nweb    ClusterIP   None         <none>        8080/TCP   73s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "replace",
+   "cmd": "oc exec web-1 -n academy-sts-id -- sh -c 'echo i-am-web-1 > /data/id; cat /data/id'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "i-am-web-1\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "replace",
+   "cmd": "oc delete pod web-1 -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod \"web-1\" deleted from academy-sts-id namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "replace",
+   "cmd": "oc rollout status statefulset/web -n academy-sts-id --timeout=240s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "replace",
+   "cmd": "oc get pods -l app=web -o wide -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\nweb-0   1/1     Running   0          94s   10.217.1.18   crc    <none>           <none>\nweb-1   1/1     Running   0          12s   10.217.1.21   crc    <none>           <none>\nweb-2   1/1     Running   0          65s   10.217.1.20   crc    <none>           <none>\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "replace",
+   "cmd": "oc exec web-1 -n academy-sts-id -- cat /data/id",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "cat: /data/id: No such file or directory\ncommand terminated with exit code 1\n",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale statefulset/web --replicas=1 -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/web scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc wait pod/web-1 --for=delete --timeout=120s -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/web-1 condition met\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc get pods -l app=web -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME    READY   STATUS    RESTARTS   AGE\nweb-0   1/1     Running   0          2m2s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale statefulset/web --replicas=3 -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/web scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc rollout status statefulset/web -n academy-sts-id --timeout=240s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for 2 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc set env statefulset/web COLOR=blue -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "statefulset.apps/web updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc rollout status statefulset/web -n academy-sts-id --timeout=300s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for partitioned roll out to finish: 1 out of 3 new pods have been updated...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for partitioned roll out to finish: 2 out of 3 new pods have been updated...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\nWaiting for 1 pods to be ready...\npartitioned roll out complete: 3 new pods have been updated...\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc describe statefulset web -n academy-sts-id",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:               web\nNamespace:          academy-sts-id\nCreationTimestamp:  Wed, 14 Oct 2026 14:46:21 +0000\nSelector:           app=web\nLabels:             <none>\nAnnotations:        <none>\nReplicas:           3 desired | 3 total\nUpdate Strategy:    RollingUpdate\n  Partition:        0\nPods Status:        3 Running / 0 Waiting / 0 Succeeded / 0 Failed\nPod Template:\n  Labels:  app=web\n  Containers:\n   app:\n    Image:      registry.access.redhat.com/ubi9/ubi-minimal:latest\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      sleep\n      infinity\n    Limits:\n      memory:  64Mi\n    Requests:\n      cpu:     10m\n      memory:  16Mi\n    Environment:\n      COLOR:  blue\n    Mounts:\n      /data from scratch (rw)\n  Volumes:\n   scratch:\n    Type:          EmptyDir (a temporary directory that shares a pod's lifetime)\n    Medium:        \n    SizeLimit:     <unset>\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nVolume Claims:     <none>\nEvents:\n  Type    Reason            Age                  From                    Message\n  ----    ------            ----                 ----                    -------\n  Normal  SuccessfulDelete  93s (x2 over 2m16s)  statefulset-controller  delete Pod web-2 in StatefulSet web successful\n  Normal  SuccessfulCreate  56s (x3 over 3m31s)  statefulset-controller  create Pod web-2 in StatefulSet web successful\n  Normal  SuccessfulDelete  46s (x2 over 2m10s)  statefulset-controller  delete Pod web-1 in StatefulSet web successful\n  Normal  SuccessfulCreate  38s (x4 over 3m46s)  statefulset-controller  create Pod web-1 in StatefulSet web successful\n  Normal  SuccessfulDelete  31s                  statefulset-controller  delete Pod web-0 in StatefulSet web successful\n  Normal  SuccessfulCreate  24s (x2 over 4m)     statefulset-controller  create Pod web-0 in StatefulSet web successful\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "failed",
+  "results": [
+   {
+    "id": "ready3",
+    "title": "StatefulSet web has 3 ready pods",
+    "expect": "3 ready",
+    "status": "fail",
+    "observed": "Error from server (NotFound): statefulsets.apps \"web\" not found"
+   },
+   {
+    "id": "web1-new",
+    "title": "web-1 exists again, Ready",
+    "expect": "1 of 1 match",
+    "status": "fail",
+    "observed": "0 of 0 match · no pods"
+   },
+   {
+    "id": "updated",
+    "title": "every pod runs the updated template",
+    "expect": "3 updated",
+    "status": "fail",
+    "observed": "Error from server (NotFound): statefulsets.apps \"web\" not found"
+   }
+  ],
+  "at": 1791989176.8091538
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "ready3",
+    "title": "StatefulSet web has 3 ready pods",
+    "expect": "3 ready",
+    "status": "pass",
+    "observed": "status.readyReplicas = 3"
+   },
+   {
+    "id": "web1-new",
+    "title": "web-1 exists again, Ready",
+    "expect": "1 of 1 match",
+    "status": "pass",
+    "observed": "1 of 1 match · web-1: Running [ready, restarts 0]"
+   },
+   {
+    "id": "updated",
+    "title": "every pod runs the updated template",
+    "expect": "3 updated",
+    "status": "pass",
+    "observed": "status.updatedReplicas = 3"
+   }
+  ],
+  "at": 1791989427.3778558
+ },
+ "seconds": 268,
+ "cleanup": {
+  "state": "clean",
+  "remaining": 0,
+  "detail": [
+   "Project/academy-sts-id: gone"
+  ]
+ },
+ "ok": true,
+ "problems": []
+}

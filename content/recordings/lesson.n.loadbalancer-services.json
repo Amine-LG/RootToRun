@@ -1,0 +1,349 @@
+{
+ "lab": "lesson.n.loadbalancer-services",
+ "kind": "lesson",
+ "lab_hash": "16462f85311f8b5d",
+ "recorded_at": "2026-10-20T15:06:07+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-loadbalancer-services",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f echo.yaml && oc rollout status deployment/echo --timeout=180s && oc rollout status deployment/client --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/echo created\ndeployment.apps/client created\nWaiting for deployment \"echo\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"echo\" successfully rolled out\ndeployment \"client\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/echo created\ndeployment.apps/client created\nWaiting for deployment \"echo\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"echo\" successfully rolled out\ndeployment \"client\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create service nodeport echo --tcp=9000:9000 --node-port=30900",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/echo created\n",
+   "stderr": "",
+   "combined": "service/echo created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get service echo -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE   SELECTOR\necho   NodePort   10.217.5.105   <none>        9000:30900/TCP   0s    app=echo\n",
+   "stderr": "",
+   "combined": "NAME   TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE   SELECTOR\necho   NodePort   10.217.5.105   <none>        9000:30900/TCP   0s    app=echo\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo 9000'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "echo: hello\n",
+   "stderr": "",
+   "combined": "echo: hello\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose service echo",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/echo exposed\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/echo exposed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "for i in $(seq 1 30); do oc get route echo -o jsonpath='{.status.ingress[*].routerName}' | grep -qw default && break; sleep 2; done; sleep 5",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "curl -s -m 5 -o /dev/null -w '%{http_code}\\n' http://$(oc get route echo -o jsonpath='{.spec.host}')/",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "502\n",
+   "stderr": "",
+   "combined": "502\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete route echo",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io \"echo\" deleted from academy-lesson-n-loadbalancer-services namespace\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io \"echo\" deleted from academy-lesson-n-loadbalancer-services namespace\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get nodes -o wide",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE                                                KERNEL-VERSION                  CONTAINER-RUNTIME\ncrc    Ready    control-plane,master,worker   204d   v1.34.5   192.168.126.11   <none>        Red Hat Enterprise Linux CoreOS 9.6.20260324-0 (Plow)   5.14.0-570.103.1.el9_6.x86_64   cri-o://1.34.6-2.rhaos4.21.gitbca534a.el9\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE                                                KERNEL-VERSION                  CONTAINER-RUNTIME\ncrc    Ready    control-plane,master,worker   204d   v1.34.5   192.168.126.11   <none>        Red Hat Enterprise Linux CoreOS 9.6.20260324-0 (Plow)   5.14.0-570.103.1.el9_6.x86_64   cri-o://1.34.6-2.rhaos4.21.gitbca534a.el9\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 192.168.126.11 30900'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "echo: hello\n",
+   "stderr": "",
+   "combined": "echo: hello\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "crc ip",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "127.0.0.1\n",
+   "stderr": "",
+   "combined": "127.0.0.1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo hello | nc -w 3 127.0.0.1 30900",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "echo: hello\n",
+   "stderr": "",
+   "combined": "echo: hello\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/routes-controller -n openshift-ingress --since=3m | grep -E 'Added service|Exposing port'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "time=\"2026-10-20T15:05:16Z\" level=info msg=\"Added service 'echo' of type 'NodePort'\"\ntime=\"2026-10-20T15:05:16Z\" level=info msg=\"Exposing port (127.0.0.1:30900 -> 192.168.127.2:30900)\"\n",
+   "stderr": "",
+   "combined": "time=\"2026-10-20T15:05:16Z\" level=info msg=\"Added service 'echo' of type 'NodePort'\"\ntime=\"2026-10-20T15:05:16Z\" level=info msg=\"Exposing port (127.0.0.1:30900 -> 192.168.127.2:30900)\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose deployment echo --name=echo-lb --type=LoadBalancer --port=9000",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/echo-lb exposed\n",
+   "stderr": "",
+   "combined": "service/echo-lb exposed\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 15",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get services",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE\necho      NodePort       10.217.5.105   <none>        9000:30900/TCP   26s\necho-lb   LoadBalancer   10.217.4.62    <pending>     9000:30955/TCP   16s\n",
+   "stderr": "",
+   "combined": "NAME      TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE\necho      NodePort       10.217.5.105   <none>        9000:30900/TCP   26s\necho-lb   LoadBalancer   10.217.4.62    <pending>     9000:30955/TCP   16s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get service echo-lb -o jsonpath='{.status}{\"\\n\"}{.spec.allocateLoadBalancerNodePorts}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"loadBalancer\":{}}\ntrue\n",
+   "stderr": "",
+   "combined": "{\"loadBalancer\":{}}\ntrue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/client -- sh -c 'echo hello | nc -w 3 echo-lb 9000'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "echo: hello\n",
+   "stderr": "",
+   "combined": "echo: hello\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get infrastructure cluster -o jsonpath='{.status.platformStatus.type}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "None\n",
+   "stderr": "",
+   "combined": "None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc api-resources --api-group=metallb.io",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   SHORTNAMES   APIVERSION   NAMESPACED   KIND\n",
+   "stderr": "",
+   "combined": "NAME   SHORTNAMES   APIVERSION   NAMESPACED   KIND\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest metallb-operator -n openshift-marketplace -o jsonpath='{.status.catalogSource}{\" \"}{.status.defaultChannel}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "redhat-operators stable\n",
+   "stderr": "",
+   "combined": "redhat-operators stable\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete service echo echo-lb",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service \"echo\" deleted from academy-lesson-n-loadbalancer-services namespace\nservice \"echo-lb\" deleted from academy-lesson-n-loadbalancer-services namespace\n",
+   "stderr": "",
+   "combined": "service \"echo\" deleted from academy-lesson-n-loadbalancer-services namespace\nservice \"echo-lb\" deleted from academy-lesson-n-loadbalancer-services namespace\n",
+   "ok": true
+  }
+ ],
+ "seconds": 64,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NET-08",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete route echo -n academy-lesson-n-loadbalancer-services --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete service echo echo-lb -n academy-lesson-n-loadbalancer-services --ignore-not-found",
+    "code": 0
+   },
+   {
+    "cmd": "sleep 5\nfw=$(curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all) || exit 1\nfor l in $(printf '%s' \"$fw\" | jq -r '.[] | select(.protocol == \"tcp\") | .local | select(test(\"^127[.]0[.]0[.]1:3[0-9]{4}$\"))'); do\n  curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" -X POST http://localhost/network/services/forwarder/unexpose -d \"{\\\"local\\\":\\\"$l\\\",\\\"protocol\\\":\\\"tcp\\\"}\" || exit 1\n  echo \"removed workstation forward $l\"\ndone",
+    "code": 0
+   }
+  ],
+  "verify": [],
+  "snapshot": [
+   {
+    "cmd": "oc get services -A -o jsonpath='{range .items[*]}{range .spec.ports[*]}{.nodePort}{\"\\n\"}{end}{end}' | awk '$1==30900' | wc -l",
+    "same": true
+   },
+   {
+    "cmd": "oc get services,routes -n academy-lesson-n-loadbalancer-services -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc api-resources --api-group=metallb.io -o name",
+    "same": true
+   },
+   {
+    "cmd": "curl -sf --max-time 5 --unix-socket \"$HOME/.crc/crc-http.sock\" http://localhost/network/services/forwarder/all | jq -S '[.[].local] | sort'",
+    "same": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,45 @@
+name: Content problem
+description: Something in a lesson, lab, incident, challenge, model, diagram, concept or reference page is wrong, unclear or out of date.
+labels: [content]
+body:
+  - type: markdown
+    attributes:
+      value: "The page's **Report a problem** link fills in what it shows. For a control or page that does not work, use the **Website problem** form instead."
+  - type: input
+    id: content-type
+    attributes: {label: Kind of content, description: "For example Lesson, Guided lab, Incident, Interactive model or Concept."}
+  - type: input
+    id: content-id
+    attributes: {label: Content id, description: "Filled in by the page's report link, for example n.htpasswd-users or lab.deploy-apps."}
+    validations: {required: true}
+  - type: input
+    id: content-title
+    attributes: {label: Title}
+  - type: input
+    id: area
+    attributes: {label: Path or section of the site, description: "The learning path, Explore or the handbook."}
+  - type: input
+    id: section
+    attributes: {label: Part of the page, description: "The heading, step or anchor, if you know it."}
+  - type: input
+    id: page-url
+    attributes: {label: Page address, description: "The address on the site, without the domain."}
+  - type: input
+    id: site-version
+    attributes: {label: Site version}
+  - type: dropdown
+    id: problem-type
+    attributes:
+      label: Kind of problem
+      options: [A factual error, An explanation that is unclear, An answer marked wrong although it is right, An answer marked right although it is wrong, Out of date for the current release, A model or diagram that shows something wrong, Something else]
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: What you expected}
+  - type: textarea
+    id: actual
+    attributes: {label: What the page says or does}
+    validations: {required: true}
+  - type: input
+    id: reference
+    attributes: {label: Official documentation, description: "A link to the official documentation that supports the correction, if any."}

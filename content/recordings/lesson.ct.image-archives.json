@@ -1,0 +1,149 @@
+{
+ "lab": "lesson.ct.image-archives",
+ "kind": "lesson",
+ "lab_hash": "67ce63e7786ae1f6",
+ "recorded_at": "2026-10-15T15:48:07+00:00",
+ "cluster": {},
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "date -u +%Y-%m-%dT%H:%M:%SZ > started-at && podman pull -q quay.io/prometheus/busybox:latest",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "stderr": "",
+   "combined": "49a1acb1757e1bc97b189d75bc2a87690573da3d4e9c4e36c2dc8bec2f3e29fe\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman run --name academy-ct3-box quay.io/prometheus/busybox:latest sh -c 'echo \"tuned by hand\" > /etc/academy.conf && unlink /etc/group && mkdir -p /srv/cache && echo 1 > /srv/cache/item'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "",
+   "combined": "",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman diff academy-ct3-box",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "C /etc\nA /etc/academy.conf\nD /etc/group\nA /srv\nA /srv/cache\nA /srv/cache/item\n",
+   "stderr": "",
+   "combined": "C /etc\nA /etc/academy.conf\nD /etc/group\nA /srv\nA /srv/cache\nA /srv/cache/item\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "echo 'patched from the host' > patch.txt && podman cp patch.txt academy-ct3-box:/srv/patch.txt && podman cp academy-ct3-box:/etc/academy.conf ./copied-out.conf && cat copied-out.conf && podman diff academy-ct3-box | grep srv/patch",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "tuned by hand\nA /srv/patch.txt\n",
+   "stderr": "",
+   "combined": "tuned by hand\nA /srv/patch.txt\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman commit -q -c 'CMD [\"cat\", \"/etc/academy.conf\"]' academy-ct3-box localhost/academy-ct3-snap:1 > /dev/null && podman run --rm localhost/academy-ct3-snap:1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "tuned by hand\n",
+   "stderr": "",
+   "combined": "tuned by hand\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman save -q -o snap-docker.tar localhost/academy-ct3-snap:1 && podman save -q --format oci-archive -o snap-oci.tar localhost/academy-ct3-snap:1 && ls -l snap-*.tar | awk '{print $5, $9}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "2777088 snap-docker.tar\n1151488 snap-oci.tar\n",
+   "stderr": "",
+   "combined": "2777088 snap-docker.tar\n1151488 snap-oci.tar\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman export -o box-fs.tar academy-ct3-box && tar -tf box-fs.tar | grep -E '^(etc/academy.conf|etc/group|srv/)'; echo \"entries: $(tar -tf box-fs.tar | wc -l), manifest or config files: $(tar -tf box-fs.tar | grep -cE 'manifest|json')\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "etc/academy.conf\nsrv/\nsrv/cache/\nsrv/cache/item\nsrv/patch.txt\nentries: 965, manifest or config files: 0\n",
+   "stderr": "",
+   "combined": "etc/academy.conf\nsrv/\nsrv/cache/\nsrv/cache/item\nsrv/patch.txt\nentries: 965, manifest or config files: 0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman import -q -m 'flattened from academy-ct3-box' box-fs.tar localhost/academy-ct3-flat:1 > /dev/null && podman image inspect --format '{{index .RepoTags 0}} cmd={{json .Config.Cmd}} env={{json .Config.Env}} layers={{len .RootFS.Layers}}' localhost/academy-ct3-snap:1 localhost/academy-ct3-flat:1; podman run --rm localhost/academy-ct3-flat:1",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 127,
+   "stdout": "localhost/academy-ct3-snap:1 cmd=[\"cat\",\"/etc/academy.conf\"] env=[\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\",\"container=podman\"] layers=3\nlocalhost/academy-ct3-flat:1 cmd=null env=null layers=1\n",
+   "stderr": "Error: crun: cannot find `` in $PATH: No such file or directory: OCI runtime attempted to invoke a command that was not found\n",
+   "combined": "localhost/academy-ct3-snap:1 cmd=[\"cat\",\"/etc/academy.conf\"] env=[\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\",\"container=podman\"] layers=3\nlocalhost/academy-ct3-flat:1 cmd=null env=null layers=1\nError: crun: cannot find `` in $PATH: No such file or directory: OCI runtime attempted to invoke a command that was not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman image inspect --format 'before: {{.ID}}' localhost/academy-ct3-snap:1 && podman rm academy-ct3-box > /dev/null && podman rmi localhost/academy-ct3-snap:1 localhost/academy-ct3-flat:1 > /dev/null && podman load -q -i snap-oci.tar && podman image inspect --format 'after:  {{.ID}}' localhost/academy-ct3-snap:1",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "before: 6447e75a4a302ab8d9ea5b1be41e55da900b26351ffe8a4d6f5949a8b6e84a8c\nLoaded image: localhost/academy-ct3-snap:1\nafter:  6447e75a4a302ab8d9ea5b1be41e55da900b26351ffe8a4d6f5949a8b6e84a8c\n",
+   "stderr": "",
+   "combined": "before: 6447e75a4a302ab8d9ea5b1be41e55da900b26351ffe8a4d6f5949a8b6e84a8c\nLoaded image: localhost/academy-ct3-snap:1\nafter:  6447e75a4a302ab8d9ea5b1be41e55da900b26351ffe8a4d6f5949a8b6e84a8c\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "skopeo copy -q docker://quay.io/prometheus/busybox:latest docker-archive:busybox-transfer.tar:quay.io/prometheus/busybox:latest && sha256sum busybox-transfer.tar > busybox-transfer.tar.sha256 && sha256sum -c busybox-transfer.tar.sha256",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "busybox-transfer.tar: OK\n",
+   "stderr": "",
+   "combined": "busybox-transfer.tar: OK\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "podman rmi localhost/academy-ct3-snap:1 quay.io/prometheus/busybox:latest > /dev/null && echo cleaned up",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cleaned up\n",
+   "stderr": "",
+   "combined": "cleaned up\n",
+   "ok": true
+  }
+ ],
+ "seconds": 11,
+ "ok": true,
+ "problems": []
+}

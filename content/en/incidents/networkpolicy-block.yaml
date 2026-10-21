@@ -1,0 +1,130 @@
+id: inc.networkpolicy-block
+kind: incident
+title: "Timeouts after security hardening"
+summary: "A reporting client times out calling the portal's Service since NetworkPolicies were introduced."
+module: b4-network-security
+minutes: 20
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with OVN-Kubernetes."
+concepts: [net.policy, sec.segmentation, k8s.labels]
+prerequisites: [d.networkpolicy-ovn]
+namespace: academy-inc-netpol
+objective: |
+  Find where the reporting client's connections are lost, then restore exactly that flow without weakening the
+  security team's hardening.
+background: |
+  **Where everything comes from.** The project holds the portal (a Deployment, a Service and the ConfigMap with its
+  page, on Red Hat's UBI 9 Apache httpd image), the `reporting` client (a Deployment running `sleep` in the UBI 9
+  minimal image, so that you can start curl from it with `oc exec`) and the security team's NetworkPolicies. The app
+  creates the project `academy-inc-netpol` as your learner identity when you start the incident, with everything
+  listed here in the state the symptom describes; how it got into that state is part of the investigation and is shown
+  in the debrief. The images come from Red Hat's public registry `registry.access.redhat.com`, which needs no login.
+  Clean up deletes the project. In the browser you replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  This morning the security team applied "default deny plus explicit allows" to the project. The reporting client's
+  calls to `http://web:8080/` now hang and fail after the timeout. The portal itself is healthy.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: reporting, labels: {app: reporting}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: reporting}}
+      template:
+        metadata: {labels: {app: reporting, tier: backoffice}}
+        spec:
+          containers:
+          - name: client
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
+break:
+  - |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata: {name: default-deny}
+    spec:
+      podSelector: {}
+      policyTypes: [Ingress]
+  - |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata: {name: allow-frontend-to-web}
+    spec:
+      podSelector: {matchLabels: {app: web}}
+      policyTypes: [Ingress]
+      ingress:
+      - from:
+        - podSelector: {matchLabels: {tier: frontend}}
+        ports: [{port: 8080, protocol: TCP}]
+investigate:
+  - {cmd: "oc exec deploy/reporting -n academy-inc-netpol -- curl -sS -m 3 http://web:8080/", meaning: "curl: (28) Connection timed out after 3000 milliseconds: a timeout, not a refusal (exit 7), so packets are being dropped", expect: fail}
+  - {cmd: "oc get endpointslices -l kubernetes.io/service-name=web -n academy-inc-netpol", meaning: "one endpoint (the web pod, port 8080): the Service is fine, the problem is between the pods"}
+  - {cmd: "oc get networkpolicy -n academy-inc-netpol", meaning: "default-deny (POD-SELECTOR <none>: the empty selector, so it applies to every pod in the project) and allow-frontend-to-web for app=web"}
+  - {cmd: "oc describe networkpolicy allow-frontend-to-web -n academy-inc-netpol", meaning: "ingress to app=web on 8080/TCP is allowed only from pods with tier=frontend; egress is not affected"}
+  - {cmd: "oc get pods --show-labels -n academy-inc-netpol", meaning: "the client is app=reporting,tier=backoffice: no tier=frontend label"}
+hints:
+  - "A timeout rather than 'connection refused' points to dropped packets. What drops packets between pods?"
+  - "List the allowed sources for the web pods and compare them with the client's labels."
+  - "Add the reporting pods as an allowed source of the existing policy; do not delete default-deny."
+fix:
+  - {cmd: "oc patch networkpolicy allow-frontend-to-web -n academy-inc-netpol --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/ingress/0/from/-\",\"value\":{\"podSelector\":{\"matchLabels\":{\"app\":\"reporting\"}}}}]'", meaning: "one more allowed source in the same rule (pods with app=reporting, still only port 8080); default-deny stays"}
+  - {cmd: "oc exec deploy/reporting -n academy-inc-netpol -- curl -sS -m 3 http://web:8080/", meaning: "<h1>payments portal</h1>: the flow works again"}
+fix_wait: [reporting-ok, deny-kept]
+checks:
+  - {id: reporting-ok, title: "reporting can reach web:8080", type: exec, from: app=reporting, command: ["curl", "-sS", "-m", "3", "http://web:8080/"], expect_output: "payments portal", expect_text: "the portal page"}
+  - {id: deny-kept, title: "default-deny is still in place", type: exists, kind: networkpolicy, name: default-deny, expect_text: "exists"}
+root_cause: |
+  Once a NetworkPolicy selects the web pods for ingress, only sources allowed by some policy can reach them. The
+  hardening allowed `tier=frontend` only; the reporting client is labelled `app=reporting, tier=backoffice`, so its
+  packets were dropped by OVN-Kubernetes ACLs and the connection timed out.
+alternatives: |
+  - A separate, named policy (`allow-reporting-to-web`) is clearer in reviews than a growing list in one policy.
+  - If the client lived in another namespace, the rule would need a `namespaceSelector` (for example on
+    `kubernetes.io/metadata.name`) combined with the podSelector in the same `from` entry.
+sre: |
+  Deleting default-deny would "fix" it and silently undo the hardening. Model required flows before enforcing
+  (traffic logs, or OVN ACL logging with the `k8s.ovn.org/acl-logging` namespace annotation), roll policies out
+  per namespace, and test each allowed and denied flow. This incident's checks test the reporting flow and that
+  default-deny still exists, not that other pods stay blocked: test that yourself from a pod that has neither label.
+questions:
+  - q: "Why a timeout and not 'connection refused'?"
+    a: "OVN-Kubernetes drops packets that no policy allows, silently: no TCP reset comes back, so the client waits until its own timeout. 'Connection refused' would mean the packet reached the pod and nothing listened on the port."
+  - q: "Why was the Service itself not involved?"
+    a: "The Service had a ready endpoint; the NetworkPolicy filtered traffic at the destination pod."
+references:
+  - {title: "Kubernetes: Network policies", url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"}
+  - {title: "OpenShift 4.21: Network policy", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/network-policy"}
+  - {title: "OpenShift 4.21: Network policy audit logging (OVN-Kubernetes)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/network_security/logging-network-security#nw-networkpolicy-audit-concept_logging-network-security"}
+symptom_checks: [reporting-ok]  # monitoring-level evidence shown before the answer

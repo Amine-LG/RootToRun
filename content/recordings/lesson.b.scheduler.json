@@ -1,0 +1,410 @@
+{
+ "lab": "lesson.b.scheduler",
+ "kind": "lesson",
+ "lab_hash": "5e8400257c5fccf2",
+ "recorded_at": "2026-10-16T14:14:32+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-b-scheduler",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc get nodes",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get node crc -L lab-tier -L topology.kubernetes.io/zone",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION   LAB-TIER   ZONE\ncrc    Ready    control-plane,master,worker   200d   v1.34.5              \n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION   LAB-TIER   ZONE\ncrc    Ready    control-plane,master,worker   200d   v1.34.5              \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe node crc | grep -E '^(Taints|Unschedulable):'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Taints:             <none>\nUnschedulable:      false\n",
+   "stderr": "",
+   "combined": "Taints:             <none>\nUnschedulable:      false\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f pod-tier.yaml",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/tier created\n",
+   "stderr": "",
+   "combined": "pod/tier created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/tier --for=condition=PodScheduled=false --timeout=60s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/tier condition met\n",
+   "stderr": "",
+   "combined": "pod/tier condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=FailedScheduling,involvedObject.name=tier",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT     MESSAGE\n0s          Warning   FailedScheduling   pod/tier   0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON             OBJECT     MESSAGE\n0s          Warning   FailedScheduling   pod/tier   0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get nodes",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): nodes is forbidden: User \"developer\" cannot list resource \"nodes\" in API group \"\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): nodes is forbidden: User \"developer\" cannot list resource \"nodes\" in API group \"\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label node crc lab-tier=demo",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc labeled\n",
+   "stderr": "",
+   "combined": "node/crc labeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/tier --for=condition=Ready --timeout=120s && oc get pod tier -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/tier condition met\nNAME   READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\ntier   1/1     Running   0          20s   10.217.0.57   crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "pod/tier condition met\nNAME   READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\ntier   1/1     Running   0          20s   10.217.0.57   crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f pod-affine.yaml && oc wait pod/affine --for=condition=Ready --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/affine created\npod/affine condition met\n",
+   "stderr": "",
+   "combined": "pod/affine created\npod/affine condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm taint node crc lab-demo=true:NoSchedule",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc tainted\n",
+   "stderr": "",
+   "combined": "node/crc tainted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe node crc | grep -E '^(Taints|Unschedulable):'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Taints:             lab-demo=true:NoSchedule\nUnschedulable:      false\n",
+   "stderr": "",
+   "combined": "Taints:             lab-demo=true:NoSchedule\nUnschedulable:      false\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f pod-plain.yaml && oc wait pod/plain --for=condition=PodScheduled=false --timeout=60s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/plain created\npod/plain condition met\n",
+   "stderr": "",
+   "combined": "pod/plain created\npod/plain condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=FailedScheduling,involvedObject.name=plain",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT      MESSAGE\n0s          Warning   FailedScheduling   pod/plain   0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON             OBJECT      MESSAGE\n0s          Warning   FailedScheduling   pod/plain   0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME     READY   STATUS    RESTARTS   AGE   IP            NODE     NOMINATED NODE   READINESS GATES\naffine   1/1     Running   0          3s    10.217.0.58   crc      <none>           <none>\nplain    0/1     Pending   0          0s    <none>        <none>   <none>           <none>\ntier     1/1     Running   0          23s   10.217.0.57   crc      <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME     READY   STATUS    RESTARTS   AGE   IP            NODE     NOMINATED NODE   READINESS GATES\naffine   1/1     Running   0          3s    10.217.0.58   crc      <none>           <none>\nplain    0/1     Pending   0          0s    <none>        <none>   <none>           <none>\ntier     1/1     Running   0          23s   10.217.0.57   crc      <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f pod-tolerant.yaml && oc wait pod/tolerant --for=condition=Ready --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/tolerant created\npod/tolerant condition met\n",
+   "stderr": "",
+   "combined": "pod/tolerant created\npod/tolerant condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm taint node crc lab-demo-",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc untainted\n",
+   "stderr": "",
+   "combined": "node/crc untainted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/plain --for=condition=Ready --timeout=120s && oc describe pod plain | sed -n '/^Events:/,$p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/plain condition met\nEvents:\n  Type     Reason            Age   From               Message\n  ----     ------            ----  ----               -------\n  Warning  FailedScheduling  5s    default-scheduler  0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n  Normal   Scheduled         1s    default-scheduler  Successfully assigned academy-lesson-b-scheduler/plain to crc\n  Normal   AddedInterface    1s    multus             Add eth0 [10.217.0.65/23] from ovn-kubernetes\n  Normal   Pulled            1s    kubelet            Container image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" already present on machine\n  Normal   Created           1s    kubelet            Created container: app\n  Normal   Started           1s    kubelet            Started container app\n",
+   "stderr": "",
+   "combined": "pod/plain condition met\nEvents:\n  Type     Reason            Age   From               Message\n  ----     ------            ----  ----               -------\n  Warning  FailedScheduling  5s    default-scheduler  0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n  Normal   Scheduled         1s    default-scheduler  Successfully assigned academy-lesson-b-scheduler/plain to crc\n  Normal   AddedInterface    1s    multus             Add eth0 [10.217.0.65/23] from ovn-kubernetes\n  Normal   Pulled            1s    kubelet            Container image \"registry.access.redhat.com/ubi9/ubi-minimal:latest\" already present on machine\n  Normal   Created           1s    kubelet            Created container: app\n  Normal   Started           1s    kubelet            Started container app\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe pod tolerant | grep -A4 '^Tolerations:'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Tolerations:                 lab-demo=true:NoSchedule\n                             node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n",
+   "stderr": "",
+   "combined": "Tolerations:                 lab-demo=true:NoSchedule\n                             node.kubernetes.io/memory-pressure:NoSchedule op=Exists\n                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc label node crc lab-tier-",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc unlabeled\n",
+   "stderr": "",
+   "combined": "node/crc unlabeled\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pod tier -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\ntier   1/1     Running   0          29s   10.217.0.57   crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME   READY   STATUS    RESTARTS   AGE   IP            NODE   NOMINATED NODE   READINESS GATES\ntier   1/1     Running   0          29s   10.217.0.57   crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get node crc -L lab-tier && oc describe node crc | grep '^Taints:'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION   LAB-TIER\ncrc    Ready    control-plane,master,worker   200d   v1.34.5   \nTaints:             <none>\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION   LAB-TIER\ncrc    Ready    control-plane,master,worker   200d   v1.34.5   \nTaints:             <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f apart.yaml -f spread.yaml && oc rollout status deploy/spread --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/apart created\ndeployment.apps/spread created\nWaiting for deployment \"spread\" rollout to finish: 0 out of 3 new replicas have been updated...\nWaiting for deployment \"spread\" rollout to finish: 0 of 3 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"spread\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/apart created\ndeployment.apps/spread created\nWaiting for deployment \"spread\" rollout to finish: 0 out of 3 new replicas have been updated...\nWaiting for deployment \"spread\" rollout to finish: 0 of 3 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"spread\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"spread\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -l 'app in (apart,spread)' -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                     READY   STATUS    RESTARTS   AGE   IP            NODE     NOMINATED NODE   READINESS GATES\napart-5bf7cdbb5-42bzj    1/1     Running   0          5s    10.217.0.66   crc      <none>           <none>\napart-5bf7cdbb5-qfhrn    0/1     Pending   0          5s    <none>        <none>   <none>           <none>\nspread-5d7d775fc-fcf2m   1/1     Running   0          5s    10.217.0.69   crc      <none>           <none>\nspread-5d7d775fc-wdvtf   1/1     Running   0          5s    10.217.0.68   crc      <none>           <none>\nspread-5d7d775fc-z7qp8   1/1     Running   0          5s    10.217.0.67   crc      <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME                     READY   STATUS    RESTARTS   AGE   IP            NODE     NOMINATED NODE   READINESS GATES\napart-5bf7cdbb5-42bzj    1/1     Running   0          5s    10.217.0.66   crc      <none>           <none>\napart-5bf7cdbb5-qfhrn    0/1     Pending   0          5s    <none>        <none>   <none>           <none>\nspread-5d7d775fc-fcf2m   1/1     Running   0          5s    10.217.0.69   crc      <none>           <none>\nspread-5d7d775fc-wdvtf   1/1     Running   0          5s    10.217.0.68   crc      <none>           <none>\nspread-5d7d775fc-z7qp8   1/1     Running   0          5s    10.217.0.67   crc      <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=FailedScheduling -o custom-columns=POD:.involvedObject.name,MESSAGE:.message",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "POD                     MESSAGE\napart-5bf7cdbb5-qfhrn   0/1 nodes are available: 1 node(s) didn't match pod anti-affinity rules. no new claims to deallocate, preemption: 0/1 nodes are available: 1 No preemption victims found for incoming pod.\nplain                   0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\ntier                    0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "POD                     MESSAGE\napart-5bf7cdbb5-qfhrn   0/1 nodes are available: 1 node(s) didn't match pod anti-affinity rules. no new claims to deallocate, preemption: 0/1 nodes are available: 1 No preemption victims found for incoming pod.\nplain                   0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\ntier                    0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get scheduler cluster -o jsonpath='{.spec}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"mastersSchedulable\":true,\"policy\":{\"name\":\"\"}}\n",
+   "stderr": "",
+   "combined": "{\"mastersSchedulable\":true,\"policy\":{\"name\":\"\"}}\n",
+   "ok": true
+  }
+ ],
+ "seconds": 59,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NODE-03",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "if oc get node crc -o jsonpath='{.spec.taints[*].key}' | grep -qw lab-demo; then oc adm taint node crc lab-demo-; fi",
+    "code": 0
+   },
+   {
+    "cmd": "if oc get node crc -o jsonpath='{.metadata.labels}' | grep -q '\"lab-tier\"'; then oc label node crc lab-tier-; fi",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready=True --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.spec.taints[*].key}' | grep -qw lab-demo",
+    "code": 1,
+    "ok": true
+   },
+   {
+    "cmd": "for i in $(seq 1 24); do n=$(oc get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | grep -c '^openshift-'); [ \"$n\" = 0 ] && exit 0; sleep 5; done; oc get pods -A --field-selector=status.phase=Pending; exit 1",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait co --all --for=condition=Degraded=False --timeout=120s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.labels}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.spec}'",
+    "same": true
+   }
+  ]
+ }
+}

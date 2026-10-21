@@ -1,0 +1,157 @@
+{
+ "lab": "lesson.b.resources-qos",
+ "kind": "lesson",
+ "lab_hash": "76e1a2be8a0155b9",
+ "recorded_at": "2026-10-16T16:13:22+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-b-resources-qos",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f too-big.yaml && sleep 10 && oc get pod too-big && oc get events --field-selector involvedObject.name=too-big -o custom-columns=REASON:.reason,MESSAGE:.message",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/too-big created\nNAME      READY   STATUS    RESTARTS   AGE\ntoo-big   0/1     Pending   0          10s\nREASON             MESSAGE\nFailedScheduling   0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "pod/too-big created\nNAME      READY   STATUS    RESTARTS   AGE\ntoo-big   0/1     Pending   0          10s\nREASON             MESSAGE\nFailedScheduling   0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f limited.yaml && oc wait --for=condition=Ready pod/limited --timeout=180s >/dev/null && oc exec limited -- cat /sys/fs/cgroup/memory.max",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/limited created\n134217728\n",
+   "stderr": "",
+   "combined": "pod/limited created\n134217728\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec limited -- cat /sys/fs/cgroup/cpu.max",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "50000 100000\n",
+   "stderr": "",
+   "combined": "50000 100000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f hungry.yaml && sleep 30 && oc get pod hungry && oc get pod hungry -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/hungry created\nNAME     READY   STATUS      RESTARTS      AGE\nhungry   0/1     OOMKilled   2 (22s ago)   31s\nOOMKilled exit=137\n",
+   "stderr": "",
+   "combined": "pod/hungry created\nNAME     READY   STATUS      RESTARTS      AGE\nhungry   0/1     OOMKilled   2 (22s ago)   31s\nOOMKilled exit=137\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f plain.yaml >/dev/null && oc get pods -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      QOS\nhungry    Burstable\nlimited   Guaranteed\nplain     BestEffort\ntoo-big   Burstable\n",
+   "stderr": "",
+   "combined": "NAME      QOS\nhungry    Burstable\nlimited   Guaranteed\nplain     BestEffort\ntoo-big   Burstable\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create limitranges",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "combined": "no\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f lab-defaults.yaml -n academy-lesson-b-resources-qos && oc describe limitrange lab-defaults -n academy-lesson-b-resources-qos",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "limitrange/lab-defaults created\nName:       lab-defaults\nNamespace:  academy-lesson-b-resources-qos\nType        Resource  Min  Max  Default Request  Default Limit  Max Limit/Request Ratio\n----        --------  ---  ---  ---------------  -------------  -----------------------\nContainer   cpu       -    -    50m              250m           -\nContainer   memory    -    -    64Mi             128Mi          -\n",
+   "stderr": "",
+   "combined": "limitrange/lab-defaults created\nName:       lab-defaults\nNamespace:  academy-lesson-b-resources-qos\nType        Resource  Min  Max  Default Request  Default Limit  Max Limit/Request Ratio\n----        --------  ---  ---  ---------------  -------------  -----------------------\nContainer   cpu       -    -    50m              250m           -\nContainer   memory    -    -    64Mi             128Mi          -\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc run plain-2 --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity >/dev/null && oc get pods plain plain-2 -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass,REQUESTS:.spec.containers[0].resources.requests,LIMITS:.spec.containers[0].resources.limits && oc get pod plain-2 -o jsonpath='{.metadata.annotations.kubernetes\\.io/limit-ranger}{\"\\n\"}'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME      QOS          REQUESTS                   LIMITS\nplain     BestEffort   <none>                     <none>\nplain-2   Burstable    map[cpu:50m memory:64Mi]   map[cpu:250m memory:128Mi]\nLimitRanger plugin set: cpu, memory request for container plain-2; cpu, memory limit for container plain-2\n",
+   "stderr": "",
+   "combined": "NAME      QOS          REQUESTS                   LIMITS\nplain     BestEffort   <none>                     <none>\nplain-2   Burstable    map[cpu:50m memory:64Mi]   map[cpu:250m memory:128Mi]\nLimitRanger plugin set: cpu, memory request for container plain-2; cpu, memory limit for container plain-2\n",
+   "ok": true
+  }
+ ],
+ "seconds": 96,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-QOS-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete limitrange lab-defaults -n academy-lesson-b-resources-qos --ignore-not-found",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "names=$(oc get limitranges,resourcequotas -n academy-lesson-b-resources-qos -o name) || exit 1\ntest -z \"$names\"",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get limitranges,resourcequotas -A -o json | jq -S '[.items[] | {kind,namespace:.metadata.namespace,name:.metadata.name,spec}] | sort_by(.kind,.namespace,.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get project academy-lesson-b-resources-qos -o name",
+    "same": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,104 @@
+id: inc.pending-resources
+kind: incident
+title: "Pending forever"
+subtitle: "No node, no container, no logs"
+summary: "A new portal pod has been Pending since it was created, and it has no logs to read."
+module: p1-scheduling
+minutes: 15
+level: 1
+supports: "Recorded on OpenShift 4.21.8, single node with 3800m allocatable CPU (CRC)."
+concepts: [k8s.scheduler, k8s.requests-limits]
+prerequisites: [b.resources-qos]
+namespace: academy-inc-pending
+objective: |
+  Find out from the scheduler's own explanation why the pod is never placed, then correct what the batch team's
+  manifest got wrong for a web portal.
+background: |
+  **Where everything comes from.** The project holds the payments portal: a Deployment `web` running Red Hat's UBI 9
+  Apache httpd image, the ConfigMap `web-content` with its page and the `healthz` file its probes read, a Service
+  `web` and a Route `web`, written from the batch team's manifest. One investigation command reads the node through
+  the reader identity, because a normal user cannot read nodes. The app creates the project `academy-inc-pending` as
+  your learner identity when you start the incident, with everything listed here in the state the symptom describes;
+  how it got into that state is part of the investigation and is shown in the debrief. The images come from Red Hat's
+  public registry `registry.access.redhat.com`, which needs no login. Clean up deletes the project. In the browser you
+  replay what this produced on OpenShift Local 4.21.8; nothing runs.
+symptom: |
+  A copy-pasted manifest from the batch team was used for the portal. The pod has been Pending since it was created.
+  Nothing is in the logs: there are no logs.
+setup:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: web-content}
+    data: {index.html: "<h1>payments portal</h1>", healthz: "ok"}
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata: {name: web}
+    spec:
+      selector: {app: web}
+      ports: [{port: 8080, targetPort: 8080}]
+  - |
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata: {name: web}
+    spec:
+      to: {kind: Service, name: web}
+      port: {targetPort: 8080}
+break:
+  - |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: web, labels: {app: web}}
+    spec:
+      replicas: 1
+      selector: {matchLabels: {app: web}}
+      template:
+        metadata: {labels: {app: web}}
+        spec:
+          containers:
+          - name: httpd
+            image: registry.access.redhat.com/ubi9/httpd-24:latest
+            ports: [{containerPort: 8080}]
+            readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+            resources: {requests: {cpu: "6", memory: 32Mi}, limits: {memory: 128Mi}}
+            volumeMounts: [{name: content, mountPath: /var/www/html}]
+          volumes: [{name: content, configMap: {name: web-content}}]
+investigate:
+  - {cmd: "oc get pods -n academy-inc-pending", meaning: "0/1 Pending, 0 restarts: the pod has not been placed on any node, so no container exists yet"}
+  - {cmd: "oc get events -n academy-inc-pending --field-selector reason=FailedScheduling", meaning: "0/1 nodes are available: 1 Insufficient cpu, and preemption is not helpful (evicting lower-priority pods could not free 6 CPUs). The middle phrase about claims comes from dynamic resource allocation and is irrelevant here"}
+  - {cmd: "oc get node -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory", as: reader, meaning: "what the node can offer: crc has 3800m CPU allocatable (about 9.8 GiB memory)"}
+  - {cmd: "oc get deploy web -n academy-inc-pending -o jsonpath='{.spec.template.spec.containers[0].resources.requests}{\"\\n\"}'", meaning: "{\"cpu\":\"6\",\"memory\":\"32Mi\"}: 6 CPUs requested, more than the whole node can offer"}
+hints:
+  - "A Pending pod with no node has not been scheduled. The scheduler explains why in an event."
+  - "Compare the CPU request with the node's allocatable CPU. Requests reserve capacity even if never used."
+  - "Lower the pod's CPU request to what the node can still offer: the node read above through the reader identity has 3800m allocatable, and the pods already running there reserve part of it (an identity that may read nodes, such as an administrator, sees both in `oc describe node`; your learner identity cannot). The 32Mi memory request was fine. Requests, not limits, decide scheduling."
+fix:
+  - {cmd: "oc set resources deploy/web -n academy-inc-pending --requests=cpu=50m,memory=32Mi", meaning: "request what the portal really needs"}
+  - {cmd: "oc rollout status deploy/web -n academy-inc-pending --timeout=120s", meaning: "the new pod is scheduled and becomes ready; the old Pending pod is removed", timeout: 140}
+fix_wait: [web-ready, route-ok]
+checks:
+  - {id: web-ready, title: "web is available", type: deployment_ready, name: web, expect_text: "1/1"}
+  - {id: route-ok, title: "The Route serves the portal", type: route_http, route: web, contains: "payments portal", expect_text: "HTTP 200"}
+root_cause: |
+  The pod requested 6 CPUs. The scheduler places a pod only on a node whose allocatable CPU minus the requests of
+  pods already there can fit it; this node offers 3800m in total. No node fits, so the pod stays Pending with a
+  `FailedScheduling: Insufficient cpu` event, and nothing ever starts.
+alternatives: |
+  - On a real cluster with the cluster autoscaler, a Pending pod can trigger a new node, but only if a machine type
+    big enough exists; 6 CPUs for a web server would just cost money.
+  - A LimitRange with a per-container `max` stops such requests at admission with a clear error (note that a `max`
+    also requires every container to have a limit for that resource, set explicitly or by the LimitRange's default).
+sre: |
+  Requests are the currency of the scheduler. Over-requesting wastes capacity and blocks scheduling; under-requesting
+  overcommits nodes. Track request vs usage per namespace and alert on pods Pending longer than a few minutes.
+questions:
+  - q: "Why are there no logs for this pod?"
+    a: "It was never scheduled, so no container was ever created."
+  - q: "Does a CPU request of 6 mean the pod will use 6 CPUs?"
+    a: "No: it reserves 6 CPUs of schedulable capacity; actual usage can be much lower."
+references:
+  - {title: "Kubernetes: Resource management for pods and containers", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"}
+  - {title: "Kubernetes: How pods with resource requests are scheduled", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#how-pods-with-resource-requests-are-scheduled"}
+  - {title: "Kubernetes: Limit ranges", url: "https://kubernetes.io/docs/concepts/policy/limit-range/"}
+symptom_checks: [web-ready, route-ok]  # monitoring-level evidence shown before the answer

@@ -1,0 +1,330 @@
+{
+ "lab": "lesson.e.storage",
+ "kind": "lesson",
+ "lab_hash": "5593fbcb62b09cb5",
+ "recorded_at": "2026-10-16T17:15:15+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-e-storage",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment notes --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity; oc rollout status deployment/notes --timeout=180s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/notes created\nWaiting for deployment \"notes\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"notes\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/notes created\nWaiting for deployment \"notes\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"notes\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/notes -- sh -c 'echo \"note 1\" > /tmp/note.txt; cat /tmp/note.txt'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "note 1\n",
+   "stderr": "",
+   "combined": "note 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete pod -l app=notes; oc wait --for=condition=Ready pod -l app=notes --timeout=120s; oc exec deploy/notes -- cat /tmp/note.txt",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "pod \"notes-7cdf6fcc4f-2rq9p\" deleted from academy-lesson-e-storage namespace\npod/notes-7cdf6fcc4f-gfp6s condition met\n",
+   "stderr": "cat: /tmp/note.txt: No such file or directory\ncommand terminated with exit code 1\n",
+   "combined": "pod \"notes-7cdf6fcc4f-2rq9p\" deleted from academy-lesson-e-storage namespace\npod/notes-7cdf6fcc4f-gfp6s condition met\ncat: /tmp/note.txt: No such file or directory\ncommand terminated with exit code 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc api-resources | awk 'NR==1 || $1 ~ /^(persistentvolumeclaims|persistentvolumes|storageclasses)$/ {print $1, $(NF-1)}' | column -t; oc get pv",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "NAME                    NAMESPACED\npersistentvolumeclaims  true\npersistentvolumes       false\nstorageclasses          false\n",
+   "stderr": "Error from server (Forbidden): persistentvolumes is forbidden: User \"developer\" cannot list resource \"persistentvolumes\" in API group \"\" at the cluster scope\n",
+   "combined": "NAME                    NAMESPACED\npersistentvolumeclaims  true\npersistentvolumes       false\nstorageclasses          false\nError from server (Forbidden): persistentvolumes is forbidden: User \"developer\" cannot list resource \"persistentvolumes\" in API group \"\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pv",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                                                 STORAGECLASS                   VOLUMEATTRIBUTESCLASS   REASON   AGE\npvc-152ce5c9-bd81-408c-a4c8-c0bb377cfdd5   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-29a4371c-7e1f-43a4-b4eb-7f33b2b1ca9b   39Gi       RWO            Retain           Released   academy-inc-pvc/ledger-data-v2                        crc-csi-hostpath-provisioner   <unset>                          47h\npvc-2a5b1dde-0fbb-490c-bff7-c1ae2bf525d5   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-44a92983-5704-4036-bc0b-c42359b6fa6e   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-6aaf5683-0bdb-433c-baf1-92b619ec7912   30Gi       RWX            Retain           Bound      openshift-image-registry/crc-image-registry-storage   crc-csi-hostpath-provisioner   <unset>                          199d\npvc-92553aff-e2dc-4c2e-af52-58bd9245e87b   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-ceef8275-d530-4eb9-959f-2db060a5bbe4   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-f938958d-7a55-4055-8b56-97ffa1be805b   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\n",
+   "stderr": "",
+   "combined": "NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                                                 STORAGECLASS                   VOLUMEATTRIBUTESCLASS   REASON   AGE\npvc-152ce5c9-bd81-408c-a4c8-c0bb377cfdd5   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-29a4371c-7e1f-43a4-b4eb-7f33b2b1ca9b   39Gi       RWO            Retain           Released   academy-inc-pvc/ledger-data-v2                        crc-csi-hostpath-provisioner   <unset>                          47h\npvc-2a5b1dde-0fbb-490c-bff7-c1ae2bf525d5   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-44a92983-5704-4036-bc0b-c42359b6fa6e   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-6aaf5683-0bdb-433c-baf1-92b619ec7912   30Gi       RWX            Retain           Bound      openshift-image-registry/crc-image-registry-storage   crc-csi-hostpath-provisioner   <unset>                          199d\npvc-92553aff-e2dc-4c2e-af52-58bd9245e87b   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-ceef8275-d530-4eb9-959f-2db060a5bbe4   39Gi       RWO            Retain           Released   academy-sts/data-web-0                                crc-csi-hostpath-provisioner   <unset>                          2d11h\npvc-f938958d-7a55-4055-8b56-97ffa1be805b   39Gi       RWO            Retain           Released   academy-sts/data-web-1                                crc-csi-hostpath-provisioner   <unset>                          2d11h\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get storageclass",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE\ncrc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer   false                  199d\n",
+   "stderr": "",
+   "combined": "NAME                                     PROVISIONER                        RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE\ncrc-csi-hostpath-provisioner (default)   kubevirt.io.hostpath-provisioner   Retain          WaitForFirstConsumer   false                  199d\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pvc",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in academy-lesson-e-storage namespace.\n",
+   "combined": "No resources found in academy-lesson-e-storage namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f notes-data.yaml; sleep 5; oc get pvc notes-data; oc describe pvc notes-data | sed -n '/^Events:/,$p'",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persistentvolumeclaim/notes-data created\nNAME         STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nnotes-data   Pending                                      crc-csi-hostpath-provisioner   <unset>                 5s\nEvents:\n  Type    Reason                Age   From                         Message\n  ----    ------                ----  ----                         -------\n  Normal  WaitForFirstConsumer  5s    persistentvolume-controller  waiting for first consumer to be created before binding\n",
+   "stderr": "",
+   "combined": "persistentvolumeclaim/notes-data created\nNAME         STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nnotes-data   Pending                                      crc-csi-hostpath-provisioner   <unset>                 5s\nEvents:\n  Type    Reason                Age   From                         Message\n  ----    ------                ----  ----                         -------\n  Normal  WaitForFirstConsumer  5s    persistentvolume-controller  waiting for first consumer to be created before binding\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set volume deployment/notes --add --name=data --type=pvc --claim-name=notes-data --mount-path=/data; oc rollout status deployment/notes --timeout=180s; oc get pvc notes-data",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/notes volume updated\nWaiting for deployment \"notes\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"notes\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"notes\" successfully rolled out\nNAME         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nnotes-data   Bound    pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 11s\n",
+   "stderr": "",
+   "combined": "deployment.apps/notes volume updated\nWaiting for deployment \"notes\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"notes\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"notes\" successfully rolled out\nNAME         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE\nnotes-data   Bound    pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9   39Gi       RWO            crc-csi-hostpath-provisioner   <unset>                 11s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pvc notes-data -n academy-lesson-e-storage -o jsonpath='{.spec.volumeName}{\"\\n\"}' | tee pv.txt; oc describe pv \"$(cat pv.txt)\"",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\nName:              pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\nLabels:            <none>\nAnnotations:       pv.kubernetes.io/provisioned-by: kubevirt.io.hostpath-provisioner\n                   volume.kubernetes.io/provisioner-deletion-secret-name: \n                   volume.kubernetes.io/provisioner-deletion-secret-namespace: \nFinalizers:        [kubernetes.io/pv-protection]\nStorageClass:      crc-csi-hostpath-provisioner\nStatus:            Bound\nClaim:             academy-lesson-e-storage/notes-data\nReclaim Policy:    Retain\nAccess Modes:      RWO\nVolumeMode:        Filesystem\nCapacity:          39Gi\nNode Affinity:     \n  Required Terms:  \n    Term 0:        topology.hostpath.csi/node in [crc]\nMessage:           \nSource:\n    Type:              CSI (a Container Storage Interface (CSI) volume source)\n    Driver:            kubevirt.io.hostpath-provisioner\n    FSType:            \n    VolumeHandle:      pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\n    ReadOnly:          false\n    VolumeAttributes:      csi.storage.k8s.io/pv/name=pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\n                           csi.storage.k8s.io/pvc/name=notes-data\n                           csi.storage.k8s.io/pvc/namespace=academy-lesson-e-storage\n                           storage.kubernetes.io/csiProvisionerIdentity=1792150743696-3577-kubevirt.io.hostpath-provisioner-crc\n                           storagePool=local\nEvents:                <none>\n",
+   "stderr": "",
+   "combined": "pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\nName:              pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\nLabels:            <none>\nAnnotations:       pv.kubernetes.io/provisioned-by: kubevirt.io.hostpath-provisioner\n                   volume.kubernetes.io/provisioner-deletion-secret-name: \n                   volume.kubernetes.io/provisioner-deletion-secret-namespace: \nFinalizers:        [kubernetes.io/pv-protection]\nStorageClass:      crc-csi-hostpath-provisioner\nStatus:            Bound\nClaim:             academy-lesson-e-storage/notes-data\nReclaim Policy:    Retain\nAccess Modes:      RWO\nVolumeMode:        Filesystem\nCapacity:          39Gi\nNode Affinity:     \n  Required Terms:  \n    Term 0:        topology.hostpath.csi/node in [crc]\nMessage:           \nSource:\n    Type:              CSI (a Container Storage Interface (CSI) volume source)\n    Driver:            kubevirt.io.hostpath-provisioner\n    FSType:            \n    VolumeHandle:      pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\n    ReadOnly:          false\n    VolumeAttributes:      csi.storage.k8s.io/pv/name=pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9\n                           csi.storage.k8s.io/pvc/name=notes-data\n                           csi.storage.k8s.io/pvc/namespace=academy-lesson-e-storage\n                           storage.kubernetes.io/csiProvisionerIdentity=1792150743696-3577-kubevirt.io.hostpath-provisioner-crc\n                           storagePool=local\nEvents:                <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc exec deploy/notes -- sh -c 'echo persisted > /data/note.txt'; oc delete pod -l app=notes; oc wait --for=condition=Ready pod -l app=notes --timeout=120s; oc exec deploy/notes -- cat /data/note.txt",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod \"notes-55486844bf-cg5g7\" deleted from academy-lesson-e-storage namespace\npod \"notes-7cdf6fcc4f-gfp6s\" deleted from academy-lesson-e-storage namespace\npod/notes-55486844bf-dr2t5 condition met\npersisted\n",
+   "stderr": "",
+   "combined": "pod \"notes-55486844bf-cg5g7\" deleted from academy-lesson-e-storage namespace\npod \"notes-7cdf6fcc4f-gfp6s\" deleted from academy-lesson-e-storage namespace\npod/notes-55486844bf-dr2t5 condition met\npersisted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete deployment notes; oc delete pvc notes-data; oc get pvc",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps \"notes\" deleted from academy-lesson-e-storage namespace\npersistentvolumeclaim \"notes-data\" deleted from academy-lesson-e-storage namespace\n",
+   "stderr": "No resources found in academy-lesson-e-storage namespace.\n",
+   "combined": "deployment.apps \"notes\" deleted from academy-lesson-e-storage namespace\npersistentvolumeclaim \"notes-data\" deleted from academy-lesson-e-storage namespace\nNo resources found in academy-lesson-e-storage namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pv \"$(cat pv.txt)\"",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                                 STORAGECLASS                   VOLUMEATTRIBUTESCLASS   REASON   AGE\npvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9   39Gi       RWO            Retain           Released   academy-lesson-e-storage/notes-data   crc-csi-hostpath-provisioner   <unset>                          70s\n",
+   "stderr": "",
+   "combined": "NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                                 STORAGECLASS                   VOLUMEATTRIBUTESCLASS   REASON   AGE\npvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9   39Gi       RWO            Retain           Released   academy-lesson-e-storage/notes-data   crc-csi-hostpath-provisioner   <unset>                          70s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create -f stor-debug-ns.yaml; oc debug node/crc --to-namespace=academy-x-stor-debug --image-stream=openshift/cli:latest -- chroot /host cat \"/var/lib/csi-hostpath-data/$(cat pv.txt)/note.txt\"",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "namespace/academy-x-stor-debug created\npersisted\n",
+   "stderr": "Starting pod/crc-debug-hsrqj ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\n",
+   "combined": "namespace/academy-x-stor-debug created\nStarting pod/crc-debug-hsrqj ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\npersisted\n\nRemoving debug pod ...\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc patch pv \"$(cat pv.txt)\" -p '{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}'; oc wait --for=delete pv/\"$(cat pv.txt)\" --timeout=120s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persistentvolume/pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9 patched\n",
+   "stderr": "",
+   "combined": "persistentvolume/pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9 patched\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc debug node/crc --to-namespace=academy-x-stor-debug --image-stream=openshift/cli:latest -- chroot /host ls \"/var/lib/csi-hostpath-data/$(cat pv.txt)\"; oc delete namespace academy-x-stor-debug",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ls: cannot access '/var/lib/csi-hostpath-data/pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9': No such file or directory\nnamespace \"academy-x-stor-debug\" deleted\n",
+   "stderr": "Starting pod/crc-debug-2dq6q ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\n\nRemoving debug pod ...\nerror: non-zero exit code from debug container\n",
+   "combined": "Starting pod/crc-debug-2dq6q ...\nTo use host binaries, run `chroot /host`. Instead, if you need to access host namespaces, run `nsenter -a -t 1`.\nls: cannot access '/var/lib/csi-hostpath-data/pvc-4ef3d4e1-d162-40b0-b8f1-977af4c86cc9': No such file or directory\n\nRemoving debug pod ...\nerror: non-zero exit code from debug container\nnamespace \"academy-x-stor-debug\" deleted\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f typo-data.yaml; sleep 5; oc get pvc typo-data; oc get events --field-selector involvedObject.name=typo-data",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "persistentvolumeclaim/typo-data created\nNAME        STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE\ntypo-data   Pending                                      fast-ssd       <unset>                 5s\nLAST SEEN   TYPE      REASON               OBJECT                            MESSAGE\n1s          Warning   ProvisioningFailed   persistentvolumeclaim/typo-data   storageclass.storage.k8s.io \"fast-ssd\" not found\n",
+   "stderr": "",
+   "combined": "persistentvolumeclaim/typo-data created\nNAME        STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE\ntypo-data   Pending                                      fast-ssd       <unset>                 5s\nLAST SEEN   TYPE      REASON               OBJECT                            MESSAGE\n1s          Warning   ProvisioningFailed   persistentvolumeclaim/typo-data   storageclass.storage.k8s.io \"fast-ssd\" not found\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f ghost.yaml; sleep 8; oc get pod ghost",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/ghost created\nNAME    READY   STATUS    RESTARTS   AGE\nghost   0/1     Pending   0          8s\n",
+   "stderr": "",
+   "combined": "pod/ghost created\nNAME    READY   STATUS    RESTARTS   AGE\nghost   0/1     Pending   0          8s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector involvedObject.name=ghost",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT      MESSAGE\n8s          Warning   FailedScheduling   pod/ghost   0/1 nodes are available: persistentvolumeclaim \"ghost-data\" not found. not found\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON             OBJECT      MESSAGE\n8s          Warning   FailedScheduling   pod/ghost   0/1 nodes are available: persistentvolumeclaim \"ghost-data\" not found. not found\n",
+   "ok": true
+  }
+ ],
+ "seconds": 155,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-STOR-01",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc delete namespace academy-x-stor-debug --ignore-not-found --wait=false",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete deployment notes -n academy-lesson-e-storage --ignore-not-found && oc delete pod ghost -n academy-lesson-e-storage --ignore-not-found --wait=false && oc delete pvc notes-data typo-data -n academy-lesson-e-storage --ignore-not-found --timeout=240s",
+    "code": 0
+   },
+   {
+    "cmd": "pvs=$(oc get pv -o json | jq -r '.items[] | select(.spec.claimRef.namespace == \"academy-lesson-e-storage\") | .metadata.name') || exit 1\nfor pv in $pvs; do\n  oc patch pv \"$pv\" -p '{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}' || exit 1\n  for i in $(seq 24); do\n    left=$(oc get pv \"$pv\" --ignore-not-found -o name) || exit 1\n    test -z \"$left\" && break\n    sleep 5\n  done\n  left=$(oc get pv \"$pv\" --ignore-not-found -o name) || exit 1\n  if [ -n \"$left\" ]; then oc delete pv \"$pv\" --timeout=60s || exit 1; fi\ndone",
+    "code": 0
+   },
+   {
+    "cmd": "oc delete project academy-lesson-e-storage --ignore-not-found --wait=false",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "pvs=$(oc get pv -o json | jq -r '.items[] | select(.spec.claimRef.namespace == \"academy-lesson-e-storage\") | .metadata.name') || exit 1\ntest -z \"$pvs\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "found=$(oc get namespace academy-x-stor-debug --ignore-not-found -o name) || exit 1\ntest -z \"$found\"",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready --timeout=60s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get pv -o json | jq -S '[.items[] | {name:.metadata.name,phase:.status.phase,claim:.spec.claimRef.name,ns:.spec.claimRef.namespace,reclaim:.spec.persistentVolumeReclaimPolicy}] | sort_by(.name)'",
+    "same": true
+   },
+   {
+    "cmd": "oc get storageclass -o json | jq -S '[.items[] | {name:.metadata.name,provisioner:.provisioner,parameters:.parameters,reclaim:.reclaimPolicy,binding:.volumeBindingMode,expansion:.allowVolumeExpansion,default:.metadata.annotations[\"storageclass.kubernetes.io/is-default-class\"]}]'",
+    "same": true
+   },
+   {
+    "cmd": "oc get namespace academy-x-stor-debug --ignore-not-found -o name",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.annotations.machineconfiguration\\.openshift\\.io/currentConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/desiredConfig} {.metadata.annotations.machineconfiguration\\.openshift\\.io/state} {.spec.unschedulable} {.spec.taints}'",
+    "same": true
+   }
+  ]
+ }
+}

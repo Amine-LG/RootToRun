@@ -1,0 +1,10 @@
+{
+  "name": "Root to Run",
+  "nameLine2": "",
+  "provisional": false,
+  "tagline": "Understand the systems. Practise running them.",
+  "description": "Understand the systems. Practise running them. A free, independent, open-source learning environment for Red Hat® OpenShift® and its Linux, container and Kubernetes® foundations, with real commands, real outputs and real incidents.",
+  "socialDescription": "Understand the systems. Practise running them. A free, independent, open-source learning environment for Red Hat® OpenShift® and its Linux, container and Kubernetes® foundations.",
+  "creator": { "name": "Amine-LG", "url": "https://github.com/Amine-LG" },
+  "copyright": "© 2026 Amine-LG and contributors"
+}

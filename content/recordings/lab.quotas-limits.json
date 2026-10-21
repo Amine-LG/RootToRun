@@ -1,0 +1,271 @@
+{
+ "lab": "lab.quotas-limits",
+ "kind": "lab",
+ "lab_hash": "9adc1a35bce6be6c",
+ "recorded_at": "2026-10-13T21:11:40+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "oc": "4.21.8",
+  "openshift": "4.21.8"
+ },
+ "entries": [
+  {
+   "step": "inspect",
+   "cmd": "oc describe quota compute -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       academy-quota\nResource         Used  Hard\n--------         ----  ----\nlimits.memory    0     1Gi\npods             0     3\nrequests.cpu     0     500m\nrequests.memory  0     512Mi\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "inspect",
+   "cmd": "oc describe limitrange defaults -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:       defaults\nNamespace:  academy-quota\nType        Resource  Min  Max    Default Request  Default Limit  Max Limit/Request Ratio\n----        --------  ---  ---    ---------------  -------------  -----------------------\nContainer   memory    -    512Mi  64Mi             128Mi          -\nContainer   cpu       -    -      50m              -              -\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "inspect",
+   "cmd": "oc auth can-i create resourcequotas -n academy-quota",
+   "as": "learner",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "defaults",
+   "cmd": "oc create deployment app --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-quota -- sleep infinity",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "defaults",
+   "cmd": "oc rollout status deploy/app -n academy-quota --timeout=120s",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Waiting for deployment \"app\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"app\" successfully rolled out\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "defaults",
+   "cmd": "oc get pods -l app=app -n academy-quota -o jsonpath='{.items[0].spec.containers[0].resources}'",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"50m\",\"memory\":\"64Mi\"}}",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "too-big",
+   "cmd": "oc create deployment big --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -n academy-quota -- sleep infinity",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/big created\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "too-big",
+   "cmd": "oc set resources deploy/big --limits=memory=1Gi -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/big resource requirements updated\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "too-big-read",
+   "cmd": "oc get events -n academy-quota --field-selector reason=FailedCreate",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON         OBJECT                     MESSAGE\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-wmzkb\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-592kb\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-qrt8v\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-9wmkd\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-wz75t\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n0s          Warning   FailedCreate   replicaset/big-69f668bdf   Error creating: pods \"big-69f668bdf-h8t68\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc delete deployment big -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps \"big\" deleted from academy-quota namespace\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale",
+   "cmd": "oc scale deploy/app --replicas=5 -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale-read",
+   "cmd": "oc get pods -l app=app -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   STATUS              RESTARTS   AGE\napp-5cfb66c95-6x8f4   1/1     Running             0          6s\napp-5cfb66c95-gnrn8   0/1     ContainerCreating   0          1s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale-read",
+   "cmd": "oc describe quota compute -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Name:            compute\nNamespace:       academy-quota\nResource         Used   Hard\n--------         ----   ----\nlimits.memory    384Mi  1Gi\npods             3      3\nrequests.cpu     150m   500m\nrequests.memory  192Mi  512Mi\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "scale-read",
+   "cmd": "oc get deploy app -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napp    1/5     2            1           6s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc scale deploy/app --replicas=3 -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/app scaled\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "fix",
+   "cmd": "oc get deploy app -n academy-quota",
+   "as": "learner",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napp    1/3     2            1           6s\n",
+   "stderr": "",
+   "ok": true
+  },
+  {
+   "step": "template",
+   "cmd": "oc adm create-bootstrap-project-template -o yaml",
+   "as": "admin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "apiVersion: template.openshift.io/v1\nkind: Template\nmetadata:\n  name: project-request\nobjects:\n- apiVersion: project.openshift.io/v1\n  kind: Project\n  metadata:\n    annotations:\n      openshift.io/description: ${PROJECT_DESCRIPTION}\n      openshift.io/display-name: ${PROJECT_DISPLAYNAME}\n      openshift.io/requester: ${PROJECT_REQUESTING_USER}\n    name: ${PROJECT_NAME}\n  spec: {}\n  status: {}\n- apiVersion: rbac.authorization.k8s.io/v1\n  kind: RoleBinding\n  metadata:\n    name: admin\n    namespace: ${PROJECT_NAME}\n  roleRef:\n    apiGroup: rbac.authorization.k8s.io\n    kind: ClusterRole\n    name: admin\n  subjects:\n  - apiGroup: rbac.authorization.k8s.io\n    kind: User\n    name: ${PROJECT_ADMIN_USER}\nparameters:\n- name: PROJECT_NAME\n- name: PROJECT_DISPLAYNAME\n- name: PROJECT_DESCRIPTION\n- name: PROJECT_ADMIN_USER\n- name: PROJECT_REQUESTING_USER\n",
+   "stderr": "",
+   "ok": true
+  }
+ ],
+ "verify_before": {
+  "verdict": "partial",
+  "results": [
+   {
+    "id": "big-rejected",
+    "title": "big's new pod was rejected by the LimitRange",
+    "expect": "FailedCreate: maximum memory usage per Container is 512Mi",
+    "status": "fail",
+    "observed": "0 event(s) · none"
+   },
+   {
+    "id": "quota-hit",
+    "title": "The quota stopped the scale-up",
+    "expect": "FailedCreate: exceeded quota: compute",
+    "status": "fail",
+    "observed": "0 event(s) · none"
+   },
+   {
+    "id": "big-gone",
+    "title": "big was removed",
+    "expect": "absent",
+    "status": "pass",
+    "observed": "not found"
+   },
+   {
+    "id": "app-three",
+    "title": "app runs 3/3 within the quota",
+    "expect": "3/3",
+    "status": "fail",
+    "observed": "Error from server (NotFound): deployments.apps \"app\" not found"
+   }
+  ],
+  "at": 1791925902.5243812
+ },
+ "verify_after": {
+  "verdict": "verified",
+  "results": [
+   {
+    "id": "big-rejected",
+    "title": "big's new pod was rejected by the LimitRange",
+    "expect": "FailedCreate: maximum memory usage per Container is 512Mi",
+    "status": "pass",
+    "observed": "7 event(s) · Error creating: pods \"big-69f668bdf-wmzkb\" is forbidden: maximum memory usage per Container is 512Mi, but limit is 1Gi"
+   },
+   {
+    "id": "quota-hit",
+    "title": "The quota stopped the scale-up",
+    "expect": "FailedCreate: exceeded quota: compute",
+    "status": "pass",
+    "observed": "10 event(s) · Error creating: pods \"app-5cfb66c95-vq8jp\" is forbidden: exceeded quota: compute, requested: pods=1, used: pods=3, limited: pods=3"
+   },
+   {
+    "id": "big-gone",
+    "title": "big was removed",
+    "expect": "absent",
+    "status": "pass",
+    "observed": "not found"
+   },
+   {
+    "id": "app-three",
+    "title": "app runs 3/3 within the quota",
+    "expect": "3/3",
+    "status": "pass",
+    "observed": "ready 3/3, updated 3, total 3, observedGeneration current: True"
+   }
+  ],
+  "at": 1791926009.295409
+ },
+ "seconds": 109,
+ "ok": true,
+ "problems": []
+}

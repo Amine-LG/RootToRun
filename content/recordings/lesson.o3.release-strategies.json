@@ -1,0 +1,168 @@
+{
+ "lab": "lesson.o3.release-strategies",
+ "kind": "lesson",
+ "lab_hash": "362b56e6d87118f2",
+ "recorded_at": "2026-10-15T22:50:59+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o3-release-strategies",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f app.yaml; oc rollout status deployment/web-blue --timeout=180s; oc rollout status deployment/web-green --timeout=180s; oc create route edge web --service=web --port=http; oc create route edge shop --service=web-blue --port=http; oc get pods; oc get services; oc get routes",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "configmap/page-blue created\nconfigmap/page-green created\ndeployment.apps/web-blue created\ndeployment.apps/web-green created\nservice/web created\nservice/web-blue created\nservice/web-green created\nWaiting for deployment \"web-blue\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web-blue\" successfully rolled out\nWaiting for deployment \"web-green\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web-green\" successfully rolled out\nroute.route.openshift.io/web created\nroute.route.openshift.io/shop created\nNAME                         READY   STATUS    RESTARTS   AGE\nweb-blue-fd88b9f5b-tldv8     1/1     Running   0          11s\nweb-green-78cf8ccc48-2nm5p   1/1     Running   0          11s\nNAME        TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nweb         ClusterIP   10.217.4.217   <none>        8080/TCP   12s\nweb-blue    ClusterIP   10.217.4.148   <none>        8080/TCP   11s\nweb-green   ClusterIP   10.217.4.163   <none>        8080/TCP   11s\nNAME   HOST/PORT                                                    PATH   SERVICES   PORT   TERMINATION   WILDCARD\nshop   shop-academy-lesson-o3-release-strategies.apps-crc.testing          web-blue   http   edge          None\nweb    web-academy-lesson-o3-release-strategies.apps-crc.testing           web        http   edge          None\n",
+   "stderr": "",
+   "combined": "configmap/page-blue created\nconfigmap/page-green created\ndeployment.apps/web-blue created\ndeployment.apps/web-green created\nservice/web created\nservice/web-blue created\nservice/web-green created\nWaiting for deployment \"web-blue\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web-blue\" successfully rolled out\nWaiting for deployment \"web-green\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web-green\" successfully rolled out\nroute.route.openshift.io/web created\nroute.route.openshift.io/shop created\nNAME                         READY   STATUS    RESTARTS   AGE\nweb-blue-fd88b9f5b-tldv8     1/1     Running   0          11s\nweb-green-78cf8ccc48-2nm5p   1/1     Running   0          11s\nNAME        TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\nweb         ClusterIP   10.217.4.217   <none>        8080/TCP   12s\nweb-blue    ClusterIP   10.217.4.148   <none>        8080/TCP   11s\nweb-green   ClusterIP   10.217.4.163   <none>        8080/TCP   11s\nNAME   HOST/PORT                                                    PATH   SERVICES   PORT   TERMINATION   WILDCARD\nshop   shop-academy-lesson-o3-release-strategies.apps-crc.testing          web-blue   http   edge          None\nweb    web-academy-lesson-o3-release-strategies.apps-crc.testing           web        http   edge          None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "host=$(oc get route web -o jsonpath='{.spec.host}'); sleep 10; echo before; curl -sk https://$host/; oc set selector service web app=web,version=green; sleep 10; echo after; curl -sk https://$host/; oc get endpointslices -l kubernetes.io/service-name=web; oc get pods -l version=green -o custom-columns=NAME:.metadata.name,IP:.status.podIP",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "before\nversion blue\nservice/web selector updated\nafter\nversion green\nNAME        ADDRESSTYPE   PORTS   ENDPOINTS     AGE\nweb-vwn5k   IPv4          8080    10.217.1.90   35s\nNAME                         IP\nweb-green-78cf8ccc48-2nm5p   10.217.1.90\n",
+   "stderr": "",
+   "combined": "before\nversion blue\nservice/web selector updated\nafter\nversion green\nNAME        ADDRESSTYPE   PORTS   ENDPOINTS     AGE\nweb-vwn5k   IPv4          8080    10.217.1.90   35s\nNAME                         IP\nweb-green-78cf8ccc48-2nm5p   10.217.1.90\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set selector service web app=web,version=blue; sleep 10; curl -sk https://$(oc get route web -o jsonpath='{.spec.host}')/",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web selector updated\nversion blue\n",
+   "stderr": "",
+   "combined": "service/web selector updated\nversion blue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set selector service web version=blue; oc get service web -o jsonpath='selector: {.spec.selector}{\"\\n\"}'; oc set selector service web app=web,version=blue; oc get service web -o jsonpath='selector: {.spec.selector}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "service/web selector updated\nselector: {\"version\":\"blue\"}\nservice/web selector updated\nselector: {\"app\":\"web\",\"version\":\"blue\"}\n",
+   "stderr": "",
+   "combined": "service/web selector updated\nselector: {\"version\":\"blue\"}\nservice/web selector updated\nselector: {\"app\":\"web\",\"version\":\"blue\"}\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment toolbox --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sleep infinity; oc rollout status deployment/toolbox --timeout=180s; oc set route-backends shop; oc set route-backends shop web-green=100; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); echo \"through the Route:\"; curl -sk https://$host/; echo \"inside the cluster, calling web-blue:\"; oc exec deploy/toolbox -- curl -s http://web-blue:8080/",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/toolbox created\nWaiting for deployment \"toolbox\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"toolbox\" successfully rolled out\nNAME         KIND     TO        WEIGHT\nroutes/shop  Service  web-blue  100\nroute.route.openshift.io/shop backends updated\nthrough the Route:\nversion green\ninside the cluster, calling web-blue:\nversion blue\n",
+   "stderr": "",
+   "combined": "deployment.apps/toolbox created\nWaiting for deployment \"toolbox\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"toolbox\" successfully rolled out\nNAME         KIND     TO        WEIGHT\nroutes/shop  Service  web-blue  100\nroute.route.openshift.io/shop backends updated\nthrough the Route:\nversion green\ninside the cluster, calling web-blue:\nversion blue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set route-backends shop web-blue=90 web-green=10; oc set route-backends shop; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 1 40); do curl -sk https://$host/; done | sort | uniq -c",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/shop backends updated\nNAME         KIND     TO         WEIGHT\nroutes/shop  Service  web-blue   90 (90%)\nroutes/shop  Service  web-green  10 (10%)\n     37 version blue\n      3 version green\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/shop backends updated\nNAME         KIND     TO         WEIGHT\nroutes/shop  Service  web-blue   90 (90%)\nroutes/shop  Service  web-green  10 (10%)\n     37 version blue\n      3 version green\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set route-backends shop web-blue=75 web-green=25; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 1 40); do curl -sk https://$host/; done | sort | uniq -c",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/shop backends updated\n     31 version blue\n      9 version green\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/shop backends updated\n     31 version blue\n      9 version green\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "host=$(oc get route shop -o jsonpath='{.spec.host}'); rm -f jar; for i in $(seq 1 20); do curl -sk -c jar -b jar https://$host/; done | sort | uniq -c; echo \"Set-Cookie headers in one response: $(curl -skI https://$host/ | grep -ic '^set-cookie')\"",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "     20 version green\nSet-Cookie headers in one response: 1\n",
+   "stderr": "",
+   "combined": "     20 version green\nSet-Cookie headers in one response: 1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 1 50); do rm -f jar; curl -sk -c jar -b jar https://$host/ | grep -q green && break; done; oc set route-backends shop web-blue=100 web-green=0; sleep 10; echo \"the pinned client:\"; for i in 1 2 3 4 5; do curl -sk -c jar -b jar https://$host/; done | sort | uniq -c; echo \"new clients:\"; for i in $(seq 1 10); do curl -sk https://$host/; done | sort | uniq -c",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/shop backends updated\nthe pinned client:\n      5 version green\nnew clients:\n     10 version blue\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/shop backends updated\nthe pinned client:\n      5 version green\nnew clients:\n     10 version blue\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set route-backends shop web-blue=100; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); echo \"the pinned client:\"; for i in 1 2 3 4 5; do curl -sk -c jar -b jar https://$host/; done | sort | uniq -c; oc get route shop -o jsonpath='{.spec.to.name} {.spec.alternateBackends}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/shop backends updated\nthe pinned client:\n      5 version blue\nweb-blue \n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/shop backends updated\nthe pinned client:\n      5 version blue\nweb-blue \n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deployment web-green --replicas=3; oc rollout status deployment/web-green --timeout=180s; oc set route-backends shop web-blue=50 web-green=50; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); for i in $(seq 1 60); do curl -sk https://$host/; done | sort | uniq -c; oc get pods -l app=web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web-green scaled\nWaiting for deployment \"web-green\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"web-green\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"web-green\" successfully rolled out\nroute.route.openshift.io/shop backends updated\n     31 version blue\n     29 version green\nNAME                         READY   STATUS    RESTARTS   AGE\nweb-blue-fd88b9f5b-tldv8     1/1     Running   0          4m34s\nweb-green-78cf8ccc48-2nm5p   1/1     Running   0          4m34s\nweb-green-78cf8ccc48-48hmb   1/1     Running   0          42s\nweb-green-78cf8ccc48-pjx2x   1/1     Running   0          42s\n",
+   "stderr": "",
+   "combined": "deployment.apps/web-green scaled\nWaiting for deployment \"web-green\" rollout to finish: 1 of 3 updated replicas are available...\nWaiting for deployment \"web-green\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"web-green\" successfully rolled out\nroute.route.openshift.io/shop backends updated\n     31 version blue\n     29 version green\nNAME                         READY   STATUS    RESTARTS   AGE\nweb-blue-fd88b9f5b-tldv8     1/1     Running   0          4m34s\nweb-green-78cf8ccc48-2nm5p   1/1     Running   0          4m34s\nweb-green-78cf8ccc48-48hmb   1/1     Running   0          42s\nweb-green-78cf8ccc48-pjx2x   1/1     Running   0          42s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc scale deployment web-green --replicas=0; sleep 5; oc set route-backends shop web-green=100; sleep 10; host=$(oc get route shop -o jsonpath='{.spec.host}'); curl -sk -o /dev/null -w 'HTTP %{http_code}\\n' https://$host/; oc get endpointslices -l kubernetes.io/service-name=web-green; oc set route-backends shop web-blue=100",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web-green scaled\nroute.route.openshift.io/shop backends updated\nHTTP 503\nNAME              ADDRESSTYPE   PORTS     ENDPOINTS   AGE\nweb-green-sjfxf   IPv4          <unset>   <unset>     4m55s\nroute.route.openshift.io/shop backends updated\n",
+   "stderr": "",
+   "combined": "deployment.apps/web-green scaled\nroute.route.openshift.io/shop backends updated\nHTTP 503\nNAME              ADDRESSTYPE   PORTS     ENDPOINTS   AGE\nweb-green-sjfxf   IPv4          <unset>   <unset>     4m55s\nroute.route.openshift.io/shop backends updated\n",
+   "ok": true
+  }
+ ],
+ "seconds": 309,
+ "ok": true,
+ "problems": []
+}

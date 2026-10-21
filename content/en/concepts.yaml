@@ -1,0 +1,93 @@
+# Concept graph: id, title, module, related concept ids. `module` is where the concept is mainly taught (the
+# knowledge map files it under that module's territory); `related` links concepts that build on each other,
+# across territories too. Titles are short labels in plain words; lessons define the terms at first use.
+- {id: linux.process, title: "Processes, PID 1 and signals", module: lx2-system, related: [k8s.pod-lifecycle, container.debugging]}
+- {id: linux.namespaces, title: "Linux namespaces: what a process can see", module: f1-containers, related: [linux.process, linux.networking]}
+- {id: linux.cgroups, title: "cgroups: limits the kernel enforces", module: f1-containers, related: [k8s.requests-limits, k8s.qos]}
+- {id: container.images, title: "Images, layers, tags and digests", module: f1-containers, related: [container.registries, sec.supplychain]}
+- {id: container.registries, title: "Registries and pulls", module: ct1-podman, related: [ocp.imagestreams]}
+- {id: container.security, title: "Users, capabilities and security contexts", module: ct1-podman, related: [sec.scc]}
+- {id: container.debugging, title: "Why a container will not start", module: ct1-podman, related: [k8s.pod-lifecycle, obs.signals]}
+- {id: k8s.architecture, title: "The parts of a cluster: control plane and nodes", module: f2-kubernetes, related: [k8s.controllers, k8s.scheduler, ocp.clusteroperators]}
+- {id: k8s.etcd, title: "etcd and the API server", module: f2-kubernetes, related: [k8s.architecture, ent.etcd-backup]}
+- {id: k8s.controllers, title: "Desired state, controllers and reconciliation", module: f2-kubernetes, related: [k8s.deployment, k8s.crd-operator, gitops.drift, linux.systemd]}
+- {id: k8s.deployment, title: "Deployments", module: a2-apps, related: [k8s.replicaset, k8s.rollout]}
+- {id: k8s.replicaset, title: "ReplicaSets", module: f2-kubernetes, related: [k8s.deployment, k8s.ownerrefs]}
+- {id: k8s.ownerrefs, title: "Owner references and garbage collection", module: f2-kubernetes, related: [k8s.controllers]}
+- {id: k8s.rollout, title: "Rollouts and rollbacks", module: a6-images-updates, related: [deploy.strategies, k8s.probes]}
+- {id: k8s.workloads, title: "Workload kinds: Jobs, CronJobs, DaemonSets, StatefulSets", module: f2-kubernetes, related: [k8s.deployment, storage.pvc]}
+- {id: k8s.labels, title: "Labels, selectors and annotations", module: f2-kubernetes, related: [net.services, k8s.replicaset]}
+- {id: k8s.requests-limits, title: "Requests and limits", module: a2-apps, related: [linux.cgroups, k8s.scheduler, k8s.qos]}
+- {id: k8s.qos, title: "QoS classes and eviction", module: a2-apps, related: [k8s.requests-limits]}
+- {id: k8s.quota, title: "ResourceQuotas and LimitRanges", module: b5-governance, related: [k8s.requests-limits, ocp.projects]}
+- {id: k8s.scheduler, title: "How the scheduler chooses a node", module: p1-scheduling, related: [k8s.affinity, k8s.requests-limits]}
+- {id: k8s.affinity, title: "Affinity, taints, tolerations, topology spread", module: p1-scheduling, related: [k8s.scheduler, ent.ha]}
+- {id: k8s.pod-lifecycle, title: "Pods: lifecycle, restarts and termination", module: a2-apps, related: [k8s.probes, linux.process]}
+- {id: k8s.probes, title: "Readiness, liveness and startup probes", module: a2-apps, related: [k8s.pod-lifecycle, net.endpointslices]}
+- {id: k8s.crd-operator, title: "Custom resources and the operator pattern", module: f3-openshift, related: [k8s.controllers, ocp.olm]}
+- {id: ocp.clusteroperators, title: "Cluster operators and platform health", module: f3-openshift, related: [k8s.architecture, ocp.upgrades]}
+- {id: ocp.mco, title: "Node configuration: MachineConfigs and pools", module: b6-operators-maintenance, related: [ocp.upgrades]}
+- {id: ocp.projects, title: "Namespaces, projects and self-provisioning", module: f3-openshift, related: [sec.rbac, k8s.quota]}
+- {id: ocp.imagestreams, title: "ImageStreams and builds", module: a6-images-updates, related: [container.images]}
+- {id: ocp.olm, title: "Operator Lifecycle Manager", module: b6-operators-maintenance, related: [k8s.crd-operator]}
+- {id: ocp.upgrades, title: "Cluster updates", module: b6-operators-maintenance, related: [ocp.clusteroperators, ocp.mco, ent.day2]}
+- {id: ocp.auth, title: "Authentication, OAuth and identity providers", module: b2-authn-authz, related: [sec.rbac]}
+- {id: net.services, title: "Services: a stable address for changing pods", module: a2-apps, related: [net.endpointslices, k8s.labels]}
+- {id: net.endpointslices, title: "EndpointSlices and readiness", module: a2-apps, related: [net.services, k8s.probes]}
+- {id: net.dns, title: "Cluster DNS and service discovery", module: a5-network, related: [net.services]}
+- {id: net.routes, title: "Routes, the router and TLS termination", module: a5-network, related: [net.services, sec.certs]}
+- {id: net.policy, title: "NetworkPolicies", module: b4-network-security, related: [net.ovn, sec.segmentation]}
+- {id: net.ovn, title: "OVN-Kubernetes, the cluster network", module: b4-network-security, related: [net.policy]}
+- {id: storage.pvc, title: "PersistentVolumes and claims", module: a4-config-storage, related: [storage.class]}
+- {id: storage.class, title: "StorageClasses, CSI and binding modes", module: a4-config-storage, related: [storage.pvc]}
+- {id: storage.dr, title: "Stateful workloads and disaster recovery", module: p4-enterprise, related: [ent.etcd-backup, k8s.workloads]}
+- {id: sec.rbac, title: "RBAC and effective permissions", module: b2-authn-authz, related: [ocp.projects, sec.serviceaccounts]}
+- {id: sec.scc, title: "Security Context Constraints", module: b3-workload-security, related: [container.security, sec.rbac, sec.serviceaccounts]}
+- {id: sec.serviceaccounts, title: "ServiceAccounts and tokens", module: b3-workload-security, related: [sec.rbac]}
+- {id: sec.secrets, title: "Secrets and encryption", module: a4-config-storage, related: [sec.serviceaccounts]}
+- {id: sec.supplychain, title: "Image supply chain and trust", module: p3-delivery, related: [container.images, ent.multicluster]}
+- {id: sec.segmentation, title: "Network segmentation and least privilege", module: b4-network-security, related: [net.policy]}
+- {id: sec.certs, title: "TLS, certificates and trust", module: a5-network, related: [net.routes]}
+- {id: sec.audit, title: "Audit logs and compliance", module: p4-enterprise, related: [sec.rbac]}
+- {id: deploy.declarative, title: "Declarative management: apply and diff", module: b1-declarative, related: [gitops.drift, k8s.controllers]}
+- {id: deploy.packaging, title: "Kustomize and Helm", module: b1-declarative, related: [deploy.declarative]}
+- {id: deploy.strategies, title: "Deployment strategies", module: a6-images-updates, related: [k8s.rollout]}
+- {id: gitops.argocd, title: "Argo CD and the GitOps operator", module: p6-gitops, related: [gitops.drift, deploy.declarative]}
+- {id: gitops.drift, title: "Drift, reconciliation and sync", module: b1-declarative, related: [gitops.argocd, k8s.controllers]}
+- {id: iac, title: "Ansible, Terraform and infrastructure as code", module: p3-delivery, related: [gitops.argocd]}
+- {id: change.control, title: "Change control in regulated environments", module: a6-images-updates, related: [ent.governance]}
+- {id: obs.signals, title: "Events, logs, metrics, traces", module: a3-troubleshoot, related: [obs.prometheus]}
+- {id: obs.prometheus, title: "Prometheus, alerting and alert fatigue", module: p2-reliability, related: [obs.slo]}
+- {id: obs.slo, title: "SLIs, SLOs and error budgets", module: p2-reliability, related: [obs.incident]}
+- {id: obs.incident, title: "Incident response and postmortems", module: p2-reliability, related: [obs.slo, change.control]}
+- {id: ent.ha, title: "High availability and failure domains", module: p4-enterprise, related: [k8s.affinity, k8s.etcd]}
+- {id: ent.etcd-backup, title: "etcd backup and cluster recovery", module: p4-enterprise, related: [k8s.etcd, storage.dr]}
+- {id: ent.day2, title: "Day-2 operations and maintenance", module: p4-enterprise, related: [ocp.upgrades]}
+- {id: ent.multicluster, title: "ACM, ACS, Quay and multi-cluster", module: p4-enterprise, related: [sec.supplychain]}
+- {id: ent.governance, title: "Platform governance and team roles", module: p4-enterprise, related: [change.control, ent.teaching]}
+- {id: ent.teaching, title: "Runbooks, documentation and knowledge transfer", module: p4-enterprise, related: [ent.governance]}
+- {id: linux.selinux, title: "SELinux, MCS categories and seccomp", module: b3-workload-security, related: [container.security, sec.scc, linux.namespaces]}
+- {id: ocp.console, title: "Web console and CLI tools", module: a1-cli, related: [ocp.clusteroperators, sec.rbac]}
+- {id: ocp.templates, title: "Templates (template.openshift.io)", module: a2-apps, related: [deploy.packaging, k8s.deployment]}
+- {id: ocp.users-identities, title: "Users, identities and the HTPasswd provider", module: b2-authn-authz, related: [ocp.auth, sec.rbac]}
+- {id: net.ingresscontroller, title: "IngressControllers, the DNS operator and platform certificates", module: b4-network-security, related: [net.routes, net.dns, sec.certs]}
+- {id: ocp.install, title: "Installation methods and topologies", module: p0-install, related: [ent.ha, ocp.clusteroperators]}
+- {id: ocp.machines, title: "Machines, MachineSets and node maintenance", module: p1-scheduling, related: [ocp.mco, k8s.scheduler]}
+- {id: ent.capacity, title: "Capacity planning, overcommit and autoscaling", module: p1-scheduling, related: [k8s.requests-limits, k8s.quota, ocp.machines]}
+- {id: obs.monitoring-stack, title: "Platform and user-workload monitoring", module: p2-reliability, related: [obs.prometheus, obs.slo]}
+- {id: obs.logging, title: "Cluster logging and log forwarding", module: p2-reliability, related: [obs.signals, sec.audit]}
+- {id: cicd.pipelines, title: "Pipelines (Tekton) and builds on the cluster", module: p3-delivery, related: [ocp.imagestreams, gitops.argocd]}
+- {id: sec.signing, title: "Image signing and verification (Sigstore)", module: p3-delivery, related: [sec.supplychain, container.images, cicd.pipelines]}
+- {id: sec.policy, title: "Policy as code and admission control", module: p4-enterprise, related: [ent.multicluster, sec.scc, ent.governance]}
+- {id: linux.shell, title: "The shell: expansion, quoting, redirection and exit codes", module: lx1-shell, related: [linux.process, container.debugging]}
+- {id: linux.files, title: "Files, directories, links and text tools", module: lx1-shell, related: [linux.shell, obs.signals]}
+- {id: linux.permissions, title: "Users, groups, permissions and sudo", module: lx1-shell, related: [container.security, sec.scc, ocp.users-identities]}
+- {id: linux.ssh, title: "SSH keys and secure remote access", module: lx1-shell, related: [linux.permissions, linux.selinux, ocp.auth]}
+- {id: linux.systemd, title: "Services with systemd, and the journal", module: lx2-system, related: [linux.process, obs.logging, k8s.architecture]}
+- {id: linux.networking, title: "Addresses, routes, ports and names", module: lx2-system, related: [net.dns, net.services, net.policy]}
+- {id: linux.storage, title: "Disks, filesystems, mounts and free space", module: lx2-system, related: [storage.pvc, container.images, container.podman]}
+- {id: container.podman, title: "Running containers and pods with Podman", module: f1-containers, related: [linux.namespaces, container.security]}
+- {id: container.build, title: "Building images with a Containerfile", module: f1-containers, related: [container.images, container.security]}
+- {id: linux.scripting, title: "Shell scripts: arguments, tests and exit status", module: lx3-admin, related: [linux.shell, container.debugging, k8s.workloads]}
+- {id: linux.packages, title: "Software packages and archives", module: lx3-admin, related: [linux.files, container.build, container.images]}
+- {id: linux.scheduling, title: "Scheduled jobs: cron and systemd timers", module: lx3-admin, related: [linux.systemd, k8s.workloads]}

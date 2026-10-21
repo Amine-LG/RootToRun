@@ -1,0 +1,156 @@
+{
+ "lab": "lesson.k.kubectl-to-oc",
+ "kind": "lesson",
+ "lab_hash": "cb3f43088cfde6d5",
+ "recorded_at": "2026-10-20T17:00:46+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-k-kubectl-to-oc",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "kubectl create deployment web --image=registry.access.redhat.com/ubi9/httpd-24:latest >/dev/null; kubectl rollout status deployment/web --timeout=180s >/dev/null; kubectl get pods",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-6d54d8ffd4-nf22d   1/1     Running   0          8s\n",
+   "stderr": "",
+   "combined": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-6d54d8ffd4-nf22d   1/1     Running   0          8s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-6d54d8ffd4-nf22d   1/1     Running   0          8s\n",
+   "stderr": "",
+   "combined": "NAME                   READY   STATUS    RESTARTS   AGE\nweb-6d54d8ffd4-nf22d   1/1     Running   0          8s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl apply -f broken-field.yaml --dry-run=server",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (BadRequest): error when creating \"broken-field.yaml\": Deployment in version \"v1\" cannot be handled as a Deployment: strict decoding error: unknown field \"spec.replica\"\n",
+   "combined": "Error from server (BadRequest): error when creating \"broken-field.yaml\": Deployment in version \"v1\" cannot be handled as a Deployment: strict decoding error: unknown field \"spec.replica\"\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f broken-field.yaml --dry-run=server; oc apply -f broken-field.yaml --dry-run=server -o jsonpath='{.spec.replicas}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/broken created (server dry run)\n1\n",
+   "stderr": "",
+   "combined": "deployment.apps/broken created (server dry run)\n1\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl auth whoami; oc whoami",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        72f89f30-0f2c-4d9a-b634-4cea13e6e197\nGroups                                     [system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\ndeveloper\n",
+   "stderr": "",
+   "combined": "ATTRIBUTE                                  VALUE\nUsername                                   developer\nUID                                        72f89f30-0f2c-4d9a-b634-4cea13e6e197\nGroups                                     [system:authenticated:oauth system:authenticated]\nExtra: scopes.authorization.openshift.io   [user:full]\ndeveloper\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl create namespace academy-bridge-demo",
+   "as": "host",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "Error from server (Forbidden): namespaces is forbidden: User \"developer\" cannot create resource \"namespaces\" in API group \"\" at the cluster scope\n",
+   "combined": "Error from server (Forbidden): namespaces is forbidden: User \"developer\" cannot create resource \"namespaces\" in API group \"\" at the cluster scope\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc new-project academy-bridge-demo --skip-config-write",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Project \"academy-bridge-demo\" created on server \"https://api.crc.testing:6443\".\n\nTo switch to this project and start adding applications, use:\n\n    oc project academy-bridge-demo\n",
+   "stderr": "",
+   "combined": "Project \"academy-bridge-demo\" created on server \"https://api.crc.testing:6443\".\n\nTo switch to this project and start adding applications, use:\n\n    oc project academy-bridge-demo\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl expose deployment web --port=8080 >/dev/null; kubectl create ingress web --rule='web-bridge.apps-crc.testing/*=web:8080'; sleep 5; oc get routes",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "ingress.networking.k8s.io/web created\nNAME        HOST/PORT                     PATH   SERVICES   PORT    TERMINATION   WILDCARD\nweb-pnwlp   web-bridge.apps-crc.testing   /      web        <all>                 None\n",
+   "stderr": "",
+   "combined": "ingress.networking.k8s.io/web created\nNAME        HOST/PORT                     PATH   SERVICES   PORT    TERMINATION   WILDCARD\nweb-pnwlp   web-bridge.apps-crc.testing   /      web        <all>                 None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc expose service web; oc get route web",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "route.route.openshift.io/web exposed\nNAME   HOST/PORT                                             PATH   SERVICES   PORT   TERMINATION   WILDCARD\nweb    web-academy-lesson-k-kubectl-to-oc.apps-crc.testing          web        8080                 None\n",
+   "stderr": "",
+   "combined": "route.route.openshift.io/web exposed\nNAME   HOST/PORT                                             PATH   SERVICES   PORT   TERMINATION   WILDCARD\nweb    web-academy-lesson-k-kubectl-to-oc.apps-crc.testing          web        8080                 None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "kubectl get routes",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME        HOST/PORT                                             PATH   SERVICES   PORT    TERMINATION   WILDCARD\nweb         web-academy-lesson-k-kubectl-to-oc.apps-crc.testing          web        8080                  None\nweb-pnwlp   web-bridge.apps-crc.testing                           /      web        <all>                 None\n",
+   "stderr": "",
+   "combined": "NAME        HOST/PORT                                             PATH   SERVICES   PORT    TERMINATION   WILDCARD\nweb         web-academy-lesson-k-kubectl-to-oc.apps-crc.testing          web        8080                  None\nweb-pnwlp   web-bridge.apps-crc.testing                           /      web        <all>                 None\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc delete project academy-bridge-demo --wait=false",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "project.project.openshift.io \"academy-bridge-demo\" deleted\n",
+   "stderr": "",
+   "combined": "project.project.openshift.io \"academy-bridge-demo\" deleted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 30,
+ "ok": true,
+ "problems": []
+}

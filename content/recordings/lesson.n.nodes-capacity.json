@@ -1,0 +1,302 @@
+{
+ "lab": "lesson.n.nodes-capacity",
+ "kind": "lesson",
+ "lab_hash": "7452086e1c368945",
+ "recorded_at": "2026-10-16T18:45:49+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-nodes-capacity",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc describe node crc | sed -n '/^Capacity:/,/^System Info:/p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Capacity:\n  cpu:                4\n  ephemeral-storage:  41352172Ki\n  hugepages-2Mi:      0\n  memory:             10691360Ki\n  pods:               250\nAllocatable:\n  cpu:                3800m\n  ephemeral-storage:  37743160053\n  hugepages-2Mi:      0\n  memory:             10230560Ki\n  pods:               250\nSystem Info:\n",
+   "stderr": "",
+   "combined": "Capacity:\n  cpu:                4\n  ephemeral-storage:  41352172Ki\n  hugepages-2Mi:      0\n  memory:             10691360Ki\n  pods:               250\nAllocatable:\n  cpu:                3800m\n  ephemeral-storage:  37743160053\n  hugepages-2Mi:      0\n  memory:             10230560Ki\n  pods:               250\nSystem Info:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe node crc | sed -n '/^Allocated resources:/,/^Events:/p'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Allocated resources:\n  (Total limits may be over 100 percent, i.e., overcommitted.)\n  Resource           Requests      Limits\n  --------           --------      ------\n  cpu                2282m (60%)   10m (0%)\n  memory             9433Mi (94%)  0 (0%)\n  ephemeral-storage  0 (0%)        0 (0%)\n  hugepages-2Mi      0 (0%)        0 (0%)\nEvents:\n",
+   "stderr": "",
+   "combined": "Allocated resources:\n  (Total limits may be over 100 percent, i.e., overcommitted.)\n  Resource           Requests      Limits\n  --------           --------      ------\n  cpu                2282m (60%)   10m (0%)\n  memory             9433Mi (94%)  0 (0%)\n  ephemeral-storage  0 (0%)        0 (0%)\n  hugepages-2Mi      0 (0%)        0 (0%)\nEvents:\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm top nodes",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: Metrics API not available\n",
+   "combined": "error: Metrics API not available\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get machines,machinesets -n openshift-machine-api",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "",
+   "stderr": "No resources found in openshift-machine-api namespace.\n",
+   "combined": "No resources found in openshift-machine-api namespace.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get infrastructure cluster -o jsonpath='{.status.platform}{\" \"}{.status.controlPlaneTopology}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "None SingleReplica\n",
+   "stderr": "",
+   "combined": "None SingleReplica\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get node crc -o jsonpath='{range .status.conditions[*]}{.type}{\"=\"}{.status}{\"\\n\"}{end}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "MemoryPressure=False\nDiskPressure=False\nPIDPressure=False\nReady=True\n",
+   "stderr": "",
+   "combined": "MemoryPressure=False\nDiskPressure=False\nPIDPressure=False\nReady=True\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm node-logs crc -u crio --tail=3",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "Oct 16 18:18:42.654277 crc crio[4374]: time=\"2026-10-16T18:18:42.654282031Z\" level=info msg=\"Stopped pod sandbox (already stopped): 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=4091b2a9-39ff-4f81-a59e-8dcd675a37d5 name=/runtime.v1.RuntimeService/StopPodSandbox\nOct 16 18:18:42.657202 crc crio[4374]: time=\"2026-10-16T18:18:42.65621543Z\" level=info msg=\"Removing pod sandbox: 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=3ce400fd-75fc-484d-ba0b-ba3427d35f17 name=/runtime.v1.RuntimeService/RemovePodSandbox\nOct 16 18:18:42.677324 crc crio[4374]: time=\"2026-10-16T18:18:42.675388447Z\" level=info msg=\"Removed pod sandbox: 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=3ce400fd-75fc-484d-ba0b-ba3427d35f17 name=/runtime.v1.RuntimeService/RemovePodSandbox\n",
+   "stderr": "",
+   "combined": "Oct 16 18:18:42.654277 crc crio[4374]: time=\"2026-10-16T18:18:42.654282031Z\" level=info msg=\"Stopped pod sandbox (already stopped): 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=4091b2a9-39ff-4f81-a59e-8dcd675a37d5 name=/runtime.v1.RuntimeService/StopPodSandbox\nOct 16 18:18:42.657202 crc crio[4374]: time=\"2026-10-16T18:18:42.65621543Z\" level=info msg=\"Removing pod sandbox: 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=3ce400fd-75fc-484d-ba0b-ba3427d35f17 name=/runtime.v1.RuntimeService/RemovePodSandbox\nOct 16 18:18:42.677324 crc crio[4374]: time=\"2026-10-16T18:18:42.675388447Z\" level=info msg=\"Removed pod sandbox: 33302b9edaa6dd355afe28ab99114468f54afe4a422bedbcd509e4df457ba38a\" id=3ce400fd-75fc-484d-ba0b-ba3427d35f17 name=/runtime.v1.RuntimeService/RemovePodSandbox\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f web.yaml && oc rollout status deploy/web --timeout=120s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/web created\npoddisruptionbudget.policy/web created\nWaiting for deployment \"web\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "stderr": "",
+   "combined": "deployment.apps/web created\npoddisruptionbudget.policy/web created\nWaiting for deployment \"web\" rollout to finish: 0 out of 1 new replicas have been updated...\nWaiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...\ndeployment \"web\" successfully rolled out\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pdb web",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nweb    1               N/A               0                     2s\n",
+   "stderr": "",
+   "combined": "NAME   MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE\nweb    1               N/A               0                     2s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm cordon crc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc cordoned\n",
+   "stderr": "",
+   "combined": "node/crc cordoned\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get node crc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS                     ROLES                         AGE    VERSION\ncrc    Ready,SchedulingDisabled   control-plane,master,worker   200d   v1.34.5\n",
+   "stderr": "",
+   "combined": "NAME   STATUS                     ROLES                         AGE    VERSION\ncrc    Ready,SchedulingDisabled   control-plane,master,worker   200d   v1.34.5\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc apply -f pod-late.yaml && oc wait pod/late --for=condition=PodScheduled=false --timeout=60s",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/late created\npod/late condition met\n",
+   "stderr": "",
+   "combined": "pod/late created\npod/late condition met\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get events --field-selector reason=FailedScheduling,involvedObject.name=late",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "LAST SEEN   TYPE      REASON             OBJECT     MESSAGE\n0s          Warning   FailedScheduling   pod/late   0/1 nodes are available: 1 node(s) were unschedulable. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "stderr": "",
+   "combined": "LAST SEEN   TYPE      REASON             OBJECT     MESSAGE\n0s          Warning   FailedScheduling   pod/late   0/1 nodes are available: 1 node(s) were unschedulable. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get pods -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                  READY   STATUS    RESTARTS   AGE   IP             NODE     NOMINATED NODE   READINESS GATES\nlate                  0/1     Pending   0          0s    <none>         <none>   <none>           <none>\nweb-d68d7ccdc-l6xxz   1/1     Running   0          3s    10.217.0.235   crc      <none>           <none>\n",
+   "stderr": "",
+   "combined": "NAME                  READY   STATUS    RESTARTS   AGE   IP             NODE     NOMINATED NODE   READINESS GATES\nlate                  0/1     Pending   0          0s    <none>         <none>   <none>           <none>\nweb-d68d7ccdc-l6xxz   1/1     Running   0          3s    10.217.0.235   crc      <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm drain crc --pod-selector=academy-experiment=X-NODE-02 --ignore-daemonsets --dry-run=server --timeout=20s",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "node/crc already cordoned (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\n",
+   "stderr": "error when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nThere are pending pods in node \"crc\" when an error occurred: error when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s\npod/web-d68d7ccdc-l6xxz\nerror: unable to drain node \"crc\" due to error: error when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s, continuing command...\nThere are pending nodes to be drained:\n crc\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s\n",
+   "combined": "node/crc already cordoned (server dry run)\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.\nevicting pod academy-lesson-n-nodes-capacity/web-d68d7ccdc-l6xxz (server dry run)\nThere are pending pods in node \"crc\" when an error occurred: error when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s\npod/web-d68d7ccdc-l6xxz\nerror: unable to drain node \"crc\" due to error: error when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s, continuing command...\nThere are pending nodes to be drained:\n crc\nerror when evicting pods/\"web-d68d7ccdc-l6xxz\" -n \"academy-lesson-n-nodes-capacity\": global timeout reached: 20s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc adm uncordon crc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "node/crc uncordoned\n",
+   "stderr": "",
+   "combined": "node/crc uncordoned\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc wait pod/late --for=condition=Ready --timeout=120s && oc get pods -o wide",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "pod/late condition met\nNAME                  READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nlate                  1/1     Running   0          22s   10.217.0.236   crc    <none>           <none>\nweb-d68d7ccdc-l6xxz   1/1     Running   0          25s   10.217.0.235   crc    <none>           <none>\n",
+   "stderr": "",
+   "combined": "pod/late condition met\nNAME                  READY   STATUS    RESTARTS   AGE   IP             NODE   NOMINATED NODE   READINESS GATES\nlate                  1/1     Running   0          22s   10.217.0.236   crc    <none>           <none>\nweb-d68d7ccdc-l6xxz   1/1     Running   0          25s   10.217.0.235   crc    <none>           <none>\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get node crc",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "stderr": "",
+   "combined": "NAME   STATUS   ROLES                         AGE    VERSION\ncrc    Ready    control-plane,master,worker   200d   v1.34.5\n",
+   "ok": true
+  }
+ ],
+ "seconds": 106,
+ "ok": true,
+ "problems": [],
+ "experiment": {
+  "id": "X-NODE-02",
+  "restored": true,
+  "rollback": [
+   {
+    "cmd": "oc adm uncordon crc",
+    "code": 0
+   }
+  ],
+  "verify": [
+   {
+    "cmd": "oc wait node/crc --for=condition=Ready=True --timeout=60s",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "u=$(oc get node crc -o jsonpath='{.spec.unschedulable}') || exit 1\ntest \"$u\" != true",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "for i in $(seq 1 24); do\n  pending=$(oc get pods -A --field-selector=status.phase=Pending --no-headers -o custom-columns=NS:.metadata.namespace) || exit 1\n  grep -q '^openshift-' <<<\"$pending\" || exit 0\n  sleep 5\ndone\noc get pods -A --field-selector=status.phase=Pending\nexit 1",
+    "code": 0,
+    "ok": true
+   },
+   {
+    "cmd": "oc wait co --all --for=condition=Degraded=False --timeout=120s",
+    "code": 0,
+    "ok": true
+   }
+  ],
+  "snapshot": [
+   {
+    "cmd": "oc get node crc -o jsonpath='{.spec}'",
+    "same": true
+   },
+   {
+    "cmd": "oc get node crc -o jsonpath='{.metadata.labels}'",
+    "same": true
+   }
+  ]
+ }
+}

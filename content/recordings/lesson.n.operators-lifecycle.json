@@ -1,0 +1,143 @@
+{
+ "lab": "lesson.n.operators-lifecycle",
+ "kind": "lesson",
+ "lab_hash": "f017dbdddfa7dc57",
+ "recorded_at": "2026-10-20T15:05:01+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-n-operators-lifecycle",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8",
+  "admin": "kubeadmin",
+  "api": "https://api.crc.testing:6443"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create subscriptions.operators.coreos.com",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\n",
+   "stderr": "",
+   "combined": "yes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create operatorgroups.operators.coreos.com",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "combined": "no\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i patch installplans.operators.coreos.com",
+   "as": "developer",
+   "identity": "developer",
+   "expect": "fail",
+   "run": null,
+   "code": 1,
+   "stdout": "no\n",
+   "stderr": "",
+   "combined": "no\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc auth can-i create operatorgroups.operators.coreos.com -n openshift-operators; oc auth can-i patch installplans.operators.coreos.com -n openshift-operators",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "yes\nyes\n",
+   "stderr": "",
+   "combined": "yes\nyes\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest openshift-cert-manager-operator -n openshift-marketplace -o jsonpath='{.status.channels[?(@.name==\"stable-v1\")].currentCSVDesc.annotations.operatorframework\\.io/suggested-namespace}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cert-manager-operator\n",
+   "stderr": "",
+   "combined": "cert-manager-operator\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest openshift-cert-manager-operator -n openshift-marketplace -o jsonpath='{range .status.channels[?(@.name==\"stable-v1\")].entries[*]}{.name}{\"\\n\"}{end}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cert-manager-operator.v1.20.1\ncert-manager-operator.v1.20.0\ncert-manager-operator.v1.19.0\ncert-manager-operator.v1.18.1\ncert-manager-operator.v1.18.0\n",
+   "stderr": "",
+   "combined": "cert-manager-operator.v1.20.1\ncert-manager-operator.v1.20.0\ncert-manager-operator.v1.19.0\ncert-manager-operator.v1.18.1\ncert-manager-operator.v1.18.0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest openshift-cert-manager-operator -n openshift-marketplace -o jsonpath='{range .status.channels[?(@.name==\"stable-v1.19\")].entries[*]}{.name}{\"\\n\"}{end}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "cert-manager-operator.v1.19.2\ncert-manager-operator.v1.19.1\ncert-manager-operator.v1.19.0\ncert-manager-operator.v1.18.1\ncert-manager-operator.v1.18.0\n",
+   "stderr": "",
+   "combined": "cert-manager-operator.v1.19.2\ncert-manager-operator.v1.19.1\ncert-manager-operator.v1.19.0\ncert-manager-operator.v1.18.1\ncert-manager-operator.v1.18.0\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc explain installplan.spec",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "GROUP:      operators.coreos.com\nKIND:       InstallPlan\nVERSION:    v1alpha1\n\nFIELD: spec <Object>\n\n\nDESCRIPTION:\n    InstallPlanSpec defines a set of Application resources to be installed\n    \nFIELDS:\n  approval\t<string> -required-\n    Approval is the user approval policy for an InstallPlan.\n    It must be one of \"Automatic\" or \"Manual\".\n\n  approved\t<boolean> -required-\n    <no description>\n\n  clusterServiceVersionNames\t<[]string> -required-\n    <no description>\n\n  generation\t<integer>\n    <no description>\n\n  source\t<string>\n    <no description>\n\n  sourceNamespace\t<string>\n    <no description>\n\n\n",
+   "stderr": "",
+   "combined": "GROUP:      operators.coreos.com\nKIND:       InstallPlan\nVERSION:    v1alpha1\n\nFIELD: spec <Object>\n\n\nDESCRIPTION:\n    InstallPlanSpec defines a set of Application resources to be installed\n    \nFIELDS:\n  approval\t<string> -required-\n    Approval is the user approval policy for an InstallPlan.\n    It must be one of \"Automatic\" or \"Manual\".\n\n  approved\t<boolean> -required-\n    <no description>\n\n  clusterServiceVersionNames\t<[]string> -required-\n    <no description>\n\n  generation\t<integer>\n    <no description>\n\n  source\t<string>\n    <no description>\n\n  sourceNamespace\t<string>\n    <no description>\n\n\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get packagemanifest openshift-cert-manager-operator -n openshift-marketplace -o jsonpath='{.status.channels[?(@.name==\"stable-v1\")].currentCSVDesc.annotations.olm\\.skipRange}{\"\\n\"}'",
+   "as": "admin",
+   "identity": "kubeadmin",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": ">=1.20.0 <1.20.1\n",
+   "stderr": "",
+   "combined": ">=1.20.0 <1.20.1\n",
+   "ok": true
+  }
+ ],
+ "seconds": 21,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,168 @@
+{
+ "lab": "lesson.o1.troubleshooting",
+ "kind": "lesson",
+ "lab_hash": "a1b034c6c77af5ce",
+ "recorded_at": "2026-10-16T16:23:44+00:00",
+ "cluster": {
+  "kubernetes": "v1.34.5",
+  "kubectl": "v1.34.1",
+  "kubectl_note": "the Kubernetes client built into oc, invoked as kubectl",
+  "namespace": "academy-lesson-o1-troubleshooting",
+  "distribution": "OpenShift Local",
+  "oc": "4.21.8"
+ },
+ "host": {
+  "podman": "5.8.2",
+  "skopeo": "3b5b519133681db9c74c7457966dec0de32e8c62",
+  "buildah": "1.2.1)"
+ },
+ "entries": [
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment broken-image --image=registry.access.redhat.com/ubi9/httpd-24:no-such-tag",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/broken-image created\n",
+   "stderr": "",
+   "combined": "deployment.apps/broken-image created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 30; oc get pods -l app=broken-image",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                           READY   STATUS         RESTARTS   AGE\nbroken-image-b9994b696-wj6xr   0/1     ErrImagePull   0          31s\n",
+   "stderr": "",
+   "combined": "NAME                           READY   STATUS         RESTARTS   AGE\nbroken-image-b9994b696-wj6xr   0/1     ErrImagePull   0          31s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc describe pod -l app=broken-image | tail -n 9",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "  Type     Reason          Age                From               Message\n  ----     ------          ----               ----               -------\n  Normal   Scheduled       30s                default-scheduler  Successfully assigned academy-lesson-o1-troubleshooting/broken-image-b9994b696-wj6xr to crc\n  Normal   AddedInterface  30s                multus             Add eth0 [10.217.0.129/23] from ovn-kubernetes\n  Normal   Pulling         17s (x2 over 30s)  kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\"\n  Warning  Failed          15s (x2 over 28s)  kubelet            Failed to pull image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\": unable to pull image or OCI artifact: pull image err: initializing source docker://registry.access.redhat.com/ubi9/httpd-24:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/httpd-24: manifest unknown; artifact err: get manifest: build image source: reading manifest no-such-tag in registry.access.redhat.com/ubi9/httpd-24: manifest unknown\n  Warning  Failed          15s (x2 over 28s)  kubelet            Error: ErrImagePull\n  Normal   BackOff         4s (x2 over 28s)   kubelet            Back-off pulling image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\"\n  Warning  Failed          4s (x2 over 28s)   kubelet            Error: ImagePullBackOff\n",
+   "stderr": "",
+   "combined": "  Type     Reason          Age                From               Message\n  ----     ------          ----               ----               -------\n  Normal   Scheduled       30s                default-scheduler  Successfully assigned academy-lesson-o1-troubleshooting/broken-image-b9994b696-wj6xr to crc\n  Normal   AddedInterface  30s                multus             Add eth0 [10.217.0.129/23] from ovn-kubernetes\n  Normal   Pulling         17s (x2 over 30s)  kubelet            Pulling image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\"\n  Warning  Failed          15s (x2 over 28s)  kubelet            Failed to pull image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\": unable to pull image or OCI artifact: pull image err: initializing source docker://registry.access.redhat.com/ubi9/httpd-24:no-such-tag: reading manifest no-such-tag in registry.access.redhat.com/ubi9/httpd-24: manifest unknown; artifact err: get manifest: build image source: reading manifest no-such-tag in registry.access.redhat.com/ubi9/httpd-24: manifest unknown\n  Warning  Failed          15s (x2 over 28s)  kubelet            Error: ErrImagePull\n  Normal   BackOff         4s (x2 over 28s)   kubelet            Back-off pulling image \"registry.access.redhat.com/ubi9/httpd-24:no-such-tag\"\n  Warning  Failed          4s (x2 over 28s)   kubelet            Error: ImagePullBackOff\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc set image deployment/broken-image httpd-24=registry.access.redhat.com/ubi9/httpd-24:latest; oc rollout status deployment/broken-image --timeout=180s; oc get pods -l app=broken-image",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/broken-image image updated\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"broken-image\" successfully rolled out\nNAME                            READY   STATUS        RESTARTS   AGE\nbroken-image-754fccb55c-4spsw   1/1     Running       0          2s\nbroken-image-b9994b696-wj6xr    0/1     Terminating   0          33s\n",
+   "stderr": "",
+   "combined": "deployment.apps/broken-image image updated\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\nWaiting for deployment \"broken-image\" rollout to finish: 1 old replicas are pending termination...\ndeployment \"broken-image\" successfully rolled out\nNAME                            READY   STATUS        RESTARTS   AGE\nbroken-image-754fccb55c-4spsw   1/1     Running       0          2s\nbroken-image-b9994b696-wj6xr    0/1     Terminating   0          33s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment crashy --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo starting; cat /etc/app/app.conf || exit 1; echo; echo configuration read, serving; sleep infinity'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/crashy created\n",
+   "stderr": "",
+   "combined": "deployment.apps/crashy created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 50; oc get pods -l app=crashy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                      READY   STATUS             RESTARTS      AGE\ncrashy-59dd6b4c5d-rt7rb   0/1     CrashLoopBackOff   2 (24s ago)   50s\n",
+   "stderr": "",
+   "combined": "NAME                      READY   STATUS             RESTARTS      AGE\ncrashy-59dd6b4c5d-rt7rb   0/1     CrashLoopBackOff   2 (24s ago)   50s\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc logs deploy/crashy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "starting\ncat: /etc/app/app.conf: No such file or directory\n",
+   "stderr": "",
+   "combined": "starting\ncat: /etc/app/app.conf: No such file or directory\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create configmap app-config --from-literal=app.conf='port=8080' >/dev/null; oc set volume deployment/crashy --add --type=configmap --configmap-name=app-config --mount-path=/etc/app >/dev/null; oc rollout status deployment/crashy --timeout=180s >/dev/null; oc get pods -l app=crashy; oc logs deploy/crashy",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                      READY   STATUS        RESTARTS   AGE\ncrashy-59dd6b4c5d-rt7rb   0/1     Terminating   3          55s\ncrashy-7778fb54f-fs8tc    1/1     Running       0          4s\nstarting\nport=8080\nconfiguration read, serving\n",
+   "stderr": "info: Generated volume name: volume-wdpbp\nFound 2 pods, using pod/crashy-7778fb54f-fs8tc\n",
+   "combined": "info: Generated volume name: volume-wdpbp\nNAME                      READY   STATUS        RESTARTS   AGE\ncrashy-59dd6b4c5d-rt7rb   0/1     Terminating   3          55s\ncrashy-7778fb54f-fs8tc    1/1     Running       0          4s\nFound 2 pods, using pod/crashy-7778fb54f-fs8tc\nstarting\nport=8080\nconfiguration read, serving\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment writer --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'id; echo started > /var/log/app.log; sleep 3600'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "deployment.apps/writer created\n",
+   "stderr": "",
+   "combined": "deployment.apps/writer created\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "sleep 30; oc get pods -l app=writer; oc logs deploy/writer",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "NAME                      READY   STATUS    RESTARTS   AGE\nwriter-66c76854d5-2b6hk   1/1     Running   0          31s\nuid=1001500000(1001500000) gid=0(root) groups=0(root),1001500000\nsh: line 1: /var/log/app.log: Permission denied\n",
+   "stderr": "",
+   "combined": "NAME                      READY   STATUS    RESTARTS   AGE\nwriter-66c76854d5-2b6hk   1/1     Running   0          31s\nuid=1001500000(1001500000) gid=0(root) groups=0(root),1001500000\nsh: line 1: /var/log/app.log: Permission denied\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc get project $(oc project -q) -o jsonpath='{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}{\"\\n\"}'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "1001500000/10000\n",
+   "stderr": "",
+   "combined": "1001500000/10000\n",
+   "ok": true
+  },
+  {
+   "step": "lesson",
+   "cmd": "oc create deployment writer-tmp --image=registry.access.redhat.com/ubi9/ubi-minimal:latest -- sh -c 'echo started > /tmp/app.log; sleep 3600' >/dev/null; oc rollout status deployment/writer-tmp --timeout=180s >/dev/null; oc exec deploy/writer-tmp -- sh -c 'ls -ld /var/log /tmp; cat /tmp/app.log'",
+   "as": "host",
+   "expect": "ok",
+   "run": null,
+   "code": 0,
+   "stdout": "drwxrwxrwt. 1 root root 21 Oct 16 16:22 /tmp\ndrwxr-xr-x. 2 root root 24 Oct 13 13:35 /var/log\nstarted\n",
+   "stderr": "",
+   "combined": "drwxrwxrwt. 1 root root 21 Oct 16 16:22 /tmp\ndrwxr-xr-x. 2 root root 24 Oct 13 13:35 /var/log\nstarted\n",
+   "ok": true
+  }
+ ],
+ "seconds": 171,
+ "ok": true,
+ "problems": []
+}

@@ -1,0 +1,201 @@
+id: lab.kustomize-helm
+title: "Kustomize overlays and a Helm release"
+summary: "Render and apply a base with a dev overlay, detect drift with oc diff, then install, upgrade, inspect and roll back a Helm release."
+module: b1-declarative
+mode: REAL_LAB
+minutes: 40
+level: 2
+supports: "Recorded on OpenShift 4.21.8 with oc 4.21.8 (built-in Kustomize v5.7.1) and a Helm 3 CLI (the recording does not show its exact version). Lab files are provided by the app and referenced as lab/<path>."
+concepts: [deploy.declarative, deploy.packaging, gitops.drift]
+prerequisites: [o2.kustomize-helm]
+namespace: academy-declarative
+objective: |
+  Produce Kubernetes YAML from reusable sources two ways (Kustomize patches, Helm templates), apply it, see what
+  changes before applying, and manage a release's history.
+background: |
+  The lab provides two directories you reference as `lab/…`: a Kustomize base (`kustomize/base`: a Deployment and a
+  Service) with an overlay (`kustomize/overlays/dev`: name prefix, a label, 2 replicas), and a small Helm chart
+  (`chart/`). Nothing here is templated by hand: Kustomize patches plain YAML, Helm renders Go templates with values.
+
+  **Where everything comes from.** The app writes the Kustomize base, the dev overlay and the Helm chart under `lab/`
+  (shown under the files below) before the first step; to work without the app, save them with the same paths.
+  Kustomize is built into `oc`; Helm runs on your machine (see the setup guide). The images come from
+  `registry.access.redhat.com`, which needs no login. Helm keeps its release history in Secrets in the project, so
+  Clean up, which deletes the project `academy-declarative`, removes the release too.
+files:
+  kustomize/base/kustomization.yaml: |
+    resources:
+      - deployment.yaml
+      - service.yaml
+    labels:
+      - pairs: {app.kubernetes.io/part-of: shop}
+        includeSelectors: false
+  kustomize/base/deployment.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: catalog
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: {app: catalog}
+      template:
+        metadata:
+          labels: {app: catalog}
+        spec:
+          containers:
+          - name: app
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "infinity"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+  kustomize/base/service.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: catalog
+    spec:
+      selector: {app: catalog}
+      ports: [{port: 8080, targetPort: 8080}]
+  kustomize/overlays/dev/kustomization.yaml: |
+    resources:
+      - ../../base
+    namePrefix: dev-
+    labels:
+      - pairs: {env: dev}
+        includeSelectors: false
+    patches:
+      - target: {kind: Deployment, name: catalog}
+        patch: |
+          - op: replace
+            path: /spec/replicas
+            value: 2
+  chart/Chart.yaml: |
+    apiVersion: v2
+    name: greeter
+    description: A tiny chart for the academy
+    version: 0.1.0
+    appVersion: "1.0"
+  chart/values.yaml: |
+    replicas: 1
+    message: hello from helm
+  chart/templates/deployment.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: {{ .Release.Name }}-greeter
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/managed-by: {{ .Release.Service }}}
+    spec:
+      replicas: {{ .Values.replicas }}
+      selector:
+        matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}}
+      template:
+        metadata:
+          labels: {app.kubernetes.io/instance: {{ .Release.Name }}}
+        spec:
+          containers:
+          - name: greeter
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command:
+            - sh
+            - -c
+            - echo {{ .Values.message | quote }}; sleep infinity
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+steps:
+  - id: render
+    title: "Render the overlay"
+    do: "Ask Kustomize what YAML the dev overlay produces, without applying anything."
+    commands:
+      - {cmd: "oc kustomize lab/kustomize/overlays/dev", meaning: "print the rendered YAML"}
+    predict:
+      prompt: "The overlay sets namePrefix dev-. What is the Deployment called in the output?"
+      choices: ["catalog", "dev-catalog", "catalog-dev"]
+      answer: 1
+      explain: "namePrefix rewrites names, and Kustomize updates references to them (for example a ConfigMap name used by a Deployment)."
+      feedback:
+        - "The base name is only the input: the overlay's namePrefix is applied to every resource name in the rendered output."
+        - "Right: namePrefix prepends `dev-` to every resource name, giving Deployment and Service `dev-catalog`."
+        - "That would be a suffix. Kustomize has a separate `nameSuffix` field; `namePrefix` puts the text in front."
+    observe: |
+      Service `dev-catalog` and Deployment `dev-catalog` (2 replicas), both labelled `env: dev` and
+      `app.kubernetes.io/part-of: shop`. The selector and pod-template labels are still only `app: catalog`: the
+      overlay uses `includeSelectors: false`, and label values are not names, so namePrefix does not touch them either.
+  - id: apply
+    title: "Apply it"
+    do: "Apply the overlay, then list what was created."
+    commands:
+      - {cmd: "oc apply -k lab/kustomize/overlays/dev -n academy-declarative", meaning: "renders the overlay and creates the objects (client-side apply: oc stores the applied YAML in the kubectl.kubernetes.io/last-applied-configuration annotation)"}
+      - {cmd: "oc get deploy,svc -n academy-declarative -l env=dev", meaning: "selected by the overlay's label"}
+    observe: "`service/dev-catalog created`, `deployment.apps/dev-catalog created`. Listed immediately, the Deployment is still `0/2`; the lab waits until it is ready."
+    wait_for: [dev-ready]
+  - id: drift
+    title: "Create drift, then see it"
+    do: "Scale the Deployment by hand, then ask what applying the overlay would change."
+    commands:
+      - {cmd: "oc scale deploy/dev-catalog --replicas=4 -n academy-declarative", meaning: "a manual change outside the source of truth"}
+      - {cmd: "oc diff -k lab/kustomize/overlays/dev -n academy-declarative", meaning: "live vs declared", expect: fail}
+    predict:
+      prompt: "What does `oc diff` show, and what is its exit code?"
+      choices: ["Nothing, exit 0", "replicas 4 → 2, exit code 1 because a difference exists", "An error"]
+      answer: 1
+      explain: "`oc diff` exits 1 when it finds differences (0 when none, >1 on errors), which makes it scriptable for drift checks."
+      feedback:
+        - "The live object now has 4 replicas while the overlay declares 2, so there is a difference to show (exit 0 would mean none)."
+        - "Right: the diff shows `replicas: 4` (live) against `replicas: 2` (what apply would produce), and exit code 1 means 'differences found'."
+        - "A non-zero exit code is not an error here: `oc diff` uses 1 for 'differences found' and reserves codes above 1 for real failures."
+    observe: |
+      A unified diff of LIVE against MERGED (the object as it would be after applying) with `-  replicas: 4` /
+      `+  replicas: 2`, and exit status 1. It also shows `generation: 2` → `3`, because the merged object is computed by
+      the API server, which would bump the generation for the spec change.
+  - id: reconcile
+    title: "Reconcile"
+    do: "Re-apply the overlay: the declared state wins again."
+    commands:
+      - {cmd: "oc apply -k lab/kustomize/overlays/dev -n academy-declarative", meaning: "back to 2 replicas: `service/dev-catalog unchanged`, `deployment.apps/dev-catalog configured`"}
+      - {cmd: "oc diff -k lab/kustomize/overlays/dev -n academy-declarative", meaning: "no output and exit 0: no difference left"}
+    wait_for: [dev-two]
+  - id: helm-template
+    title: "Helm: render, then install"
+    do: "Render the chart locally, then install it as a release named `demo`."
+    commands:
+      - {cmd: "helm template demo lab/chart -n academy-declarative", meaning: "the YAML Helm would apply, rendered locally: Deployment demo-greeter, 1 replica, message \"hello from helm\""}
+      - {cmd: "helm install demo lab/chart -n academy-declarative", meaning: "release demo, STATUS deployed, REVISION 1"}
+      - {cmd: "helm list -n academy-declarative", meaning: "releases in the namespace"}
+    wait_for: [demo-ready]
+  - id: helm-upgrade
+    title: "Upgrade with new values, then roll back"
+    do: "Upgrade the release with 2 replicas and a new message, look at the history, then roll back to revision 1."
+    commands:
+      - {cmd: "helm upgrade demo lab/chart --set replicas=2 --set message=hello-v2 -n academy-declarative", meaning: "revision 2"}
+      - {cmd: "helm history demo -n academy-declarative", meaning: "revisions 1 and 2"}
+      - {cmd: "helm rollback demo 1 -n academy-declarative", meaning: "revision 3 = the content of revision 1"}
+      - {cmd: "helm history demo -n academy-declarative", meaning: "1, 2, 3"}
+    observe: "History shows revision 3 with description `Rollback to 1`; the Deployment is back to 1 replica."
+    why: "Like `oc rollout undo`, a Helm rollback creates a new revision. Helm 3 stores each revision's release state in a Secret in the release namespace (`sh.helm.release.v1.demo.v1` … `v3`, labelled `owner=helm`): that is what `helm history` reads."
+    wait_for: [demo-one]
+hints: []
+checks:
+  - {id: dev-ready, title: "dev-catalog is ready", type: deployment_ready, name: dev-catalog, final: false, expect_text: "ready"}
+  - {id: dev-two, title: "dev-catalog matches the overlay (2 replicas)", type: field, kind: deployment, name: dev-catalog, path: spec.replicas, op: eq, value: 2, expect_text: "2"}
+  - {id: dev-label, title: "The overlay's label is on the Deployment", type: field, kind: deployment, name: dev-catalog, path: metadata.labels.env, op: eq, value: dev, expect_text: "env=dev"}
+  - {id: demo-ready, title: "Helm release demo is running", type: deployment_ready, name: demo-greeter, final: false, expect_text: "ready"}
+  - {id: demo-one, title: "After the rollback, demo runs 1 replica", type: field, kind: deployment, name: demo-greeter, path: spec.replicas, op: eq, value: 1, expect_text: "1"}
+  - {id: demo-rev, title: "The release has 3 revisions (install, upgrade, rollback)", type: count, kind: secrets, selector: "owner=helm,name=demo", op: eq, value: 3, expect_text: "3 release secrets"}
+questions:
+  - q: "When would you prefer Kustomize, and when Helm?"
+    a: "Kustomize for your own apps across environments (plain YAML, patches, no templating). Helm for packaged software with many options and a release lifecycle, often third-party."
+  - q: "How can `oc diff` be used in a pipeline?"
+    a: "Its exit code (1 when differences exist) turns drift detection into a check, before or instead of applying."
+enterprise: |
+  Teams usually keep Kustomize overlays per environment in Git and let Argo CD apply them; Helm charts for
+  vendor software are rendered by Argo CD too. Argo CD only uses Helm to render (`helm template`) and manages the
+  lifecycle itself, so those applications do not appear in `helm list`. Running `helm install` by hand in
+  production is usually avoided, because nothing then records the desired state outside the cluster.
+references:
+  - {title: "Kubernetes: Declarative management with Kustomize", url: "https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/"}
+  - {title: "Kubernetes: kubectl diff (exit codes)", url: "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_diff/"}
+  - {title: "Helm: Using Helm (install, upgrade, history, rollback)", url: "https://helm.sh/docs/intro/using_helm/"}
+  - {title: "Argo CD: Helm", url: "https://argo-cd.readthedocs.io/en/stable/user-guide/helm/"}
+  - {title: "OpenShift 4.21: Helm on OpenShift", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/building_applications/working-with-helm-charts"}
+variations:
+  - "On your own: in your own copy of the lab's `kustomize` folder, add a `prod` overlay (prefix `prod-`, label `env: prod`, 3 replicas), render it, apply it, then prove that live and declared state agree. Check: `prod-catalog` runs 3 pods and `oc diff -k` on your overlay exits 0."
+  - "Upgrade the Helm release with `--set replicas=2`, then upgrade it again passing only `--set message=hello-v3`. Predict the replica count before you look. Check: you can explain the result from `helm get values demo`: values you do not pass again are dropped unless you ask Helm to reuse them."

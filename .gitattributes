@@ -1,0 +1,7 @@
+# The same bytes on every platform: text files are checked out with LF line endings, on Windows too (where git's
+# core.autocrlf would otherwise write CRLF), so recordings' fingerprints, scans, tests and builds see identical files.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary

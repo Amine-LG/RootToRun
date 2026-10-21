@@ -1,0 +1,136 @@
+- id: f0-prereqs
+  title: "First look at a platform"
+  summary: "A short review of the Linux facts behind cluster errors, what Kubernetes adds to running containers, and the objects, YAML and API you use from here on."
+  lessons: [f0.linux-essentials, a.what-kubernetes-does, f0.objects-api]
+- id: f1-containers
+  title: "Containers: what they are, running and building them"
+  summary: "A container is a Linux process with namespaces and limits: the processes and signals of the Linux territory, seen from inside and outside. Run services with Podman, then build your own images."
+  lessons: [a.container-is-a-process, ct.podman-run, ct.build-images]
+- id: f2-kubernetes
+  title: "How Kubernetes works"
+  summary: "The API server, etcd, controllers, the scheduler and the kubelet; desired state, reconciliation and the workload kinds."
+  lessons: [b.architecture, b.reconciliation, b.workloads]
+- id: f3-openshift
+  title: "What the platform adds to Kubernetes"
+  summary: "Kubernetes plus a platform that manages itself: cluster operators, Routes, projects, SCCs, ImageStreams, and the API extensions they rely on."
+  lessons: [b.crds-operators, k.kubectl-to-oc, c.openshift-extends]
+- id: a1-cli
+  title: "The CLI and the platform"
+  summary: "Find your way with oc and the web console, install and configure the CLI tools, and check the health of an OpenShift cluster."
+  lessons: [n.console-clis, n.console-tour, o1.cli]
+- id: a2-apps
+  title: "Deploy and scale applications"
+  summary: "Create, expose, scale and size applications from images, templates and manifests; pod lifecycle, probes, requests and limits."
+  lessons: [o1.deploy-apps, n.templates, b.pod-lifecycle, b.health-probes, b.resources-qos, o3.init-sidecars]
+- id: a3-troubleshoot
+  title: "Troubleshoot applications"
+  summary: "A method and a toolbox: status, events, logs, exec, debug pods, and support data to capture before evidence disappears. Then practise on real incidents."
+  lessons: [o1.troubleshooting, o1.console-apps, o3.support-data]
+- id: a4-config-storage
+  title: "Configuration and storage"
+  summary: "ConfigMaps and Secrets as environment and files, persistent volumes that outlive pods, and StatefulSets: stable identity and per-pod storage."
+  lessons: [o1.config-secrets, e.storage, f0.statefulsets]
+- id: a5-network
+  title: "Services and Routes"
+  summary: "Service discovery, EndpointSlices and DNS; Routes, the router and TLS termination; Ingress and the Gateway API. The connection failures of the Linux networking lesson come back here, one layer up."
+  lessons: [d.services-dns, d.routes-tls, o3.ingress-gateway]
+- id: a6-images-updates
+  title: "Images, builds and updates"
+  summary: "ImageStreams and builds on OpenShift, and what a node does with an image; rolling updates, rollbacks, change control, and blue/green and canary releases."
+  lessons: [ct.openshift-images, c.projects-builds, ct.images-on-nodes, g.rollouts-change, o3.release-strategies]
+- id: b1-declarative
+  title: "Declarative management"
+  summary: "Manifests in Git, drift and how to correct it, Kustomize overlays and Helm releases: manage applications as files."
+  lessons: [gx.declarative, o2.kustomize-helm]
+- id: b0-cluster-admin
+  title: "Working as a cluster administrator"
+  summary: "The administrator's identity and toolbox: cluster version and operators, nodes, events, platform logs and support data, read with real administrator access."
+  lessons: [n.cluster-admin-health, n.console-admin]
+- id: b2-authn-authz
+  title: "Authentication and authorization"
+  summary: "Identity providers (HTPasswd in practice), users, identities and groups, RBAC and effective permissions."
+  lessons: [c.auth, n.htpasswd-idp, n.htpasswd-users, f.rbac, o2.groups]
+- id: b3-workload-security
+  title: "Workload security"
+  summary: "ServiceAccounts, Security Context Constraints and the exceptions you should rarely grant, and SELinux, seccomp and node-level evidence."
+  lessons: [o2.service-accounts, f.scc, n.privileged-workloads, n.selinux-node]
+- id: b4-network-security
+  title: "Network security and exposure"
+  summary: "NetworkPolicies, TLS with the service CA, passthrough and re-encrypt, NodePort and LoadBalancer services, and the platform operators behind DNS, ingress and certificates."
+  lessons: [d.networkpolicy-ovn, o2.tls-exposure, n.loadbalancer-services, n.ingress-sharding, n.ingress-dns-certs]
+- id: b5-governance
+  title: "Project governance"
+  summary: "ResourceQuotas, LimitRanges, project request templates, cluster quotas and self-provisioning: guardrails for shared clusters."
+  lessons: [o2.quotas-limits, n.project-templates, n.cluster-quotas]
+- id: b6-operators-maintenance
+  title: "Operators and cluster maintenance"
+  summary: "Install, update and remove operators with OLM; Jobs and CronJobs for administrative tasks; machine configuration and planned cluster updates."
+  lessons: [c.olm, n.operators-lifecycle, o2.jobs-cronjobs, c.machineconfig-upgrades, n.cluster-updates]
+- id: p0-install
+  title: "Installation and topologies"
+  summary: "How OpenShift clusters come to exist: installation methods, topologies from single node to hosted control planes, and the day-1 decisions you cannot change later."
+  lessons: [n.installation]
+- id: p1-scheduling
+  title: "Nodes, scheduling and capacity"
+  summary: "How the scheduler filters and scores nodes, how nodes and machines are managed, and how to plan capacity and headroom."
+  lessons: [b.scheduler, n.nodes-capacity, p.cluster-partitioning, p.project-tolerations-pdb]
+- id: p2-reliability
+  title: "Observability and reliability"
+  summary: "Signals, the platform and user-workload monitoring stacks, cluster logging, alerting, SLOs, error budgets, incident response and postmortems."
+  lessons: [h.observability, n.monitoring, n.logging, p.event-router, h.slo-incidents]
+- id: p3-delivery
+  title: "Delivery, automation and supply chain"
+  summary: "Infrastructure as code around the platform, pipelines and builds on the cluster, and a verifiable path from source to signed image."
+  lessons: [g.iac, n.cicd, n.supply-chain]
+- id: p4-enterprise
+  title: "Enterprise operations"
+  summary: "HA and failure domains, backup and DR, secrets and supply chain, multi-cluster, policy as code, and the platform team."
+  lessons: [i.ha-architecture, p.export-import, e.stateful-dr, i.day2-backup, f.secrets-supplychain, i.multicluster, n.policy-governance, i.platform-team]
+- id: l1-access
+  title: "Access analysis"
+  summary: "Trace permissions through subjects, groups, bindings and roles; find grants that outlive their subjects."
+  lessons: [l.access-paths, l.access-can-come-back, l.image-pullers]
+- id: r1-app-challenges
+  title: "Application challenges"
+  summary: "Reach a required state your own way: deploy, expose, configure, repair and scale. Graded on your cluster by inspecting what is really there."
+  labs: [ch.ship-web-app, ch.recover-and-scale, ch.right-size, ch.slow-start, ch.config-out-of-spec]
+- id: r2-admin-challenges
+  title: "Platform challenges"
+  summary: "Self-service guardrails, least-privilege access and traffic protection, graded by their effect: what is allowed, what is denied, what connects."
+  labs: [ch.deploy-bot-access, ch.protect-traffic, ch.bounded-cleanup, ch.helm-release]
+- id: r3-incidents
+  title: "Incidents"
+  summary: "Something is broken. Investigate, explain the cause, repair it, and compare your reasoning with a recorded investigation."
+  labs: [inc.service-selector-503, inc.wrong-targetport, inc.imagepull, inc.crashloop-config, inc.configmap-missing, inc.readiness-503, inc.liveness-restarts, inc.oomkilled, inc.dns-typo, inc.pvc-pending, inc.broken-rollout, inc.networkpolicy-block, inc.rbac-denied, inc.scc-root, inc.gitops-drift, inc.pending-resources]
+- id: r4-capstone
+  title: "Capstone"
+  summary: "One service built end to end: workload, identity, health, exposure, TLS and isolation, each graded by its effect. Take it after both the application and platform tracks."
+  labs: [ch.production-ready]
+- id: p5-identity
+  title: "Identity at scale"
+  summary: "Corporate identity providers (LDAP, OpenID Connect), group synchronisation and the lifecycle of users who join, move and leave; credentials in kubeconfig files for jobs and tools."
+  lessons: [p.ldap-oidc, p.ldap-group-sync, p.kubeconfig-credentials]
+- id: p6-gitops
+  title: "GitOps for clusters and applications"
+  summary: "Argo CD keeps the cluster matching Git: Applications, sync and health, self-heal and prune, failed syncs and rollback, and OpenShift GitOps with one overlay per environment."
+  lessons: [gx.argocd, gx.argocd-ops, gx.openshift-gitops]
+- id: lx1-shell
+  title: "The shell, files and permissions"
+  summary: "Move around a Linux system with confidence: the shell, files and directories, text tools, finding files and links, editing in the terminal, users, groups and permissions, and logging in to other machines with SSH."
+  lessons: [lx.first-steps, lx.shell-basics, lx.files-text, lx.shell-expansion, lx.redirection, lx.exit-status, lx.text-tools, lx.find-links, lx.editing, lx.users-permissions, lx.ssh-security]
+- id: lx2-system
+  title: "Processes, services, networks and disks"
+  summary: "What runs on a Linux machine and how to inspect it: processes and signals, systemd and the journal, networking and storage. Containers, next, are built from exactly these pieces."
+  lessons: [lx.processes-signals, lx.systemd-journal, lx.networking, lx.storage-filesystems]
+- id: ct1-podman
+  title: "Images, security and troubleshooting"
+  summary: "Image names, tags, digests and registries; images that run as any user; troubleshooting containers that will not start; several containers together; moving images without a registry."
+  lessons: [a.images-registries, a.container-security, ct.troubleshoot-containers, ct.podman-stack, ct.image-archives]
+- id: ct2-images
+  title: "Images in depth"
+  summary: "Inside a registry: one tag for several architectures (indexes and manifests), copying an image without changing its digest, how short names are resolved, and where registry logins are stored."
+  lessons: [ct.registries-skopeo]
+- id: lx3-admin
+  title: "Administer a Linux system"
+  summary: "Automate with shell scripts, manage software and archives, users and sudo, and scheduled jobs: the administration every node and image build relies on. Scripts, archives and schedules come back with containers and clusters."
+  lessons: [lx.shell-scripts, lx.packages-archives, lx.users-scheduling]
