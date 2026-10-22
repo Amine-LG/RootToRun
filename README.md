@@ -7,6 +7,8 @@ It runs in your browser with no account and no cluster; when you are ready, you 
 **▶ Try it live: [roottorun.aminelg.com](https://roottorun.aminelg.com)**, the whole course in your browser, with no
 account and nothing to install. Or run it on your own machine: [Getting started](#getting-started).
 
+https://github.com/user-attachments/assets/420958eb-f124-4dee-9394-475944417812
+
 ## What learning here looks like
 
 - **One path, six courses**: Linux → Containers → Kubernetes → OpenShift applications → OpenShift administration →
