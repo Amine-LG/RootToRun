@@ -335,9 +335,13 @@ def test_back_never_lands_on_a_leftover_overlay_entry(browser, static_site):
     wait_true(pg, on_learn())
     pg.go_forward()
     wait_true(pg, AT_LESSON)
+    # the lesson has rendered (as before the next opening below): on a busy Windows runner, the menu opened while the
+    # page still loaded kept moving under Playwright's stability check until the tap timed out
+    pg.wait_for_selector("main .page:not(:has(.sk-page))")
     # closed and reopened at once: it stays open; Back closes it; the next Back reaches /learn
     pg.get_by_test_id("menu-open").tap()
     menu.wait_for()
+    settled(pg)  # its slide-in has ended
     pg.get_by_test_id("menu-close").tap()
     pg.get_by_test_id("menu-open").tap()
     # it opens and stays open (waited for, not slept on: a busy Windows runner took longer than 600 ms to show it)
