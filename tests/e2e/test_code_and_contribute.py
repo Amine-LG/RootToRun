@@ -145,12 +145,17 @@ def test_long_commands_do_not_widen_the_page(browser, static_site, width):
     ctx.close()
 
 
+# every link of the credit line, read in one go inside the page, once the line is complete (its last link is there):
+# read link by link it could re-render in between and come back half-rendered under load (a Chromium CI run)
+CREDIT_LINKS = """() => { const c = document.querySelector('[data-testid=foot-credit]');
+  if (!c) return null;
+  const links = Object.fromEntries([...c.querySelectorAll('a')].map((a) => [a.innerText.trim(), a.getAttribute('href')]));
+  return 'Licences' in links ? links : null }"""
+
+
 def _credit(page):
-    credit = page.get_by_test_id("foot-credit")
-    expect(credit).to_be_visible()
-    # the credit line is complete once its last link is there (it was read half-rendered under load)
-    expect(credit.get_by_role("link", name="Licences")).to_be_visible()
-    return {a.inner_text(): a.get_attribute("href") for a in credit.locator("a").all()}
+    expect(page.get_by_test_id("foot-credit")).to_be_visible()
+    return page.wait_for_function(CREDIT_LINKS, timeout=10000).json_value()
 
 
 def test_footer_credits_the_creator_and_links_the_repository_when_set(page, repo_server):
