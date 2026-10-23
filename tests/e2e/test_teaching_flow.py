@@ -139,7 +139,10 @@ def test_a_look_back_names_the_lesson_it_comes_from(page, static_site):
     open_(page, static_site, lesson_url("lx.shell-basics"))
     note = page.get_by_test_id("recall-from").first
     expect(note).to_contain_text("Your first minutes in a shell")
-    expect(note).to_contain_text("not opened it")  # a fresh browser has not been through lesson 1
+    expect(note).to_contain_text("not opened that lesson")  # a fresh browser has not been through lesson 1
+    expect(note).to_contain_text("Optional")
+    expect(note).to_contain_text("read on")  # not "it comes before this one": a visitor sent here did not start wrong
+    expect(note).not_to_contain_text("comes before")
     expect(note.locator("a")).to_have_attribute("href", lesson_url("lx.first-steps"))
     open_(page, static_site, lesson_url("lx.first-steps"))
     open_(page, static_site, lesson_url("lx.shell-basics"))

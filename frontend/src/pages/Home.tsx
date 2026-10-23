@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useDueCount } from '../components/Shell'
 import { Icon } from '../components/ui'
 import type { Curriculum, LessonSummary, Route } from '../lib/data'
@@ -8,6 +8,7 @@ import { continueTarget, nextLesson, nextUnread } from '../lib/next'
 import { usePlannedLesson } from '../lib/planned'
 import { setRoute, useProgress, type Progress } from '../lib/progress'
 import { useLocation } from '../lib/router'
+import { reveal } from '../lib/reveal'
 import { beginHref, daysAway, nextOnRoute, routeLessons, routeProgress, suggestPractice } from '../lib/routes'
 import { labHref, lessonHref, refOf, trackHref } from '../lib/urls'
 import { duration, trackTime } from '../lib/studytime'
@@ -37,6 +38,12 @@ function RoutePicker({ cur, prog, chosen, onChoose, heading = true }: { cur: Cur
     requestAnimationFrame(() => document.getElementById(`rp-${routes[j].id}`)?.focus())
   }
   const rp = chosen ? routeProgress(cur, prog, chosen) : null
+  // a tap shows the chosen route's start button, which would otherwise open below a phone's screen
+  const go = useRef<HTMLAnchorElement>(null)
+  const pick = (id: string) => {
+    onChoose(id)
+    requestAnimationFrame(() => reveal(go.current))
+  }
   return (
     <div className="start-from">
       {heading && <h2 id="start-from-h">{t('home.startFrom')}</h2>}
@@ -50,7 +57,7 @@ function RoutePicker({ cur, prog, chosen, onChoose, heading = true }: { cur: Cur
             aria-checked={chosen?.id === r.id}
             tabIndex={chosen ? (chosen.id === r.id ? 0 : -1) : i === 0 ? 0 : -1}
             className="route-pick"
-            onClick={() => onChoose(r.id)}
+            onClick={(e) => (e.detail ? pick(r.id) : onChoose(r.id))} // a key press keeps the focused choice on screen
             onKeyDown={(e) => keys(e, i)}
             data-testid={`route-${r.id}`}
           >
@@ -87,7 +94,7 @@ function RoutePicker({ cur, prog, chosen, onChoose, heading = true }: { cur: Cur
             </div>
           </div>
           <div className="rd-actions">
-            <a className="btn lg route-go" href={beginHref(chosen)} data-testid="start-learning">
+            <a className="btn lg route-go" href={beginHref(chosen)} data-testid="start-learning" ref={go}>
               {chosen.begin.label} <Icon name="arrow" size={17} />
             </a>
             <a className="rd-alt" href="/learn">{t('route.seeMap')}</a>
@@ -286,6 +293,7 @@ export default function Home() {
   // a chosen route counts as a start: its starting point, not the first Linux lesson
   const next = returning || route ? continueTarget(cur, prog, route, planned) : null
   const apps = cur.tracks.find((x) => x.id === 'admin1')
+  const appsFirst = nextLesson(cur, prog, 'admin1') // the lesson the course page's Begin opens
   const allDone = (returning || !!route) && !next
   return (
     <div className={`page home hx ${returning ? 'is-returning' : 'is-first'}`} data-layout={returning ? 'returning' : 'first'}>
@@ -307,12 +315,13 @@ export default function Home() {
                   {t('me.practiseNext')} <Icon name="arrow" size={17} />
                 </a>
               ) : (
-                <a className="btn primary lg" href={trackHref('admin1')} data-testid="hero-start">
+                <a className="btn primary lg" href={appsFirst ? lessonHref(appsFirst.id) : trackHref('admin1')} data-testid="hero-start" aria-describedby={apps ? 'hx-level' : undefined}>
                   {apps ? t('hx.start') : t('home.startFirst')} <Icon name="arrow" size={17} />
                 </a>
               )}
               <a className="hx-alt hero-alt" href="#start-from">{t('hx.findStart')}</a>
             </div>
+            {!next && !allDone && apps && <p className="hx-level" id="hx-level" data-testid="hero-level">{t('hx.startLevel')}</p>}
             <p className="hx-new">
               {t('hx.newHere')} <a href={lessonHref('lx.first-steps')}>{t('hx.firstLesson', { min: cur.lessons['lx.first-steps']?.minutes || 12 })}</a>
             </p>

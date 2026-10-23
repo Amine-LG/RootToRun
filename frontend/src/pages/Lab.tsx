@@ -129,7 +129,7 @@ function LabHeader({ data, title }: { data: LabData; title: RefObject<HTMLHeadin
         )}
         <LabStatusPill s={labStatus(prog.labs[lab.id])} />
       </div>
-      <Prereqs tools={cur?.labs[lab.id]?.tools ?? []} where="lab" versions={{ oc: rec?.cluster?.oc }} />
+      <Prereqs tools={cur?.labs[lab.id]?.tools ?? []} where={lab.kind === 'challenge' ? 'challenge' : 'lab'} versions={{ oc: rec?.cluster?.oc }} />
     </header>
   )
 }

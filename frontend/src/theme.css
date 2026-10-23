@@ -209,6 +209,7 @@ pre.code { font-size: 0.84rem; line-height: 1.65; padding: 14px 16px; border-rad
 code.nb { white-space: nowrap; }
 .route-pick .rp-dot { border-color: var(--muted); }
 .hx-section { margin-top: clamp(48px, 7vw, 88px); }
+.hx-level { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-sm); }
 .hx-new { margin: 18px 0 0; color: var(--muted); font-size: var(--fs-sm); }
 .hx-new a { font-weight: 600; }
 .lesson2 .lesson-h { margin-bottom: 28px; }
