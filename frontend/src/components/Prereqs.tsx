@@ -7,7 +7,7 @@ import { setupHref } from '../lib/urls'
 import { Icon } from './ui'
 import './commands.css'
 
-export type Where = 'host' | 'cluster' | 'cluster-admin' | 'lab'
+export type Where = 'host' | 'cluster' | 'cluster-admin' | 'lab' | 'challenge'
 
 /** A version worth showing next to a tool: only something that looks like one (recordings sometimes hold a commit). */
 const version = (v?: string) => (v && /^v?\d+\.\d+(\.\d+)?$/.test(v) ? v.replace(/^v/, '') : '')
@@ -17,11 +17,12 @@ export function Prereqs({ tools, where, versions = {} }: { tools: string[]; wher
   const known = new Map((cur?.tools ?? []).map((x) => [x.id, x]))
   const list = tools.filter((id) => known.has(id))
   const cluster = where !== 'host'
+  const practice = where === 'lab' || where === 'challenge' // a lab, an incident or a challenge
   if (!list.length && !cluster) return null
   return (
     <aside className="prereqs" aria-label={t('setup.prereqAria')} data-testid="prereqs">
       <Icon name="wrench" size={15} />
-      <span className="prereqs-label">{t(where === 'lab' ? 'setup.needLab' : 'setup.need')}</span>
+      <span className="prereqs-label">{t(where === 'challenge' ? 'setup.needChallenge' : practice ? 'setup.needLab' : 'setup.need')}</span>
       <ul className="prereqs-list">
         {list.map((id) => (
           <li key={id}>
@@ -31,11 +32,11 @@ export function Prereqs({ tools, where, versions = {} }: { tools: string[]; wher
         ))}
         {cluster && (
           <li>
-            <a href={setupHref('cluster')}>{t(where === 'cluster-admin' ? 'setup.clusterAdmin' : where === 'lab' ? 'setup.clusterLab' : 'setup.clusterUser')}</a>
+            <a href={setupHref('cluster')}>{t(where === 'cluster-admin' ? 'setup.clusterAdmin' : practice ? 'setup.clusterLab' : 'setup.clusterUser')}</a>
           </li>
         )}
       </ul>
-      <span className="prereqs-where">{t(where === 'lab' ? 'setup.nothingRunsLab' : 'setup.nothingRuns')}</span>
+      <span className="prereqs-where">{t(where === 'challenge' ? 'setup.nothingRunsChallenge' : where === 'lab' ? 'setup.nothingRunsLab' : 'setup.nothingRuns')}</span>
     </aside>
   )
 }

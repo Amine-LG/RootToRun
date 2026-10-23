@@ -1215,6 +1215,8 @@ details.more-inline > summary { font-size: 0.88rem; color: var(--text-2); font-w
 .continue-cta { align-items: center; }
 .continue-what { flex-basis: 100%; order: 3; color: var(--text-2); font-weight: 600; }
 .lesson-list .l-facts { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+/* a practice row's verification line does not fit beside its title on a phone: the row ran past the screen */
+@media (max-width: 600px) { .lesson-list .l-verified { display: none; } }
 
 /* the step bar of a lab: the Finish segment is not a step */
 .lesson-steps .ls.finish-ls { flex: 0 0 auto; min-width: 64px; }

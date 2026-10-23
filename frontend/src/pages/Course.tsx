@@ -246,7 +246,7 @@ export default function Course({ track }: { track: string }) {
                             <span className="l-title">{lab.title}</span>
                             {vtag(lab.id)}
                             <LabStatusPill s={labStatus(prog.labs[lab.id])} />
-                            <span className="l-facts">{lab.recorded ? t('learn.gradedLive') : t('learn.notYetRecorded')}</span>
+                            <span className={lab.recorded ? 'l-facts l-verified' : 'l-facts'}>{lab.recorded ? t('learn.gradedLive') : t('learn.notYetRecorded')}</span>
                             <span className="l-min">{t('ui.minutes', { n: lab.minutes })}</span>
                           </a>
                         </li>
