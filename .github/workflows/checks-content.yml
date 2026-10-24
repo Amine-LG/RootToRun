@@ -15,17 +15,27 @@ env:
   KUBECONFIG: /nonexistent
 
 jobs:
+  # The whole Python suite in 2 parts (--shard I/N, tests/conftest.py: every test in exactly one part); the content
+  # checks once, in part 1.
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    name: python (${{ matrix.shard }}/2)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
       - uses: ./.github/actions/python-env
       # first: a file that does not load makes dozens of tests fail; this names it
       - name: Content loads, teaching rules, stable addresses, coverage references, public scan
+        if: matrix.shard == 1
         run: scripts/test_content.sh --data-checks
-      - name: Unit, API, security and content tests (the whole Python suite)
+      - name: Unit, API, security and content tests (part of the whole Python suite)
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/2
         run: scripts/test_content.sh --python
 
   site:
@@ -75,10 +85,6 @@ jobs:
         run: uv venv .venv --python 3.12 && uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
       - name: Course content loads
         run: .venv\Scripts\python.exe scripts\check_content.py
-      - name: Unit, API, security, content and portability tests
-        env:
-          PYTHONWARNDEFAULTENCODING: "1"
-        run: .venv\Scripts\python.exe -m pytest -q tests --ignore=tests/e2e -n ([Math]::Min([Environment]::ProcessorCount, 4))
       - name: Teaching rules
         run: .venv\Scripts\python.exe scripts\teach_lint.py
       - name: Every lesson and lab keeps its public address
@@ -113,6 +119,32 @@ jobs:
             if ($page.StatusCode -ne 200 -or $page.Content -notmatch '<div id="root">') { throw "the site is not served" }
             "serve.py: practice mode; the site and its API answer on 127.0.0.1:8768"
           } finally { Stop-Process -Id $server.Id }
+
+  # The whole Python suite on Windows (paths, encodings, the console), in 2 parts beside the windows job.
+  windows-python:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    name: windows-python (${{ matrix.shard }}/2)
+    defaults:
+      run: {shell: pwsh}
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/python-env
+        with: {install: "false"}
+      - name: Python environment
+        run: uv venv .venv --python 3.12 && uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
+      - name: Unit, API, security, content and portability tests (part of the whole Python suite)
+        env:
+          PYTHONWARNDEFAULTENCODING: "1"
+          SHARD: ${{ matrix.shard }}/2
+        run: .venv\Scripts\python.exe -m pytest -q tests --ignore=tests/e2e -n ([Math]::Min([Environment]::ProcessorCount, 4)) --shard $env:SHARD
 
   # The same source must export the same site on Linux and on Windows, byte for byte (paths, line endings, encodings).
   same-site:

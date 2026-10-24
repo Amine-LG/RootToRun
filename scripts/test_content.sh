@@ -3,7 +3,7 @@
 # (a few minutes; docs/CI.md). The Windows job and the page check run in CI.
 #   scripts/test_content.sh                 # everything below, in order
 #   scripts/test_content.sh --data-checks   # content loads, teaching rules, stable addresses, coverage, public scan
-#   scripts/test_content.sh --python        # the whole Python suite, as CI runs it
+#   scripts/test_content.sh --python        # the whole Python suite, as CI runs it (TEST_SHARD=I/N: one of N parts)
 #   scripts/test_content.sh --site          # frontend tests, type check and build; static export; scan; links
 # Needs .venv (docs/INSTALL.md) and, for --site, Node.js 22 (npm). PYTHON and TEST_WORKERS override the defaults.
 set -euo pipefail
@@ -25,7 +25,8 @@ fi
 if [ "$mode" = all ] || [ "$mode" = --python ]; then
   echo "== the Python suite (unit, API, security and content tests)"
   workers=${TEST_WORKERS:-$(( $(nproc 2>/dev/null || echo 4) < 4 ? $(nproc 2>/dev/null || echo 4) : 4 ))}
-  PYTHONWARNDEFAULTENCODING=1 "$python" -m pytest -q -p no:cacheprovider tests --ignore=tests/e2e -n "$workers"
+  PYTHONWARNDEFAULTENCODING=1 "$python" -m pytest -q -p no:cacheprovider tests --ignore=tests/e2e -n "$workers" \
+    ${TEST_SHARD:+--shard "$TEST_SHARD"}
 fi
 if [ "$mode" = all ] || [ "$mode" = --site ]; then
   echo "== frontend tests, type check and build; static export; public scan and internal links of the export"

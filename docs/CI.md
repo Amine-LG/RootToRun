@@ -36,7 +36,7 @@ the Containerfile and nginx, any other file type, and anything the list does not
 | | content lane | deep lane | ci-main (after a merge, manual, weekly) |
 |---|---|---|---|
 | content checks (load, teaching rules, addresses, coverage, public scan) | yes | yes | yes |
-| the whole Python suite, Linux and Windows | yes | yes | yes |
+| the whole Python suite, Linux and Windows (2 parallel parts each) | yes | yes | yes |
 | frontend tests, type check, build, export, scan, internal links, Linux and Windows | yes | yes | yes |
 | Linux and Windows exports identical | yes | yes | yes |
 | every page opens in Chromium: its content shows, no error, fits a phone | yes | in the browser suite | in the browser suite |
@@ -53,8 +53,9 @@ what a page shows only after a click (a diagnostic's questions, a lesson's "Go d
 failing on content, not those components' behaviour, layout or focus. The content lane leaves to ci-main the
 interactive browser tests, Firefox, the Windows browser tests and the production image's nginx rules for content
 pages. The deep lane's jobs run side by side; the content lane's
-python, site, windows and same-site jobs are the deep lane's own (`tests/test_ci_workflows.py` checks that they are
-identical). The content lane saves the image and the browser suite, not the Python and Windows checks, so its wall
+python, site, windows, windows-python and same-site jobs are the deep lane's own (`tests/test_ci_workflows.py` checks
+that they are identical). The Python suite runs in 2 parts on each system (`--shard I/N`, `tests/conftest.py`: every test
+in exactly one part), beside the Windows build and export. The content lane saves the image and the browser suite, not the Python and Windows checks, so its wall
 time is about the Windows job's; no saving has been measured on GitHub yet.
 
 ## Locally
