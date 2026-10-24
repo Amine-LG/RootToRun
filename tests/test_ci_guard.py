@@ -8,14 +8,18 @@ import re
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 from academy import config
+from platforms import WINDOWS
 
 WF = config.ROOT / ".github" / "workflows" / "ci-guard.yml"
 GUARD = yaml.safe_load(WF.read_text(encoding="utf-8"))
 ON = GUARD.pop(True, GUARD.get("on"))  # YAML 1.1 reads the key `on` as True
 JOB = GUARD["jobs"]["guard"]
+# the guard's shell runs on ubuntu-latest (bash, python3); the Windows job checks the rest of this file
+linux_shell = pytest.mark.skipif(WINDOWS, reason="the guard runs on ubuntu-latest: bash and python3")
 
 
 def test_runs_from_the_default_branch_for_pull_requests_into_it_and_runs_nothing_of_theirs():
@@ -59,6 +63,7 @@ else:
 '''
 
 
+@linux_shell
 def test_guard_uses_the_latest_owner_review_and_binds_the_diff_to_the_event_head(tmp_path):
     """Execute the trusted shell with an offline gh stub: historical approvals and a stale event cannot grant access."""
     stub = tmp_path / "gh-stub.py"
@@ -115,7 +120,8 @@ def test_the_guard_exempts_only_documentation_and_screenshots(tmp_path):
         rows = "".join(json.dumps([p, (modes or {}).get(p, "100644")]) + "\n" for p in paths)
         base.write_text(rows, encoding="utf-8")
         head.write_text(("TRUNCATED\n" if truncated else "") + rows, encoding="utf-8")
-        env = {**os.environ, "CHANGED_FILES": str(len(files) if changed is None else changed)}
+        # the verdict names a file; on Windows the console's code page could not print every name
+        env = {**os.environ, "CHANGED_FILES": str(len(files) if changed is None else changed), "PYTHONIOENCODING": "utf-8"}
         return subprocess.run([sys.executable, "-I", "-", str(listing), str(base), str(head)], input=guard_program(),
                               encoding="utf-8", capture_output=True, check=True, env=env).stdout.strip()
     clean = [["docs/AUTHORING.md", None], ["docs/$(id).md", None], ["docs/é\nfile.md", None], ["README.md", None],
@@ -140,6 +146,7 @@ def test_the_guard_exempts_only_documentation_and_screenshots(tmp_path):
     assert verdict(clean, truncated=True).startswith("unlisted")  # a file tree too large to read fails closed
 
 
+@linux_shell
 def test_a_pull_request_into_another_branch_gets_no_verdict(tmp_path):
     stub = tmp_path / "gh-stub.py"
     stub.write_text(GH_STUB, encoding="utf-8")

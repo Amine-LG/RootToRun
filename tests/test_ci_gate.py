@@ -6,6 +6,9 @@ import itertools
 import os
 import subprocess
 
+import pytest
+
+from platforms import WINDOWS
 from test_ci_workflows import WORKFLOWS
 
 
@@ -34,6 +37,7 @@ def gate_script():
     return WORKFLOWS["ci.yml"]["jobs"]["ci-ok"]["steps"][0]["run"]
 
 
+@pytest.mark.skipif(WINDOWS, reason="the gate runs on ubuntu-latest (bash)")
 def test_the_gate_decision_table_for_every_combination():
     """Exhaustive: every result GitHub can report (and an empty value) for each input, and odd verdicts."""
     results = ["success", "failure", "cancelled", "skipped", ""]

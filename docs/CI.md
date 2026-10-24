@@ -43,7 +43,7 @@ the Containerfile and nginx, any other file type, and anything the list does not
 | production image built once and smoke-tested | | yes | yes |
 | the whole browser suite against the image, Chromium and Firefox | | yes (3 + 3 parts) | yes |
 | browser tests in Firefox on Windows | | part 1 of 5 | all 5 parts |
-| dependency review of added packages | | yes | |
+| dependency review of added packages (GitHub's dependency graph) | | yes | |
 
 A content change cannot touch the code, the nginx rules or the build that the image and the browser suite test; it
 can break how a page renders. The page check opens every page as it first appears and requires its own content (a

@@ -10,7 +10,10 @@ import sys
 
 import yaml
 
+import pytest
+
 from academy import config
+from platforms import WINDOWS
 from test_ci_guard import guard_program
 
 WF = config.ROOT / ".github" / "workflows"
@@ -203,6 +206,7 @@ elif args[:1] == ["api"] and any("/runs?" in a for a in args):
     return [c[:2] for c in calls if c[0] == "issue" and c[1] != "list"], calls
 
 
+@pytest.mark.skipif(WINDOWS, reason="the alert runs on ubuntu-latest (bash, jq)")
 def test_the_alert_follows_mains_current_state_not_the_event(tmp_path):
     a = "a" * 40
     run1, run2 = "https://github.com/owner/repo/actions/runs/1", "https://github.com/owner/repo/actions/runs/2"
@@ -220,6 +224,7 @@ def test_the_alert_follows_mains_current_state_not_the_event(tmp_path):
     assert alert_run(tmp_path, a, f"skipped {run1}", "7", run1)[0] == []
 
 
+@pytest.mark.skipif(WINDOWS, reason="the alert runs on ubuntu-latest (bash, jq)")
 def test_the_alert_waits_for_a_pending_retry_and_reads_every_page(tmp_path):
     url1, url2 = "https://github.com/owner/repo/actions/runs/1", "https://github.com/owner/repo/actions/runs/2"
     older = {"id": 1, "run_attempt": 1, "status": "completed", "conclusion": "success",

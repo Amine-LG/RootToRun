@@ -4,12 +4,17 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from academy import config
+from platforms import WINDOWS
 
 sys.path.insert(0, str(config.ROOT / "scripts"))
 from ci_needs_site import needs_site, parse_raw, tier  # noqa: E402
 
 SCRIPT = config.ROOT / "scripts" / "ci_needs_site.py"
+# the router runs the classifier on ubuntu-latest and reads its exact bytes; Windows prints \r\n
+linux_router = pytest.mark.skipif(WINDOWS, reason="the router runs on ubuntu-latest")
 
 
 def run_tier(raw: bytes, script=SCRIPT) -> str:
@@ -42,6 +47,7 @@ def test_code_tests_workflows_and_unknown_paths_get_the_deep_lane():
     assert tier([]) == "deep"
 
 
+@linux_router
 def test_the_command_line_reads_git_nul_lists_and_fails_closed():
     assert run_tier(b"docs/$(touch PWNED).md\0docs/a\nb.md\0docs/-a.md\0") == "tier=content\n"
     for raw in [b"docs/a.md\0tests/a.py\0",   # one code path
@@ -53,6 +59,7 @@ def test_the_command_line_reads_git_nul_lists_and_fails_closed():
     assert bad.returncode != 0 and b"tier=" not in bad.stdout
 
 
+@linux_router
 def test_git_deletions_renames_and_a_pull_request_that_edits_the_classifier(tmp_path):
     """What the router does: the BASE blob of the classifier, executed with isolated Python, on git's own list."""
     def git(*args):
@@ -92,6 +99,7 @@ def test_git_deletions_renames_and_a_pull_request_that_edits_the_classifier(tmp_
     assert lane() == "tier=deep\n"  # what the base copy says: the router never runs the PR's copy
 
 
+@linux_router
 def test_git_file_modes_cannot_disguise_code_as_content(tmp_path):
     """Exercise git's actual raw format, including executable data, symlinks, gitlinks and deletion of each."""
     def git(*args, data=None):
