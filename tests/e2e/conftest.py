@@ -1,8 +1,10 @@
 """Browser tests. The static site is exported to a temporary directory and served with Python's http.server,
 exactly as a public static host would serve it (no API, no cluster)."""
 import functools
+import hashlib
 import http.server
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -91,8 +93,90 @@ def wait_true(page, expression, arg=None, timeout=30_000):
         page.wait_for_timeout(50)
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Each phase's report on the test item (item.rep_setup, item.rep_call, item.rep_teardown). Once the last one is
+    known, the traces _trace_failures wrote for a test that passed every phase are removed."""
+    report = yield
+    setattr(item, "rep_" + report.when, report)
+    if report.when == "teardown" and not any(getattr(getattr(item, "rep_" + when, None), "failed", False)
+                                             for when in ("setup", "call", "teardown")):
+        for path in item.__dict__.get("_e2e_traces", []):
+            if os.path.exists(path):
+                os.remove(path)
+    return report
+
+
 @pytest.fixture(autouse=True)
-def _injected_test_scripts(request, monkeypatch):
+def _trace_failures(request, monkeypatch):
+    """E2E_ARTIFACTS=<dir> (the CI sets it) records a Playwright trace of each browser context a test opens through
+    Browser.new_context or Browser.new_page (screenshots, DOM snapshots, sources) and keeps it in <dir> only when the test failed: open it with
+    `python -m playwright show-trace <file>` or at trace.playwright.dev. Unset (the default), nothing changes.
+    A trace is written when the test failed in setup or in its body, or when the test closed the context before its
+    result was known; the report hook above removes such a trace once all three phases have passed. Passing tests'
+    traces are not written (writing them all measured 33 s -> 42 s on two files locally), so a test that fails only in
+    its teardown, with its context still open, keeps no trace (its error is still in the test output). Best effort: a
+    cancelled or timed-out job leaves none."""
+    out = os.environ.get("E2E_ARTIFACTS")
+    if not out:
+        yield
+        return
+    from playwright.sync_api import Browser, BrowserContext
+
+    node = request.node
+    # readable, and unique: the full test id's hash and the xdist worker, so two tests never share a file
+    stem = "-".join([re.sub(r"[^A-Za-z0-9_.-]+", "-", node.nodeid.replace(".py::", "-"))[:100],
+                     hashlib.sha1(node.nodeid.encode("utf-8")).hexdigest()[:10], os.environ.get("PYTEST_XDIST_WORKER", "w")])
+    traced, owned = [], []
+    written = node.__dict__.setdefault("_e2e_traces", [])
+
+    def failed():
+        return any(getattr(getattr(node, "rep_" + when, None), "failed", False) for when in ("setup", "call"))
+
+    def stop(ctx):
+        if not ctx.__dict__.pop("_e2e_traced", False):
+            return
+        try:
+            if failed() or not hasattr(node, "rep_call"):  # failed, or still running: keep it until the result
+                path = os.path.join(out, f"{stem}-{len(written) + 1}.zip")
+                ctx.tracing.stop(path=path)
+                written.append(path)
+            else:
+                ctx.tracing.stop()
+        except Exception as e:  # a trace that cannot be saved (the browser has gone) never hides the test's result
+            print(f"trace of {node.nodeid} not saved: {e}", file=sys.stderr)
+
+    new_context, close = Browser.new_context, BrowserContext.close
+
+    def traced_new_context(self, *args, **kwargs):
+        ctx = new_context(self, *args, **kwargs)
+        ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
+        ctx._e2e_traced = True
+        traced.append(ctx)
+        return ctx
+
+    def traced_new_page(self, **kwargs):  # Browser.new_page's own context bypasses new_context above
+        ctx = self.new_context(**kwargs)
+        owned.append(ctx)
+        return ctx.new_page()
+
+    def traced_close(self, *args, **kwargs):
+        stop(self)
+        return close(self, *args, **kwargs)
+
+    os.makedirs(out, exist_ok=True)
+    monkeypatch.setattr(Browser, "new_context", traced_new_context)
+    monkeypatch.setattr(Browser, "new_page", traced_new_page)
+    monkeypatch.setattr(BrowserContext, "close", traced_close)
+    yield
+    for ctx in traced:  # contexts left open, for example by an assertion that failed before ctx.close()
+        stop(ctx)
+    for ctx in owned:  # page.close() would have closed the context Browser.new_page makes; it is closed here
+        close(ctx)
+
+
+@pytest.fixture(autouse=True)
+def _injected_test_scripts(request, monkeypatch, _trace_failures):  # after _trace_failures: it wraps new_context
     """A module that injects a test script (axe-core) with a <script> tag sets INJECTS_SCRIPTS: against a served site
     its browser contexts bypass the site's Content-Security-Policy, which rightly refuses that tag. Every other test
     runs under the real policy, and a violation fails it like any console error."""

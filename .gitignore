@@ -9,3 +9,4 @@ __pycache__/
 *.kubeconfig
 
 docs/design/screens/
+e2e-artifacts/

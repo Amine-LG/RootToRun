@@ -1,4 +1,5 @@
 """Phase-5 counterexamples. Static content or mocked live responses; no cluster traffic."""
+import datetime
 import json
 import re
 
@@ -77,6 +78,9 @@ def test_verified_catalogue_hides_and_survives_reload(page, static_site):
 
 
 def test_verified_R15_hint_cooldown_survives_reload(page, static_site):
+    # the page's clock (Date.now) stands still, timers still run: the cooldown (15 s) cannot run out while a slow
+    # runner reloads (one took 21 s between the hint and the reloaded page, and rightly showed the button enabled)
+    page.clock.set_fixed_time(datetime.datetime.now())
     open_(page, static_site, lab_url("inc.service-selector-503") + '?stage=investigate')
     page.get_by_test_id('hint').click()
     expect(page.locator('.hint')).to_have_count(1)
