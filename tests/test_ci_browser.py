@@ -56,8 +56,9 @@ def test_every_linux_browser_install_in_ci_goes_through_the_script():
 
 
 def test_every_browser_test_step_uploads_its_traces_only_on_failure():
-    """A failed browser test in CI leaves its Playwright traces (tests/e2e/conftest.py, E2E_ARTIFACTS) in an artifact:
-    uploaded only when the job failed, kept a week, one name per matrix part, with the pinned upload action."""
+    """The Playwright traces a failed browser test leaves (tests/e2e/conftest.py, E2E_ARTIFACTS) are uploaded only when
+    the job failed, kept a week, one name per matrix part, with the pinned upload action. This checks the upload
+    configuration, not that a trace exists: a test that fails only in its teardown may have none."""
     checked = 0
     for workflow in ("ci.yml", "candidate.yml"):
         jobs = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]

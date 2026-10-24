@@ -109,13 +109,14 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture(autouse=True)
 def _trace_failures(request, monkeypatch):
-    """E2E_ARTIFACTS=<dir> (the CI sets it) records a Playwright trace of every browser context a test opens
-    (screenshots, DOM snapshots, sources) and keeps it in <dir> only when the test failed: open it with
+    """E2E_ARTIFACTS=<dir> (the CI sets it) records a Playwright trace of each browser context a test opens through
+    Browser.new_context or Browser.new_page (screenshots, DOM snapshots, sources) and keeps it in <dir> only when the test failed: open it with
     `python -m playwright show-trace <file>` or at trace.playwright.dev. Unset (the default), nothing changes.
     A trace is written when the test failed in setup or in its body, or when the test closed the context before its
-    result was known; the report hook above removes such a trace once all three phases have passed. Writing every
-    trace would slow the browser jobs by about a quarter, so a test that fails only in its teardown, with its context
-    still open, keeps no trace (its error is still in the test output)."""
+    result was known; the report hook above removes such a trace once all three phases have passed. Passing tests'
+    traces are not written (writing them all measured 33 s -> 42 s on two files locally), so a test that fails only in
+    its teardown, with its context still open, keeps no trace (its error is still in the test output). Best effort: a
+    cancelled or timed-out job leaves none."""
     out = os.environ.get("E2E_ARTIFACTS")
     if not out:
         yield
