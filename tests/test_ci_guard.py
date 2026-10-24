@@ -120,10 +120,13 @@ def test_the_guard_exempts_only_documentation_and_screenshots(tmp_path):
         rows = "".join(json.dumps([p, (modes or {}).get(p, "100644")]) + "\n" for p in paths)
         base.write_text(rows, encoding="utf-8")
         head.write_text(("TRUNCATED\n" if truncated else "") + rows, encoding="utf-8")
-        # the verdict names a file; on Windows the console's code page could not print every name
-        env = {**os.environ, "CHANGED_FILES": str(len(files) if changed is None else changed), "PYTHONIOENCODING": "utf-8"}
-        return subprocess.run([sys.executable, "-I", "-", str(listing), str(base), str(head)], input=guard_program(),
-                              encoding="utf-8", capture_output=True, check=True, env=env).stdout.strip()
+        env = {**os.environ, "CHANGED_FILES": str(len(files) if changed is None else changed)}
+        # -X utf8: the verdict names a file, and Windows' console code page cannot print every name (-I ignores
+        # PYTHONIOENCODING); the guard itself runs on ubuntu-latest, in UTF-8
+        done = subprocess.run([sys.executable, "-I", "-X", "utf8", "-", str(listing), str(base), str(head)],
+                              input=guard_program(), encoding="utf-8", capture_output=True, env=env)
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
     clean = [["docs/AUTHORING.md", None], ["docs/$(id).md", None], ["docs/é\nfile.md", None], ["README.md", None],
              ["content/media/lesson/screen.png", None]]
     assert verdict(clean) == "clean"
