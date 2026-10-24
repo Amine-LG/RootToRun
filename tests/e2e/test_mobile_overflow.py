@@ -1,5 +1,7 @@
-"""Every lesson (shown whole), lab, incident, challenge and diagnostic fits a 390 px phone: no horizontal page scroll.
-Long tables and code scroll inside their own boxes; buttons that carry a title wrap. One test per page group."""
+"""Every lesson (shown whole), lab, incident, challenge and diagnostic renders and fits a 390 px phone: its page shows
+instead of the recovery panel, with no page or console error, and no horizontal page scroll. Long tables and code
+scroll inside their own boxes; buttons that carry a title wrap. One test per page group. This is the content lane's
+browser check (docs/CI.md): content that the renderer cannot show fails here."""
 import json
 
 import pytest
@@ -20,18 +22,21 @@ def test_the_page_groups_cover_every_page_once(page, static_site):
 
 
 @pytest.mark.parametrize("group", PAGE_GROUPS)
-def test_no_page_is_wider_than_a_phone(browser, static_site, group):
+def test_every_page_renders_and_is_no_wider_than_a_phone(page, static_site, group):
     site = static_site.rstrip("/")
-    ctx = browser.new_context(viewport={"width": 390, "height": 844})
-    page = ctx.new_page()
+    page.set_viewport_size({"width": 390, "height": 844})
     routes = pages_of(curriculum(page, site), group)
     assert routes, group
-    wide = []
+    wide, broken = [], []
     for r in routes:
         page.goto(site + r)
         page.wait_for_selector("main .page:not(:has(.sk-page))")
+        if page.locator("[data-testid=page-error]").count():
+            broken.append(r)
+            continue
         w = page.evaluate("document.documentElement.scrollWidth")
         if w > 390:
             wide.append((r, w))
-    ctx.close()
+    assert not broken, broken
+    assert page.errors == []
     assert not wide, wide
