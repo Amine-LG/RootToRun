@@ -28,14 +28,23 @@ def stored(page):
     return page.evaluate("JSON.parse(localStorage.getItem('osa.progress.v2'))")
 
 
+def progress_shown(page):
+    """The Progress page has rendered. Its code loads after the curriculum, so after page.goto's load event: leaving
+    before then makes the browser cancel that download, and Firefox then reports it as a failed import."""
+    expect(page.locator(".me-data")).to_be_visible()
+
+
 def test_a_backup_from_the_baseline_site_imports_over_newer_work(page, static_site):
     site = static_site.rstrip("/")
     page.goto(site + "/me")
+    progress_shown(page)
     page.evaluate(f"localStorage.setItem('osa.progress.v2', {json.dumps(json.dumps(LOCAL))})")
     page.reload()
+    progress_shown(page)
     page.locator("input[type=file]").set_input_files(str(BACKUP))
     expect(page.locator(".me-data")).to_contain_text("4 lessons")
     page.reload()
+    progress_shown(page)
 
     p = stored(page)
     assert p["lessons"]["lx.first-steps"]["done"] == T + 1  # newer work kept
