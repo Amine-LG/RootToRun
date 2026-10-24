@@ -17,9 +17,12 @@
       id: situation
       title: "A prompt and nothing else"
       body: |
-        Someone gives you access to a Linux machine and asks you to read a note they left there. **Linux** is
-        an operating system, like Windows or macOS: the software that manages a computer and runs every other
-        program on it. Most servers run Linux, and everything else in this course runs on it too.
+        Someone gives you access to a Linux machine and tells you they left a note for you on it: a short text
+        file, but they did not say where. Finding that note and reading it is what this lesson walks you
+        through, one command at a time.
+
+        **Linux** is an operating system, like Windows or macOS: the software that manages a computer and runs
+        every other program on it. Most servers run Linux, and everything else in this course runs on it too.
 
         When you connect, there are no windows and no icons. A **terminal**, a window that shows only text,
         displays one line, waiting:
