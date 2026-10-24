@@ -112,7 +112,7 @@ def document_loads(page):
 def home(page, site):
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(site)
-    expect(page.locator("#main h1")).to_be_visible()
+    expect(page.locator("#main h1")).to_be_visible(timeout=30_000)  # a whole first load: slow on CI's Windows runner
     page.wait_for_load_state("networkidle")
 
 
