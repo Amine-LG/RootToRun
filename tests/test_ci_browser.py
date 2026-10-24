@@ -1,6 +1,7 @@
 """scripts/ci_browser.sh installs a browser for the Linux CI jobs and its system libraries (apt, slow) only when the
 browser does not start without them. Here a stand-in for .venv/bin/python records what the script asks of it."""
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -54,3 +55,32 @@ def test_every_linux_browser_install_in_ci_goes_through_the_script():
         assert not [r for r in runs if "playwright install" in r], workflow.name
         used |= {workflow.name for r in runs if r.startswith("scripts/ci_browser.sh ")}
     assert used == {"checks-app.yml", "checks-content.yml", "candidate.yml"}
+
+
+def test_every_browser_test_step_uploads_its_traces_only_on_failure():
+    """The Playwright traces a failed browser test leaves (tests/e2e/conftest.py, E2E_ARTIFACTS) are uploaded only when
+    the job failed, kept a week, one name per matrix part, with the pinned upload action. This checks the upload
+    configuration, not that a trace exists: a test that fails only in its teardown may have none."""
+    checked = []
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
+        pins = {s["uses"] for job in jobs.values() for s in job.get("steps", []) if "actions/upload-artifact@" in s.get("uses", "")}
+        assert all(re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", pin) for pin in pins), (workflow.name, pins)
+        for name, job in jobs.items():
+            steps = job.get("steps", [])
+            for i, step in enumerate(steps):
+                if "-m pytest" not in step.get("run", "") or "tests/e2e" not in step["run"].split("--ignore=tests/e2e")[0]:
+                    continue
+                where = f"{workflow.name}:{name}:{step.get('name')}"
+                out = step.get("env", {}).get("E2E_ARTIFACTS")
+                assert out, where
+                (upload,) = [s for s in steps[i + 1:] if "actions/upload-artifact@" in s.get("uses", "")
+                             and s["with"]["path"] == out]
+                assert upload["if"] == "failure()", where
+                assert upload["with"]["retention-days"] <= 7 and upload["with"]["if-no-files-found"] == "ignore", where
+                for key in job.get("strategy", {}).get("matrix", {}):
+                    assert "${{ matrix.%s }}" % key in upload["with"]["name"], where
+                checked.append(f"{workflow.name}:{name}")
+    # the deep lane's Linux matrix and Windows part, the content lane's pages, ci-main's Windows parts, the candidate
+    assert sorted(checked) == ["candidate.yml:test", "checks-app.yml:browser", "checks-app.yml:windows-browser",
+                               "checks-content.yml:pages", "checks-main.yml:windows-browser-rest"], checked

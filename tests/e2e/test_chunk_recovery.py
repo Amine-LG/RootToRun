@@ -130,6 +130,13 @@ def address(url):
     return re.sub(r"/+(?=$|[?#])", "", url, count=1)
 
 
+def panel_shown(page):
+    # after the page's code fails, the app asks the server whether a reload would help (a request) and may reload the
+    # whole page before the panel shows: slow on a busy runner, as in lesson_shown. This checks that the panel comes,
+    # not how fast.
+    expect(page.get_by_test_id("page-error")).to_be_visible(timeout=30_000)
+
+
 def lesson_shown(page, lid, site):
     # fetching the lesson's code and data (again, after a retry or a reload) and rendering it is slow on a busy runner,
     # as in home(): this checks that the lesson comes back, not how fast
@@ -197,7 +204,7 @@ def test_a_reload_from_the_panel_recovers(page, static_site):
     page.route(LESSON, gone)
     reloaded_recently(page, lesson_url(FIRST))
     follow(page, lesson_url(FIRST))
-    expect(page.get_by_test_id("page-error")).to_be_visible()
+    panel_shown(page)
     page.unroute(LESSON)
     page.get_by_test_id("page-reload").click()
     lesson_shown(page, FIRST, static_site)
@@ -235,7 +242,7 @@ def test_b_a_dropped_request_while_online_shows_the_panel_and_is_tried_again_in_
     loads = document_loads(page)
     page.route(LESSON, dropped_once())  # not a deployment: the server still has the file, so no reload
     follow(page, lesson_url(FIRST))
-    expect(page.get_by_test_id("page-error")).to_be_visible()
+    panel_shown(page)
     page.wait_for_timeout(1500)
     assert loads == []
     page.get_by_test_id("page-retry").click()
@@ -314,7 +321,7 @@ def test_d_a_chunk_that_always_fails_reloads_exactly_once_then_shows_the_panel(p
     loads = document_loads(page)
     deployed(page, LESSON, fixed_after_reload=False)  # the new deployment lacks the file too
     follow(page, lesson_url(FIRST))
-    expect(page.get_by_test_id("page-error")).to_be_visible()
+    panel_shown(page)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:  # long enough for a second reload to show
         page.wait_for_timeout(250)

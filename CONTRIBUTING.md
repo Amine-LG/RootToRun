@@ -44,6 +44,15 @@ correct, and can someone else check it? Most content changes need no cluster.
   it (`tests/`), a model change a unit test (`frontend/src/sims/models.test.ts`) and, for visible behaviour, a browser
   test (`tests/e2e/`).
 
+## Who must review
+
+A pull request from anyone but the owner needs the owner's approval of its exact commit before it can merge, unless
+every changed file is Markdown documentation or a lesson screenshot. That includes lessons, labs, incidents,
+challenges, diagnostics and recordings: their commands and manifests are shown to learners, applied to their own
+clusters and run by the owner's recorder. The `ci-guard` check enforces this from the default branch
+(`.github/workflows/ci-guard.yml`); after approving, the owner re-runs it or changes a label. A new commit needs a new
+approval.
+
 ## Before you open a pull request
 
 ```bash
