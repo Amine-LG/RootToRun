@@ -8,7 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTED_SECTIONS = ("## Get the code and its environment", "## Run the website locally", "## Run the tests")
-CI_ONLY = re.compile(r"\s(-q|-n \(\[Math\]::Min\(\[Environment\]::ProcessorCount, 4\)\)|--shard \d/\d)(?=\s|$)")
+CI_ONLY = re.compile(r"\s(-q|-n \(\[Math\]::Min\(\[Environment\]::ProcessorCount, 4\)\)|--shard (\d/\d|\$env:SHARD))(?=\s|$)")
 
 
 def commands(text):
@@ -30,7 +30,7 @@ def test_the_windows_guide_shows_the_commands_ci_runs():
     assert len(documented) >= 12
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "checks-app.yml").read_text(encoding="utf-8"))["jobs"]
     run = []
-    for step in jobs["windows"]["steps"] + jobs["windows-browser"]["steps"]:
+    for step in jobs["windows"]["steps"] + jobs["windows-python"]["steps"] + jobs["windows-browser"]["steps"]:
         run += commands(step.get("run", ""))
         if "serve.py" in step.get("run", ""):  # the server check starts it with Start-Process: its own form
             run.append(r".venv\Scripts\python.exe scripts\serve.py --practice")

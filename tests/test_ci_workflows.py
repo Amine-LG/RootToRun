@@ -28,7 +28,7 @@ def load(path):
 
 WORKFLOWS = {p.name: load(p) for p in sorted(WF.glob("*.yml"))}
 COMPOSITES = {p.parent.name: yaml.safe_load(p.read_text(encoding="utf-8")) for p in sorted(ACTIONS.glob("*/action.yml"))}
-SHARED = ("python", "site", "windows", "same-site")  # the jobs both lanes run, identically
+SHARED = ("python", "site", "windows", "windows-python", "same-site")  # the jobs both lanes run, identically
 
 
 def all_steps():
@@ -138,7 +138,9 @@ def test_both_lanes_share_the_python_site_and_windows_jobs():
     assert python == ["scripts/test_content.sh --data-checks", "scripts/test_content.sh --python"]
     script = (config.ROOT / "scripts" / "test_content.sh").read_text(encoding="utf-8")
     assert "-m content" not in script and "tests --ignore=tests/e2e -n" in script  # the whole suite, no marker
-    windows = " ".join(s.get("run", "") for s in app["windows"]["steps"])
+    for job in ("python", "windows-python"):  # the whole suite, in two parts that together hold every test
+        assert app[job]["strategy"]["matrix"] == {"shard": [1, 2]}, job
+    windows = " ".join(s.get("run", "") for job in ("windows", "windows-python") for s in app[job]["steps"])
     assert "pytest -q tests --ignore=tests/e2e" in windows and "export_static.py" in windows and "serve.py" in windows
 
 
