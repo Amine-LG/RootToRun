@@ -95,6 +95,8 @@ export function Md({ text, className }: { text: string; className?: string }) {
         if (!cells.every((c) => /^:?-{2,}:?$/.test(c))) rows.push(cells)
         i++
       }
+      // Separator lines carry no content; a block made only of them has no header to show, so it renders nothing.
+      if (!rows.length) continue
       const [head, ...body] = rows
       blocks.push(
         <div className={`table-wrap ${head.length >= 3 ? 'stack-on-phone' : ''}`} key={k++}>
