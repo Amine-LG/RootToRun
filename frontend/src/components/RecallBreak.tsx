@@ -3,7 +3,7 @@ import { api, type ReviewCard } from '../lib/data'
 import { useApp } from '../lib/app'
 import { t } from '../lib/i18n'
 import { MdInline } from '../lib/md'
-import { grade, unlocked, useProgress } from '../lib/progress'
+import { grade, hasCardProgress, unlocked, useProgress } from '../lib/progress'
 import { Icon } from './ui'
 
 /** "Before you go": up to three due review cards from OTHER lessons the learner has already studied, mixed in at the
@@ -14,9 +14,13 @@ export function RecallBreak({ lessonId }: { lessonId: string }) {
   const [cards, setCards] = useState<ReviewCard[] | null>(null)
   const [shown, setShown] = useState<Record<string, boolean>>({})
   const [done, setDone] = useState<Record<string, boolean>>({})
+  const eligible = hasCardProgress(prog, lessonId)
   useEffect(() => {
-    api.cards(lang).then(setCards, () => setCards([]))
-  }, [lang])
+    let alive = true
+    setCards(null)
+    if (eligible) api.cards(lang).then((c) => alive && setCards(c), () => alive && setCards([]))
+    return () => { alive = false }
+  }, [lang, eligible])
   // chosen once per visit, so grading a card does not reshuffle the set
   const pick = useMemo(() => {
     if (!cards) return []

@@ -1,32 +1,39 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { AccountSyncProvider } from './components/AccountSync'
+import { lazyPage, PageBoundary } from './components/PageBoundary'
 import { Shell } from './components/Shell'
 import { Callout, NotFound, PageSkeleton } from './components/ui'
 import { useApp } from './lib/app'
 import type { Curriculum } from './lib/data'
 import { DIAGRAMS } from './lib/diagrams'
-import { lastNav, useLocation } from './lib/router'
+import { focusHeading } from './lib/focus'
+import { anchorTarget, lastNav, useLocation } from './lib/router'
 import { resolve, type Ref } from './lib/urls'
 import { t } from './lib/i18n'
-import About from './pages/About'
-import Commands from './pages/Commands'
-import Connections from './pages/Connections'
-import Course, { Paths } from './pages/Course'
-import Diagnostic from './pages/Diagnostic'
-import Explorer from './pages/Explorer'
-import Handbook, { CasePage, RunbookPage } from './pages/Handbook'
 import Home from './pages/Home'
-import LabPage from './pages/Lab'
-import KnowledgeMap from './pages/KnowledgeMap'
-import Setup from './pages/Setup'
-import Lesson from './pages/Lesson'
-import { Challenges, Incidents, Labs } from './pages/Lists'
-import Me from './pages/Me'
-import Review from './pages/Review'
-import Studio from './pages/Studio'
-import TerminalPage from './pages/Terminal'
 
-const Author = lazy(() => import('./pages/Author'))
+const About = lazyPage(() => import('./pages/About'))
+const Commands = lazyPage(() => import('./pages/Commands'))
+const Connections = lazyPage(() => import('./pages/Connections'))
+const Course = lazyPage(() => import('./pages/Course'))
+const Paths = lazyPage(() => import('./pages/Course'), (m) => m.Paths)
+const Diagnostic = lazyPage(() => import('./pages/Diagnostic'))
+const Explorer = lazyPage(() => import('./pages/Explorer'))
+const Handbook = lazyPage(() => import('./pages/Handbook'))
+const CasePage = lazyPage(() => import('./pages/Handbook'), (m) => m.CasePage)
+const RunbookPage = lazyPage(() => import('./pages/Handbook'), (m) => m.RunbookPage)
+const LabPage = lazyPage(() => import('./pages/Lab'))
+const KnowledgeMap = lazyPage(() => import('./pages/KnowledgeMap'))
+const Setup = lazyPage(() => import('./pages/Setup'))
+const Lesson = lazyPage(() => import('./pages/Lesson'))
+const Challenges = lazyPage(() => import('./pages/Lists'), (m) => m.Challenges)
+const Incidents = lazyPage(() => import('./pages/Lists'), (m) => m.Incidents)
+const Labs = lazyPage(() => import('./pages/Lists'), (m) => m.Labs)
+const Me = lazyPage(() => import('./pages/Me'))
+const Review = lazyPage(() => import('./pages/Review'))
+const Studio = lazyPage(() => import('./pages/Studio'))
+const TerminalPage = lazyPage(() => import('./pages/Terminal'))
+const Author = lazyPage(() => import('./pages/Author'))
 
 export default function App() {
   const loc = useLocation()
@@ -48,6 +55,33 @@ export default function App() {
     if (lastNav.restored) return void document.getElementById('main')?.focus({ preventScroll: true })
     return focusHeading()
   }, [loc.path]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!cur || !loc.hash || lastNav.restored) return
+    let id: string
+    try { id = decodeURIComponent(loc.hash.slice(1)) } catch { return }
+    const main = document.getElementById('main')
+    if (!main) return
+    // The router's immediate anchor jump may precede a lazy page. Retry when its content arrives.
+    const jump = () => {
+      const target = anchorTarget(id)
+      if (!target || !main.contains(target)) return false
+      target.scrollIntoView({ block: 'start' })
+      return true
+    }
+    if (jump()) return
+    const stop = () => {
+      observer.disconnect()
+      clearTimeout(timer)
+      for (const event of events) window.removeEventListener(event, stop, true)
+    }
+    const observer = new MutationObserver(() => { if (jump()) stop() })
+    const timer = window.setTimeout(stop, 4000)
+    const events = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+    observer.observe(main, { childList: true, subtree: true })
+    for (const event of events) window.addEventListener(event, stop, { capture: true, passive: true })
+    return stop
+  }, [cur, loc.path, loc.search, loc.hash])
 
   let page
   if (error && !cur) page = <div className="page"><Callout tone="bad" title={t('app.loadError')}>{error}</Callout></div>
@@ -80,7 +114,9 @@ export default function App() {
     <AccountSyncProvider>
     <Shell route={route} key={meta?.mode}>
       <div className="page-enter" key={a === 'studio' ? `${a}/${b}` : route}>
-        {page}
+        <PageBoundary at={route}>
+          <Suspense fallback={<div className="page"><PageSkeleton /></div>}>{page}</Suspense>
+        </PageBoundary>
       </div>
     </Shell>
     </AccountSyncProvider>
@@ -121,26 +157,4 @@ function pageName(cur: Curriculum, a: string, b: string, c: string, cluster: boo
   if (cluster && a === 'explorer') return t('title.explorer')
   if (cluster && a === 'connections') return t('title.connections')
   return t('app.notFound')
-}
-
-/** Focus the new page's h1 once it renders (pages load their content asynchronously), without scrolling. Gives up if
- *  focus has already moved into the page, or after a few seconds. Returns the cleanup. */
-function focusHeading(): () => void {
-  const main = document.getElementById('main')
-  if (!main) return () => {}
-  const attempt = () => {
-    const f = document.activeElement
-    if (f && f !== main && main.contains(f)) return true // the page placed focus itself (a step, a field)
-    const h = main.querySelector<HTMLElement>('h1')
-    if (!h) return false
-    if (!h.hasAttribute('tabindex')) h.tabIndex = -1
-    h.focus({ preventScroll: true })
-    return true
-  }
-  if (attempt()) return () => {}
-  const mo = new MutationObserver(() => attempt() && stop())
-  const timer = window.setTimeout(() => stop(), 4000)
-  const stop = () => (mo.disconnect(), clearTimeout(timer))
-  mo.observe(main, { childList: true, subtree: true })
-  return stop
 }

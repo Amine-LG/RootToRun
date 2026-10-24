@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { PageActions } from '../components/Contribute'
 import { FlowDiagram } from '../components/FlowDiagram'
 import { PageHead } from '../components/PageHead'
+import { useOnline } from '../components/PageBoundary'
 import { Callout, Icon, Spinner } from '../components/ui'
+import { reloadPage, retrying } from '../lib/chunks'
 import { DIAGRAMS } from '../lib/diagrams'
 import { navigate } from '../lib/router'
 import { t } from '../lib/i18n'
@@ -14,20 +16,46 @@ import '../explore.css'
 
 export type SimDef = { id: string; title: string; summary: string; concepts: string[]; Component: () => JSX.Element }
 const simLoaders = import.meta.glob('../sims/index.ts') as Record<string, () => Promise<{ SIMS: SimDef[] }>>
+const [simImport] = Object.values(simLoaders)
+const simLoader = simImport && retrying(simImport)
 let simCache: Promise<SimDef[]> | null = null
+/** The models' code, loaded once. A failed load is forgotten, so the next request tries again (lib/chunks.ts). */
 export function loadSims(): Promise<SimDef[]> {
-  const loader = Object.values(simLoaders)[0]
-  if (!loader) return Promise.resolve([])
-  return (simCache ??= loader().then((m) => m.SIMS || []))
+  if (!simLoader) return Promise.resolve([])
+  return (simCache ??= simLoader().then((m) => m.SIMS || [], (e) => {
+    simCache = null
+    throw e
+  }))
 }
-export const simTitle = () => loadSims().then((s) => Object.fromEntries(s.map((x) => [x.id, x.title])))
 
-function useSims() {
+/** The models, null while they load. A failed load is shown where the model would be (ModelFailed), never instead
+ *  of the page around it: a lesson or a diagram is still worth reading. */
+function useSims(): { sims: SimDef[] | null; failed: boolean; retry: () => void } {
   const [sims, setSims] = useState<SimDef[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [round, setRound] = useState(0)
   useEffect(() => {
-    loadSims().then(setSims, () => setSims([]))
-  }, [])
-  return sims
+    let live = true
+    loadSims().then((s) => live && setSims(s), () => live && setFailed(true))
+    return () => { live = false }
+  }, [round])
+  return { sims, failed, retry: () => (setFailed(false), setRound((n) => n + 1)) }
+}
+
+/** In place of a model that could not load: what happened (offline or not), and Try again or Reload. */
+function ModelFailed({ onRetry }: { onRetry: () => void }) {
+  const online = useOnline()
+  return (
+    <div data-testid="model-error">
+      <Callout tone="warn" title={t('studio.modelFailed')}>
+        <p>{t(online ? 'studio.modelFailedText' : 'studio.modelOffline')}</p>
+        <p className="row">
+          <button type="button" className="btn sm primary" onClick={onRetry} data-testid="model-retry">{t('app.pageRetry')}</button>
+          <button type="button" className="btn sm" onClick={() => void reloadPage()}>{t('app.pageReload')}</button>
+        </p>
+      </Callout>
+    </div>
+  )
 }
 
 /** Older content refers to some diagrams by former ids. */
@@ -39,7 +67,8 @@ export function Diagram({ id }: { id: string }) {
 }
 
 export function SimById({ id }: { id: string; bare?: boolean }) {
-  const sims = useSims()
+  const { sims, failed, retry } = useSims()
+  if (failed) return <ModelFailed onRetry={retry} />
   if (!sims) return <Spinner />
   const s = sims.find((x) => x.id === id)
   if (!s) return null
@@ -75,7 +104,7 @@ function usePrefFlag(key: string): [boolean, (v: boolean) => void] {
 }
 
 export default function Studio({ view }: { view: string }) {
-  const sims = useSims()
+  const { sims, failed, retry } = useSims()
   const [hideList, setHideList] = usePrefFlag('osa.studio.hideList')
   const items: Item[] = [
     ...(sims || []).map((s) => ({ kind: 'model' as const, id: s.id, title: s.title, summary: s.summary })),
@@ -83,7 +112,7 @@ export default function Studio({ view }: { view: string }) {
   ]
   // Until the models have loaded, a model (or the default view, which is the first model) cannot be resolved yet:
   // wait instead of flashing a different item or an empty stage.
-  const waiting = sims === null && (view === 'index' || !resolve(view, items))
+  const waiting = sims === null && !failed && (view === 'index' || !resolve(view, items))
   const selected = waiting ? undefined : view === 'index' ? items.find((x) => x.kind === 'model') || items[0] : resolve(view, items)
   const key = (x: Item) => `${x.kind}/${x.id}`
   const isOn = (kind: Item['kind'], id: string) => selected?.kind === kind && selected.id === id
@@ -123,7 +152,12 @@ export default function Studio({ view }: { view: string }) {
           </label>
           <div className="studio-groups">
             <div className="menu-h">{t('studio.sims')}</div>
-            {sims === null && <Spinner label={t('studio.loadingModels')} />}
+            {sims === null && !failed && <Spinner label={t('studio.loadingModels')} />}
+            {failed && (
+              <p className="small">
+                {t('studio.modelsMissing')} <button type="button" className="linkish" onClick={retry}>{t('app.pageRetry')}</button>
+              </p>
+            )}
             {(sims || []).map((s) => (
               <button key={s.id} className={`studio-item ${isOn('model', s.id) ? 'on' : ''}`} onClick={() => select(`model/${s.id}`)} aria-current={isOn('model', s.id) ? 'true' : undefined}>
                 {s.title}
@@ -157,6 +191,7 @@ export default function Studio({ view }: { view: string }) {
             </div>
           )}
           {waiting && <Spinner label={t('studio.loadingModels')} />}
+          {!selected && !waiting && failed && <ModelFailed onRetry={retry} />}
           {!selected && !waiting && sims !== null && <Callout tone="info">{t('studio.pick')}</Callout>}
           {selected && (prev || next) && (
             <nav className="xp-pager" aria-label={t('xp.pagerLabel')}>

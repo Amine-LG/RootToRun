@@ -46,7 +46,7 @@ export const MODEL_SOURCES: Record<string, string> = {
   rbac: 'RbacSim.tsx', storage: 'StorageSim.tsx', drift: 'DriftSim.tsx', perms: 'PermsSim.tsx',
 }
 const SIMS_DIR = 'frontend/src/sims/'
-export const MODEL_CATALOGUE = 'frontend/src/sims/index.ts' // titles and summaries of the models
+export const MODEL_CATALOGUE = 'frontend/src/sims/catalog.ts' // titles and summaries of the models
 export const DIAGRAMS_FILE = 'frontend/src/lib/diagrams.ts' // every diagram, as data
 
 export type EditKey = 'lesson' | 'lab' | 'incident' | 'challenge' | 'runbook' | 'case' | 'diagnostic' | 'modelCode' | 'modelText' | 'diagram' | 'concept' | 'concepts' | 'path' | 'modules'
