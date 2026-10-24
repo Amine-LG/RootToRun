@@ -26,7 +26,7 @@ def ci_browser(tmp_path, launch_exit):
     (venv / "python").write_text(STAND_IN, encoding="utf-8")
     (venv / "python").chmod(0o755)
     env = {**os.environ, "LAUNCH_EXIT": str(launch_exit)}
-    done = subprocess.run(["bash", str(SCRIPT), "firefox"], cwd=tmp_path, env=env, capture_output=True, text=True)
+    done = subprocess.run(["bash", str(SCRIPT), "firefox"], cwd=tmp_path, env=env, capture_output=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr
     return (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines(), done.stdout
 
