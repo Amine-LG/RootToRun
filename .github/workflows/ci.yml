@@ -47,6 +47,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
       - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
       # first: a file that does not load makes dozens of tests fail; this names it, on the file in the pull request
       - name: Course content loads
@@ -77,6 +78,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
       # the frontend tests read the lessons through the Python environment, so it comes first
       - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
       - name: Frontend unit tests, type check and build
@@ -107,6 +109,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
       - name: Python environment
         run: uv venv .venv --python 3.12 && uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
       - name: Course content loads
@@ -197,6 +200,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
       - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
       - name: Runner size (the browser test workers follow it)
         run: nproc && free -m
@@ -221,7 +225,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.pw.outputs.version }}
-      - run: .venv/bin/python -m playwright install --with-deps "$BROWSER"
+      - run: scripts/ci_browser.sh "$BROWSER"
         env:
           BROWSER: ${{ matrix.browser }}
       - name: Browser tests against the running image (${{ matrix.browser }}, part ${{ matrix.shard }} of 3)
@@ -233,3 +237,41 @@ jobs:
         run: |
           workers=$(( $(nproc) < 4 ? $(nproc) : 4 ))
           .venv/bin/python -m pytest -q tests/e2e --shard "$SHARD" -n "$workers" --durations=10
+
+  # Rollout: require browser-tests and remove the six matrix contexts before changing the matrix.
+  browser-tests:
+    needs: [changes, image-and-browser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every part of the browser tests passed, or the change did not need them
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          SITE: ${{ needs.changes.outputs.site }}
+          PARTS: ${{ needs.image-and-browser.result }}
+        run: |
+          echo "changes: $CHANGES; image and browser tests needed: $SITE; their result: $PARTS"
+          [ "$CHANGES" = success ] || exit 1
+          case "$SITE/$PARTS" in true/success | false/skipped) ;; *) exit 1 ;; esac
+
+  # Rollout bridge: all eleven old contexts still report. Make ci-ok the ONLY required context
+  # after this commit is on main, before merging the contributor tiers.
+  ci-ok:
+    needs: [changes, content-and-python, site, windows, same-site, browser-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All required checks passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CONTENT: ${{ needs.content-and-python.result }}
+          SITE: ${{ needs.site.result }}
+          WINDOWS: ${{ needs.windows.result }}
+          SAME_SITE: ${{ needs.same-site.result }}
+          BROWSER: ${{ needs.browser-tests.result }}
+        run: |
+          for result in "$CHANGES" "$CONTENT" "$SITE" "$WINDOWS" "$SAME_SITE" "$BROWSER"; do
+            [ "$result" = success ] || exit 1
+          done
