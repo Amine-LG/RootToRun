@@ -1,0 +1,21 @@
+# Files that decide what CI runs, how the site and the image are built, which dependencies are installed, and what a
+# lab applies to a learner's cluster. GitHub asks the owner to review pull requests that change them. This file does
+# not block a merge by itself ("Require review from Code Owners" is off: the owner could not approve their own pull
+# requests); ci-guard (.github/workflows/ci-guard.yml) is what requires the owner's approval (CONTRIBUTING.md).
+/.github/                    @Amine-LG
+/scripts/                    @Amine-LG
+/tests/                      @Amine-LG
+/pytest.ini                  @Amine-LG
+/requirements*.txt           @Amine-LG
+/requirements.in             @Amine-LG
+/frontend/package.json       @Amine-LG
+/frontend/package-lock.json  @Amine-LG
+/frontend/scripts/           @Amine-LG
+/frontend/vite.config.*      @Amine-LG
+/frontend/tsconfig*          @Amine-LG
+/Containerfile               @Amine-LG
+/.dockerignore               @Amine-LG
+/deploy/                     @Amine-LG
+/compose.yaml                @Amine-LG
+/content/                    @Amine-LG
+/backend/                    @Amine-LG
