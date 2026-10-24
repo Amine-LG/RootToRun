@@ -131,7 +131,9 @@ def address(url):
 
 
 def lesson_shown(page, lid, site):
-    expect(page.get_by_test_id("lesson-facts")).to_be_visible()
+    # fetching the lesson's code and data (again, after a retry or a reload) and rendering it is slow on a busy runner,
+    # as in home(): this checks that the lesson comes back, not how fast
+    expect(page.get_by_test_id("lesson-facts")).to_be_visible(timeout=30_000)
     page.wait_for_load_state("load")  # a page can show before its load event: count a reload only once it is done
     assert address(page.url) == site.rstrip("/") + lesson_url(lid)
 
