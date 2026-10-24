@@ -1,4 +1,5 @@
 # The first lesson of the Linux path (lx1-shell), written as a teaching flow: one small task done end to end.
+# (measuring the content lane of CI again; this pull request is never merged)
 - id: lx.first-steps
   title: "Your first minutes in a shell"
   subtitle: "Where you are, what is there, and reading a file"
