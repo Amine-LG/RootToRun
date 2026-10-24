@@ -561,6 +561,13 @@ class ExecIn(BaseModel):
     confirm: bool = False
 
 
+def _as_run(c) -> str:
+    """What a confirmation shows: the command that will run (a lab command's `run` form when it has one, with its
+    placeholders such as {pod:app=web} still to be filled in) and the YAML it sends, not only the displayed `cmd`."""
+    text = c.run or c.cmd
+    return f"{text}\n{c.stdin.rstrip()}" if c.stdin else text
+
+
 @app.post("/api/labs/{lid}/exec")
 def lab_exec(lid: str, body: ExecIn, lang: str | None = None):
     """Run one of the lab's own (recorded) commands on the cluster, with its placeholders resolved live."""
@@ -582,14 +589,14 @@ def lab_exec(lid: str, body: ExecIn, lang: str | None = None):
         if not environment.same_cluster("admin"):
             return {"refused": True, "reason": "The admin identity is connected to a different cluster than the learner; disconnect it."}
         if not body.confirm:
-            return {"needs_confirm": True, "display": c.cmd, "namespace": l.namespace, "admin": True}
+            return {"needs_confirm": True, "display": _as_run(c), "namespace": l.namespace, "admin": True}
     else:
         try:
             write = policy.plan(c.run or c.cmd, c.as_, l.namespace, str(labs.labfiles_dir(l))).write
         except policy.Refused:
             write = False  # placeholders are resolved below; the runner re-checks the resolved command
         if write and not body.confirm:
-            return {"needs_confirm": True, "display": c.cmd, "namespace": l.namespace}
+            return {"needs_confirm": True, "display": _as_run(c), "namespace": l.namespace}
     if l.files:
         labs.write_files(l)
     labs.note_lab_volumes(l)  # a step may delete a claim: record its volume first

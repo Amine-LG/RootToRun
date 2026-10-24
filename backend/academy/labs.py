@@ -23,7 +23,7 @@ import yaml
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)  # libyaml when available: the content is large
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
-from . import checks, config, environment, kube, ledger, policy
+from . import checks, config, environment, kube, ledger, manifests, policy
 
 MARKER = config.MARKER
 Mode = Literal["REAL_LAB", "LOCAL_SIMULATION", "GUIDED_INVESTIGATION", "ENTERPRISE_ARCHITECTURE", "EXTERNAL_LAB_REQUIRED"]
@@ -118,7 +118,69 @@ def _check_manifests(docs: list[str], allowed: set[str] | None = None) -> list[s
                 raise ValueError(f"lab manifests may not create {kind}")
             if obj.get("metadata", {}).get("namespace"):
                 raise ValueError("lab manifests must not set metadata.namespace (the lab namespace is applied)")
+        # the same objects again, inside List and Template wrappers too, against the writable-kind allowlist
+        manifests.validate_manifests(d, None, namespace_mode="unset", allowed_kinds=allowed)
     return docs
+
+
+# Defense in depth for what a lab applies to the learner's own cluster: setup and break (learner identity),
+# elevated_setup (admin identity, after the learner's consent) and the YAML a command sends with `-f -`. These rules
+# read names and rules written in the lab; they do not resolve existing Role or ClusterRole permissions, so
+# elevated (admin) bindings may name only the view cluster role or a namespaced Role. Commands run as admin are not
+# limited here: the learner confirms each one as it will run (main.lab_exec), and the owner reviews lab content.
+PRIVILEGED_ROLES = {"cluster-admin", "admin"}
+ELEVATED_CLUSTER_ROLES = {"view"}
+POWERFUL_VERBS = {"*", "escalate", "bind", "impersonate"}
+RBAC_GROUP = "rbac.authorization.k8s.io"
+
+
+def _rbac(objects: list) -> list[dict]:
+    """Every role and binding in the documents, also inside List and Template wrappers."""
+    out = []
+    for obj in objects:
+        if isinstance(obj, dict):
+            if obj.get("kind") in ("RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"):
+                out.append(obj)
+            for field in ("items", "objects"):
+                if isinstance(obj.get(field), list):
+                    out += _rbac(obj[field])
+    return out
+
+
+def _named(value) -> bool:
+    """A literal name: a string without a template parameter and outside the system: names."""
+    return isinstance(value, str) and bool(value) and "${" not in value and not value.lower().startswith("system:")
+
+
+def _check_bindings(docs: list[str], namespaces: list[str], field: str, elevated: bool = False) -> None:
+    for d in docs:
+        for obj in _rbac(list(yaml.safe_load_all(d))):
+            name = (obj.get("metadata") or {}).get("name", "?")
+            if obj["kind"] in ("Role", "ClusterRole"):
+                for rule in obj.get("rules") or []:
+                    rule = rule if isinstance(rule, dict) else {}
+                    if POWERFUL_VERBS & set(rule.get("verbs") or []) or "*" in (rule.get("resources") or []) \
+                            or "*" in (rule.get("apiGroups") or []):
+                        raise ValueError(f"{field}: role {name} may not use *, escalate, bind or impersonate")
+                continue
+            # a binding stays in the lab's projects; a service account named without a namespace is in the binding's
+            own = (obj.get("metadata") or {}).get("namespace")
+            if own is not None and own not in namespaces:
+                raise ValueError(f"{field}: binding {name} is outside the lab's projects")
+            ref = obj.get("roleRef") if isinstance(obj.get("roleRef"), dict) else {}
+            role = ref.get("name")
+            if not _named(role) or role in PRIVILEGED_ROLES or ref.get("kind") not in ("Role", "ClusterRole") \
+                    or ref.get("apiGroup") != RBAC_GROUP:
+                raise ValueError(f"{field}: binding {name} may not grant the role {role!r}")
+            if elevated and not (ref["kind"] == "Role" or role in ELEVATED_CLUSTER_ROLES):
+                raise ValueError(f"{field}: a binding applied as admin may grant only a Role or the view cluster role")
+            for s in obj.get("subjects") or []:
+                s = s if isinstance(s, dict) else {}
+                who = s.get("name")
+                if not _named(who) or who == "*" or s.get("kind") not in ("User", "Group", "ServiceAccount"):
+                    raise ValueError(f"{field}: binding {name} may not name the subject {who!r}")
+                if s["kind"] == "ServiceAccount" and s.get("namespace", own or namespaces[0]) not in namespaces:
+                    raise ValueError(f"{field}: binding {name} names a service account outside the lab's projects")
 
 
 class ClusterObject(Strict):
@@ -190,6 +252,17 @@ class Lab(Strict):
     # incidents: the checks that are monitoring-level evidence (availability, the Route's answer, a timeout, a 403), shown
     # before the answer; every other check states the cause and appears only with it. Prose, outside the recording hash.
     symptom_checks: list[str] = []
+
+    @model_validator(mode="after")
+    def bindings_ok(self):
+        for field in ("setup", "break_", "elevated_setup"):
+            _check_bindings(getattr(self, field), self.namespaces, field.rstrip("_"), elevated=field == "elevated_setup")
+        # every command that can send YAML, also a challenge's trials (run by the recorder), not only all_commands()
+        commands = self.all_commands() + [(f"trial:{t.id}", c) for t in self.trials for c in t.commands]
+        for where, c in commands:
+            if c.stdin:
+                _check_bindings([c.stdin], self.namespaces, f"{where} stdin", elevated=c.as_ == "admin")
+        return self
 
     @model_validator(mode="after")
     def challenge_complete(self):
