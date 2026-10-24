@@ -403,3 +403,51 @@ def test_flow_lessons_get_teaching_standard_warnings(local):
     result = local.post("/api/author/validate", json=edit(data, source), headers=H).json()
     assert result["ok"], result
     assert any("is not recorded yet" in w for w in result["warnings"])
+
+
+def _listing(kind):
+    return [(b.kind, b.id, b.title, b.path, b.text, b.start, b.end) for b in authoring.blocks(kind)]
+
+
+def test_blocks_parse_a_file_again_only_when_its_text_changes(local, monkeypatch):
+    """authoring.blocks() keeps each file's parse keyed by its exact text: the same listing without parsing unchanged
+    files again, and a change of one byte is parsed again (no stale ids, titles or offsets)."""
+    parsed = []
+    real = authoring._parse_entries
+    monkeypatch.setattr(authoring, "_parse_entries", lambda kind, text: parsed.append(kind) or real(kind, text))
+    authoring._PARSED.clear()
+    files = sorted((config.content_dir() / "lessons").glob("*.yaml"))
+    first = _listing("lesson")
+    assert len(parsed) == len(files)
+    assert _listing("lesson") == first and len(parsed) == len(files)  # unchanged: from the memo, identical
+    block = authoring.find("lesson", "h.observability")
+    edited = block.text.replace(block.source, block.source.replace("- id: h.observability", "- id: h.observability-renamed", 1), 1)
+    assert edited != block.text
+    block.path.write_bytes(edited.encode("utf-8"))
+    parsed.clear()
+    after = _listing("lesson")
+    assert parsed == ["lesson"]  # only the changed file
+    assert "h.observability-renamed" in [b[1] for b in after] and "h.observability" not in [b[1] for b in after]
+    authoring._PARSED.clear()
+    assert _listing("lesson") == after  # the same as a parse without the memo
+
+
+def test_a_memoised_file_still_passes_the_path_checks_and_names_its_file(local, tmp_path):
+    """The memo holds parses only: a file whose text was parsed before is still refused when it becomes a symbolic
+    link, and a parse error names the file that has it now."""
+    block = authoring.find("lesson", "h.observability")  # its text is now memoised
+    outside = tmp_path / "outside.yaml"
+    outside.write_bytes(block.text.encode("utf-8"))  # the same text, elsewhere
+    block.path.unlink()
+    block.path.symlink_to(outside)
+    with pytest.raises(authoring.HTTPException) as refused:
+        authoring.blocks("lesson")
+    assert refused.value.status_code == 400
+    block.path.unlink()
+    lessons = config.content_dir() / "lessons"
+    for name in ("a-broken.yaml", "b-broken.yaml"):
+        (lessons / name).write_text("- id: x\n  id: y\n", encoding="utf-8")  # a duplicate key
+        with pytest.raises(authoring.HTTPException) as broken:
+            authoring.blocks("lesson")
+        assert broken.value.status_code == 422 and broken.value.detail.startswith(f"{name}: duplicate YAML keys"), broken.value.detail
+        (lessons / name).unlink()
