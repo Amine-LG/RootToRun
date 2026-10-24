@@ -40,7 +40,18 @@ def test_existing_sources_are_available_before_the_experiment(page, static_site,
                 break
             page.wait_for_timeout(100)
         assert code.text_content().rstrip("\n") == body.rstrip("\n")
-        file.get_by_role("button", name=f"Copy source file {name}", exact=True).click()
+        # opening the file scrolls it into view: click Copy once the page stands still, or the click lands on the
+        # Copy button of the file above it (two Firefox CI runs copied the previous file's text)
+        page.evaluate(SETTLED)
+        copy = file.get_by_role("button", name=f"Copy source file {name}", exact=True)
+        copy.scroll_into_view_if_needed()
+        page.evaluate(SETTLED)
+        copy.click()
+        # the copy is written asynchronously
+        for _ in range(50):
+            if page.evaluate("window.copiedSource") == body:
+                break
+            page.wait_for_timeout(100)
         assert page.evaluate("window.copiedSource") == body
     assert page.errors == []
 
