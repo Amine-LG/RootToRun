@@ -2,7 +2,8 @@
 shows (the lesson's facts, the lab player, the diagnostic's introduction), not the recovery panel or a load error, with
 no page or console error, and no horizontal page scroll. Long tables and code scroll inside their own boxes; buttons
 that carry a title wrap. One test per page group. This is the content lane's browser check (docs/CI.md): it opens each
-page as it first appears; what a page shows after a click is rendered by frontend/src/lib/md.content.test.ts."""
+page as it first appears; frontend/src/lib/md.content.test.ts separately renders every string of the content through
+the Markdown renderer, without the components that show them after a click."""
 import json
 
 import pytest

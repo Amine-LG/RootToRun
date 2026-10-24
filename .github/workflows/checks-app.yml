@@ -205,7 +205,7 @@ jobs:
         run: |
           workers=$(( $(nproc) < 4 ? $(nproc) : 4 ))
           .venv/bin/python -m pytest -q tests/e2e --shard "$SHARD" -n "$workers" --durations=10
-      # a failed browser test leaves its Playwright trace (tests/e2e/conftest.py): python -m playwright show-trace
+      # the traces of failed browser tests, when there are any (tests/e2e/conftest.py): python -m playwright show-trace
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with: {name: "browser-traces-${{ matrix.browser }}-${{ matrix.shard }}", path: e2e-artifacts, retention-days: 7, if-no-files-found: ignore}
@@ -239,7 +239,7 @@ jobs:
           E2E_BROWSER: firefox
           E2E_ARTIFACTS: e2e-artifacts
         run: .venv\Scripts\python.exe -m pytest -q tests/e2e --shard 1/5 -n ([Math]::Min([Environment]::ProcessorCount, 4))
-      # a failed browser test leaves its Playwright trace (tests/e2e/conftest.py): python -m playwright show-trace
+      # the traces of failed browser tests, when there are any (tests/e2e/conftest.py): python -m playwright show-trace
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with: {name: "browser-traces-windows-1", path: e2e-artifacts, retention-days: 7, if-no-files-found: ignore}

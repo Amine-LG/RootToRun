@@ -168,9 +168,9 @@ def test_the_release_candidate_tests_the_published_image_with_the_whole_suite():
     assert WORKFLOWS["candidate.yml"]["jobs"]["publish"]["needs"] == ["build", "test"]
 
 
-def alert_run(tmp_path, main, latest, open_issue, event_url):
-    """The alert's shell with an offline gh: `main` is the commit main points to, `latest` the latest completed ci-main
-    run for it ("conclusion url", or "" for none), `open_issue` the open issue's number or ""."""
+def alert_run(tmp_path, main, latest, open_issue, event_url, runs=None):
+    """The alert's shell with an offline gh and the real jq: `main` is the commit main points to, `latest` its one run
+    ("conclusion url", or "" for none) unless `runs` gives the API's pages, `open_issue` the open issue or ""."""
     stub = tmp_path / "gh.py"
     stub.write_text('''import json, os, sys
 args = sys.argv[1:]
@@ -179,14 +179,23 @@ if args[:2] == ["issue", "list"]:
     print(os.environ["OPEN"])
 elif args[:1] == ["api"] and "/commits/main" in args[1]:
     print(os.environ["MAIN"])
-elif args[:1] == ["api"] and "/runs?" in args[1]:
-    assert "head_sha=" + os.environ["MAIN"] in args[1] and "status=completed" in args[1]
-    print(os.environ["LATEST"])
+elif args[:1] == ["api"] and any("/runs?" in a for a in args):
+    endpoint = next(a for a in args if "/runs?" in a)
+    assert "head_sha=" + os.environ["MAIN"] in endpoint and "status=completed" not in endpoint
+    assert "--paginate" in args and "--slurp" in args
+    if os.environ.get("RUNS"):
+        print(os.environ["RUNS"])
+    else:
+        value = os.environ["LATEST"].split(" ", 1)
+        rows = [] if not value[0] else [{"id": 1, "run_attempt": 1, "status": "completed",
+                "run_started_at": "2026-10-24T10:00:00Z", "conclusion": value[0], "html_url": value[1]}]
+        print(json.dumps([{"workflow_runs": rows}]))
 ''', encoding="utf-8")
     log = tmp_path / f"log-{len(list(tmp_path.glob('log-*')))}"
     script = 'gh() { "$PY" "$STUB" "$@"; }\n' + WORKFLOWS["main-alert.yml"]["jobs"]["alert"]["steps"][0]["run"]
     env = {**os.environ, "PY": sys.executable, "STUB": str(stub), "LOG": str(log), "OPEN": open_issue, "MAIN": main,
-           "LATEST": latest, "REPO": "owner/repo", "OWNER": "owner", "EVENT_RUN_URL": event_url, "GH_TOKEN": "offline"}
+           "LATEST": latest, "REPO": "owner/repo", "OWNER": "owner", "EVENT_RUN_URL": event_url, "GH_TOKEN": "offline",
+           "RUNS": json.dumps(runs) if runs is not None else ""}
     result = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script], env=env,
                             capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
@@ -209,6 +218,22 @@ def test_the_alert_follows_mains_current_state_not_the_event(tmp_path):
     assert alert_run(tmp_path, a, f"success {run2}", "", run1)[0] == []
     assert alert_run(tmp_path, a, "", "7", run1)[0] == []  # no completed run for main's commit yet
     assert alert_run(tmp_path, a, f"skipped {run1}", "7", run1)[0] == []
+
+
+def test_the_alert_waits_for_a_pending_retry_and_reads_every_page(tmp_path):
+    url1, url2 = "https://github.com/owner/repo/actions/runs/1", "https://github.com/owner/repo/actions/runs/2"
+    older = {"id": 1, "run_attempt": 1, "status": "completed", "conclusion": "success",
+             "run_started_at": "2026-10-24T10:00:00Z", "html_url": url1}
+    # a failed run being re-run: an older success must not close the issue, also when the queued attempt has no start
+    # time yet (it would sort first, and the older success would look like the latest)
+    for status, started in (("queued", "2026-10-24T12:00:00Z"), ("in_progress", "2026-10-24T12:00:00Z"),
+                            ("queued", "")):
+        retry = {"id": 2, "run_attempt": 2, "status": status, "conclusion": None, "run_started_at": started,
+                 "html_url": url2}
+        assert alert_run(tmp_path, "a" * 40, "", "7", url1, runs=[{"workflow_runs": [older, retry]}])[0] == [], started
+    newer_attempt = {**older, "run_attempt": 2, "conclusion": "failure", "run_started_at": "2026-10-24T13:00:00Z"}
+    pages = [{"workflow_runs": [{**older, "id": 2, "html_url": url2}]}, {"workflow_runs": [newer_attempt]}]
+    assert alert_run(tmp_path, "a" * 40, "", "7", url1, runs=pages)[0] == [["issue", "comment"]]
 
 
 def test_what_the_guard_exempts_also_takes_the_content_lane():

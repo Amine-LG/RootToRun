@@ -47,12 +47,15 @@ the Containerfile and nginx, any other file type, and anything the list does not
 
 A content change cannot touch the code, the nginx rules or the build that the image and the browser suite test; it
 can break how a page renders. The page check opens every page as it first appears and requires its own content (a
-lesson's facts, the lab player, a diagnostic's introduction); what a page shows only after a click (a diagnostic's
-questions, a lesson's "Go deeper" panel) is covered by `frontend/src/lib/md.content.test.ts`, which renders every
-string of the content, in the site job of both lanes. What the content lane leaves to ci-main: Firefox, the Windows
-browser tests and the production image's nginx rules for content pages. The deep lane's jobs run side by side; the content lane's
+lesson's facts, the lab player, a diagnostic's introduction). In the site job of both lanes,
+`frontend/src/lib/md.content.test.ts` renders every string of `content/en` through the Markdown renderer, including
+what a page shows only after a click (a diagnostic's questions, a lesson's "Go deeper" panel); it catches the renderer
+failing on content, not those components' behaviour, layout or focus. The content lane leaves to ci-main the
+interactive browser tests, Firefox, the Windows browser tests and the production image's nginx rules for content
+pages. The deep lane's jobs run side by side; the content lane's
 python, site, windows and same-site jobs are the deep lane's own (`tests/test_ci_workflows.py` checks that they are
-identical).
+identical). The content lane saves the image and the browser suite, not the Python and Windows checks, so its wall
+time is about the Windows job's; no saving has been measured on GitHub yet.
 
 ## Locally
 
@@ -70,9 +73,10 @@ documentation or a lesson screenshot (an ordinary file), or when the owner appro
 from anyone else needs the owner's approval first, including lessons, labs, incidents, challenges, diagnostics and
 recordings: their commands and manifests are shown to learners, applied to their own clusters (a lab's
 `elevated_setup` with the admin identity, after the learner's consent) and run by the owner's recorder. Content is never
-run in CI, in either lane. The lab model limits the roles and bindings a lab can apply (`backend/academy/labs.py`), and a
-learner confirms each command as it will run, but commands run as admin are not limited by it: the owner's review is
-what covers lab content.
+run in CI, in either lane. The lab model limits the roles and bindings a lab applies and the YAML its commands send
+(`backend/academy/labs.py`), but it does not resolve what an existing role allows or limit what an admin command does.
+A command that changes the cluster shows, before it runs, the command and the YAML that will run (placeholders are
+filled in when it runs); read-only commands run without asking. The owner's review is what covers lab content.
 
 GitHub starts no trusted workflow on a review: after approving or withdrawing an approval, the owner re-runs
 `ci-guard`, or adds or removes any label on the pull request. A new commit always needs a new approval. The comparison
@@ -93,9 +97,10 @@ off, because the owner cannot approve their own pull requests.
 
 ## When main fails
 
-`ci-main` runs after every merge and is never cancelled. Whenever a run completes, `main-alert.yml` looks at the latest
-completed run (latest attempt) for the commit main points to now: failed, cancelled or timed out, it opens one issue,
-"main is failing", assigned to the owner; passed, it closes it. A late or older run cannot hide a newer failure. It is an
+`ci-main` runs after every merge and is never cancelled. Whenever a run completes, `main-alert.yml` reads the runs of
+the commit main points to now: while one is queued or running it changes nothing; otherwise the latest started attempt
+decides. Failed, cancelled or timed out, it opens one issue, "main is failing", assigned to the owner; passed, it
+closes it. Reads and writes are not atomic, so the issue can lag main's state until the next run completes. It is an
 alert, not a lock: nothing stops another merge while main is red, so fix main first. The release candidate is built
 only from a successful `ci-main` run of a push to main.
 
@@ -106,5 +111,6 @@ and `ci-guard`, both from GitHub Actions. The switch is the owner's, in this ord
 cannot rewrite is required before the eleven names go: merge `ci-guard` on its own; check on a pull request from
 another account that it reports and blocks, then require it next to the eleven names; confirm on GitHub how `ci-ok`
 reports failed, cancelled, skipped and re-run jobs, and require it too; when the lanes are ready to merge (their own
-run reports `ci-ok`, not the eleven names), remove the eleven names, merge the lanes, and re-run open pull requests.
+run reports `ci-ok`, not the eleven names), pause other merges, remove the eleven names, merge the lanes, and re-run
+open pull requests before merging anything else.
 Job names inside the lanes are not required and may change.

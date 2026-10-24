@@ -1,10 +1,10 @@
 name: main-alert
 # A failing main must not go unnoticed while more pull requests merge. Each time a ci-main run (checks-main.yml)
-# completes, this reads the CURRENT state, not the event: the latest completed ci-main run (its latest attempt) for the
-# commit main points to now. If that run failed, was cancelled or timed out, it opens one issue, "main is failing",
-# assigned to the owner (or comments on it when this event is that run); if that run passed, it closes the issue. An
-# older run, another commit's run or a run finishing out of order cannot hide a newer failure or close the issue
-# early. It is an alert, not a merge lock.
+# completes, this reads the ci-main runs of the commit main points to now, not the event that arrived. While one of
+# them is still queued or running (a re-run, say), it changes nothing. Otherwise the latest started attempt decides:
+# failed, cancelled or timed out, it opens one issue, "main is failing", assigned to the owner (or comments on it when
+# this event is that run); passed, it closes it. Main is read again before writing, but reads and writes are not
+# atomic: the issue can lag main's state until the next run completes. It is an alert, not a merge lock.
 #
 # workflow_run runs this file from the default branch, never from a pull request. It checks out nothing and runs no
 # file of the repository; its only write permission is issues. Every value it uses comes from GitHub.
@@ -42,12 +42,17 @@ jobs:
                  --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
           head=$(gh api "repos/$REPO/commits/main" --jq .sha)
           [[ "$head" =~ ^[0-9a-f]{40}$ ]]
-          # the latest completed run for that commit: a re-run's newest attempt has the newest start time
-          latest=$(gh api "repos/$REPO/actions/workflows/checks-main.yml/runs?branch=main&head_sha=$head&status=completed&per_page=100" \
-                   --jq '.workflow_runs | sort_by(.run_started_at) | last | select(. != null) | "\(.conclusion) \(.html_url)"')
+          # every run of that commit, on every page; none while one is queued or running (its completion decides);
+          # otherwise the latest started attempt (a re-run's newest attempt has the newest start time)
+          latest=$(gh api --paginate --slurp "repos/$REPO/actions/workflows/checks-main.yml/runs?branch=main&head_sha=$head&per_page=100" | \
+                   jq -r '[.[].workflow_runs[]] as $runs | if any($runs[]; .status != "completed") then empty else
+                          $runs | sort_by([.run_started_at, .id, .run_attempt]) | last | select(. != null) |
+                          "\(.conclusion) \(.html_url)" end')
           conclusion=${latest%% *}; url=${latest#* }
-          echo "main is at ${head:0:12}; its latest completed ci-main: ${latest:-none}; open issue: ${open:-none}"
-          [ -n "$latest" ] || exit 0  # no completed run for the current commit yet: its own completion decides
+          echo "main is at ${head:0:12}; its latest ci-main: ${latest:-pending or none}; open issue: ${open:-none}"
+          [ -n "$latest" ] || exit 0  # no run of the current commit yet, or one is pending: nothing changes
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          [ "$current" = "$head" ] || exit 0  # main moved meanwhile: its own runs decide
           [[ "$conclusion" =~ ^[a-z_]+$ && "$url" =~ ^https://github\.com/[A-Za-z0-9._/-]+$ ]]
           case "$conclusion" in
             success)
