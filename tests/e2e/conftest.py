@@ -1,6 +1,7 @@
 """Browser tests. The static site is exported to a temporary directory and served with Python's http.server,
 exactly as a public static host would serve it (no API, no cluster)."""
 import functools
+import hashlib
 import http.server
 import os
 import re
@@ -94,9 +95,15 @@ def wait_true(page, expression, arg=None, timeout=30_000):
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Each phase's report on the test item (item.rep_setup, item.rep_call), for _trace_failures."""
+    """Each phase's report on the test item (item.rep_setup, item.rep_call, item.rep_teardown). Once the last one is
+    known, the traces _trace_failures wrote for a test that passed every phase are removed."""
     report = yield
     setattr(item, "rep_" + report.when, report)
+    if report.when == "teardown" and not any(getattr(getattr(item, "rep_" + when, None), "failed", False)
+                                             for when in ("setup", "call", "teardown")):
+        for path in item.__dict__.get("_e2e_traces", []):
+            if os.path.exists(path):
+                os.remove(path)
     return report
 
 
@@ -105,8 +112,10 @@ def _trace_failures(request, monkeypatch):
     """E2E_ARTIFACTS=<dir> (the CI sets it) records a Playwright trace of every browser context a test opens
     (screenshots, DOM snapshots, sources) and keeps it in <dir> only when the test failed: open it with
     `python -m playwright show-trace <file>` or at trace.playwright.dev. Unset (the default), nothing changes.
-    A passing test's trace is discarded without being written, unless the test closed the context itself before its
-    result was known; such a trace is written, then removed when the test passes."""
+    A trace is written when the test failed in setup or in its body, or when the test closed the context before its
+    result was known; the report hook above removes such a trace once all three phases have passed. Writing every
+    trace would slow the browser jobs by about a quarter, so a test that fails only in its teardown, with its context
+    still open, keeps no trace (its error is still in the test output)."""
     out = os.environ.get("E2E_ARTIFACTS")
     if not out:
         yield
@@ -114,8 +123,11 @@ def _trace_failures(request, monkeypatch):
     from playwright.sync_api import Browser, BrowserContext
 
     node = request.node
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", node.nodeid.replace(".py::", "-"))[:150]
-    traced, owned, written = [], [], []
+    # readable, and unique: the full test id's hash and the xdist worker, so two tests never share a file
+    stem = "-".join([re.sub(r"[^A-Za-z0-9_.-]+", "-", node.nodeid.replace(".py::", "-"))[:100],
+                     hashlib.sha1(node.nodeid.encode("utf-8")).hexdigest()[:10], os.environ.get("PYTEST_XDIST_WORKER", "w")])
+    traced, owned = [], []
+    written = node.__dict__.setdefault("_e2e_traces", [])
 
     def failed():
         return any(getattr(getattr(node, "rep_" + when, None), "failed", False) for when in ("setup", "call"))
@@ -124,7 +136,7 @@ def _trace_failures(request, monkeypatch):
         if not ctx.__dict__.pop("_e2e_traced", False):
             return
         try:
-            if failed() or not hasattr(node, "rep_call"):  # failed, or still running: keep it for now
+            if failed() or not hasattr(node, "rep_call"):  # failed, or still running: keep it until the result
                 path = os.path.join(out, f"{stem}-{len(written) + 1}.zip")
                 ctx.tracing.stop(path=path)
                 written.append(path)
@@ -160,10 +172,6 @@ def _trace_failures(request, monkeypatch):
         stop(ctx)
     for ctx in owned:  # page.close() would have closed the context Browser.new_page makes; it is closed here
         close(ctx)
-    if not failed():
-        for path in written:
-            if os.path.exists(path):
-                os.remove(path)
 
 
 @pytest.fixture(autouse=True)
