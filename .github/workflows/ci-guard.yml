@@ -1,0 +1,128 @@
+name: ci-guard
+# The one check a pull request cannot rewrite (docs/CI.md, "What the checks guarantee"). On `pull_request`, a pull
+# request supplies its own workflow files and scripts, so it could make `ci-ok` pass by editing them. This workflow is
+# `pull_request_target`: GitHub runs it from the DEFAULT branch, never from the pull request. It checks out nothing and
+# runs no file of the pull request; it reads the changed files and their file modes from the API and posts the commit
+# status `ci-guard` on the pull request's head commit (a status, not a check run: a same-named check run that a pull
+# request adds cannot replace it, both would have to pass):
+#   success  the author is the repository owner; or every changed file is Markdown documentation or a lesson
+#            screenshot, as an ordinary file (mode 100644); or the owner approved this exact head commit;
+#   failure  someone else changed anything else: code, tests, CI, dependencies, and also lessons, labs, incidents,
+#            challenges, diagnostics and recordings, whose commands and manifests are shown to learners, applied to
+#            their clusters (some with the admin identity) and run by the owner's recorder. The owner reviews the
+#            diff and approves that commit; a new commit needs a new approval.
+# GitHub starts no trusted workflow on a review, so after approving (or withdrawing an approval) the owner re-runs this
+# workflow, or adds or removes any label on the pull request, which re-runs it. It does not prove that the right tests
+# ran; it makes sure nothing from someone else that can change CI, the site or a learner's cluster merges unread.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled, unlabeled]
+permissions: {}
+concurrency:
+  group: ci-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read       # immutable base...head comparison and the two trees (no checkout)
+      pull-requests: read  # the current head and the reviews
+      statuses: write      # the ci-guard status on the head commit
+    steps:
+      - name: Changes from anyone but the owner need the owner's approval, except documentation and screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE" =~ ^[0-9a-f]{40}$ && "$HEAD" =~ ^[0-9a-f]{40}$ && "$PR" =~ ^[0-9]+$ && "$CHANGED_FILES" =~ ^[0-9]+$ && "$OWNER" =~ ^[A-Za-z0-9-]+$ ]]
+          status() {  # status <state> <description>
+            gh api -X POST "repos/$REPO/statuses/$HEAD" -f state="$1" -f context=ci-guard -f description="${2:0:140}" > /dev/null
+          }
+          status pending "checking which files this pull request changes"
+          trap 'status error "the guard could not run: see the ci-guard workflow"' ERR
+          # A stale rerun must never attach a verdict for a newer diff to this event's commit. The comparison below
+          # is bound to immutable event SHAs; current-head checks also reject obsolete runs, including owner bypass.
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+          [ "$current" = "$HEAD" ] || { status error "the pull request head changed; use its current guard run"; exit 1; }
+          # one JSON array per file: [new path, old path of a rename or null]; no name is ever split or evaluated.
+          # Unlike pulls/PR/files, compare cannot change underneath pagination. Its 300-file cap fails closed below.
+          gh api "repos/$REPO/compare/$BASE...$HEAD" --jq '.files[] | [.filename, .previous_filename] | @json' > "$RUNNER_TEMP/files"
+          # the file mode of every path in both commits: a symbolic link, a submodule or an executable is never exempt
+          for side in BASE HEAD; do
+            gh api "repos/$REPO/git/trees/${!side}?recursive=1" \
+              --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | [.path, .mode] | @json)' > "$RUNNER_TEMP/tree-$side"
+          done
+          gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100" \
+            --jq '.[] | [.id, .state, .user.login, .commit_id] | @json' > "$RUNNER_TEMP/reviews"
+          approved=$(python3 -I - "$RUNNER_TEMP/reviews" <<'PY'
+          import json, os, sys
+          reviews = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+          decisive = [r for r in reviews if r[2] == os.environ["OWNER"] and r[1] in
+                      {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}]
+          latest = max(decisive, key=lambda r: r[0], default=None)
+          print(int(latest is not None and latest[1] == "APPROVED" and latest[3] == os.environ["HEAD"]))
+          PY
+          )
+          verdict=$(python3 -I - "$RUNNER_TEMP/files" "$RUNNER_TEMP/tree-BASE" "$RUNNER_TEMP/tree-HEAD" <<'PY'
+          import json, os, sys
+          from pathlib import PurePosixPath
+          # Exempt from the owner's review: Markdown documentation and lesson screenshots, nothing else. Never import a
+          # file from the pull request to make this decision (tests/test_ci_workflows.py tests this function).
+          ROOT_DOCS = {"README.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md",
+                       "THIRD_PARTY_NOTICES.md"}
+          def exempt_path(path):
+              parts = path.split("/")
+              if not path or "\\" in path or any(p in ("", ".", "..") for p in parts):
+                  return False
+              suffix = PurePosixPath(path).suffix
+              if path in ROOT_DOCS:
+                  return True
+              if parts[0] == "docs":
+                  return len(parts) > 1 and suffix == ".md"
+              return len(parts) == 4 and parts[:2] == ["content", "media"] and suffix == ".png"
+          def tree(name):
+              lines = [line.strip() for line in open(name, encoding="utf-8")]
+              if "TRUNCATED" in lines:
+                  return None
+              return {path: mode for path, mode in map(json.loads, lines)}
+          base, head = tree(sys.argv[2]), tree(sys.argv[3])
+          def ordinary(path):  # an ordinary file (100644) on each side where it exists, and present on one side
+              modes = [t[path] for t in (base, head) if path in t]
+              return bool(modes) and all(m == "100644" for m in modes)
+          paths = []
+          for line in open(sys.argv[1], encoding="utf-8"):
+              paths += [p for p in json.loads(line) if p is not None]
+          listed = sum(1 for _ in open(sys.argv[1], encoding="utf-8"))
+          if listed != int(os.environ["CHANGED_FILES"]) or listed >= 300:  # immutable compare lists at most 300 files
+              print(f"unlisted: {listed} of {os.environ['CHANGED_FILES']} files listed")
+          elif base is None or head is None:
+              print("unlisted: a file tree is too large to read")
+          else:
+              hits = sorted({p for p in paths if not (exempt_path(p) and ordinary(p))})
+              print(f"review: {len(hits)} file(s) need the owner's review, e.g. {hits[0]!r}" if hits else "clean")
+          PY
+          )
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+          [ "$current" = "$HEAD" ] || { status error "the pull request head changed; use its current guard run"; exit 1; }
+          echo "author association: $AUTHOR_ASSOCIATION; owner approvals of $HEAD: $approved; files: $verdict"
+          trap - ERR
+          if [ "$AUTHOR_ASSOCIATION" = OWNER ]; then
+            status success "opened by the owner"
+          elif [ "$verdict" = clean ]; then
+            status success "documentation or screenshots only"
+          elif [ "$approved" -gt 0 ]; then
+            status success "approved by the owner at this commit"
+          else
+            status failure "the owner must review and approve this commit, then re-run ci-guard (or change a label)"
+            echo "::error title=ci-guard::$verdict. The owner must review the diff, approve this commit and re-run this workflow."
+            exit 1
+          fi

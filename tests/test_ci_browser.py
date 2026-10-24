@@ -46,9 +46,11 @@ def test_a_browser_that_does_not_start_gets_its_libraries(tmp_path):
 
 
 def test_every_linux_browser_install_in_ci_goes_through_the_script():
-    for workflow in ("ci.yml", "candidate.yml"):
-        jobs = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
+    used = set()
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
         runs = [s.get("run", "") for job in jobs.values() if "windows" not in str(job.get("runs-on"))
-                for s in job["steps"]]
-        assert not [r for r in runs if "playwright install" in r], workflow
-        assert [r for r in runs if r.startswith("scripts/ci_browser.sh ")], workflow
+                for s in job.get("steps", [])]
+        assert not [r for r in runs if "playwright install" in r], workflow.name
+        used |= {workflow.name for r in runs if r.startswith("scripts/ci_browser.sh ")}
+    assert used == {"checks-app.yml", "checks-content.yml", "candidate.yml"}

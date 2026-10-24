@@ -1,0 +1,5 @@
+# uv for CI, installed with pip from PyPI with --require-hashes (no third-party GitHub Action). One version for every
+# job; update the version and both hashes together (https://pypi.org/project/uv/<version>/#files).
+uv==0.12.21 \
+    --hash=sha256:0083454d25479f1cd03547c8c98c235b4af92bd07f0e61c3eae5d1cbb0c1834c \
+    --hash=sha256:8c7c3eb32d84c711906dedd09df7379cf4d9f5bb84b8e58a1244ca0a8a1209d4

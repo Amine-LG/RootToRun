@@ -1,277 +1,77 @@
 name: ci
-# Fork pull requests run on GitHub-hosted runners with a read-only token and no secrets. This workflow uses no secrets
-# at all and only reads the repository. Third-party actions are pinned to a commit.
+# The pull-request router (docs/CI.md). It runs no code from the pull request: it reads git's list of changed files and
+# lets the classifier of the BASE commit choose a lane, calls that lane, and reports `ci-ok`, the only required check.
+#   content lane (checks-content.yml): lessons, labs, recordings, screenshots, Markdown docs: the Python suite, the
+#                                       content checks, the site, Windows, and every page in a browser.
+#   deep lane    (checks-app.yml):     everything else, including workflows, tests and unknown paths: also the
+#                                       production image and the whole browser suite, with a part on Windows.
+# Pushes to main, a manual run and a weekly run use ci-main (checks-main.yml): never required on pull requests.
+# Whether a pull request may merge without the owner's review is ci-guard.yml's decision (trusted, default branch).
+#
+# Fork pull requests get a read-only token and no secrets (pull_request, never pull_request_target); nothing here uses
+# a secret. Only official actions/* are used, pinned to a commit; no third-party action, app or service.
 on:
   pull_request:
-  push:
-    branches: [main]
-  workflow_call:
 permissions:
   contents: read
 concurrency:
-  # a new push to a pull request cancels the run for the previous commit
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # a new push to a pull request cancels the run for its previous commit
+  group: ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  # Pull requests that change only documentation, repository forms or Python-only tests cannot change the site:
-  # they skip the image and browser tests (scripts/ci_needs_site.py; anything unknown runs them). This saves time; it
-  # is not a security gate (a pull request can change this file too). Pushes to main and candidates run everything.
-  changes:
+  classify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     outputs:
-      site: ${{ steps.diff.outputs.site }}
+      tier: ${{ steps.tier.outputs.tier }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false, fetch-depth: 0}
-      - id: diff
+      - id: tier
         env:
-          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+        # The classifier is the base commit's blob, run with isolated Python (-I: no PYTHONPATH, no current directory
+        # on sys.path), on git's NUL-separated raw diff without rename detection (both paths and file modes count). Only
+        # the exact line "tier=content" selects the content lane; anything else, including a failure, is deep.
         run: |
-          if [ "$EVENT" = pull_request ]; then
-            # without rename detection a moved file shows both its old and its new path
-            site=$(git diff --no-renames --name-only "$BASE...$HEAD" | python3 scripts/ci_needs_site.py)
-          else
-            site=true
-          fi
-          echo "site=$site" >> "$GITHUB_OUTPUT"
-          echo "Image and browser tests needed: $site" >> "$GITHUB_STEP_SUMMARY"
+          [[ "$BASE" =~ ^[0-9a-f]{40}$ && "$HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no base/head commit"; exit 1; }
+          git show "$BASE:scripts/ci_needs_site.py" > "$RUNNER_TEMP/classifier.py"
+          git diff --no-renames --raw -z "$BASE...$HEAD" > "$RUNNER_TEMP/changed"
+          verdict=$(python3 -I "$RUNNER_TEMP/classifier.py" --tier-raw < "$RUNNER_TEMP/changed" || true)
+          if [ "$verdict" = "tier=content" ]; then tier=content; else tier=deep; fi
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+          count=$(( $(tr -cd '\0' < "$RUNNER_TEMP/changed" | wc -c) / 2 ))
+          echo "Lane: **$tier** ($count changed files, classified by scripts/ci_needs_site.py of the base commit ${BASE:0:12})" >> "$GITHUB_STEP_SUMMARY"
 
-  content-and-python:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {persist-credentials: false}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
-      - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
-      # first: a file that does not load makes dozens of tests fail; this names it, on the file in the pull request
-      - name: Course content loads
-        run: .venv/bin/python scripts/check_content.py
-      - name: Unit, API, security and content tests (recordings current, prerequisites before use)
-        # one worker per CPU, at most four; a text file opened without encoding="utf-8" fails (pytest.ini): Windows
-        # would read it in its own code page
-        env:
-          PYTHONWARNDEFAULTENCODING: "1"
-        run: |
-          workers=$(( $(nproc) < 4 ? $(nproc) : 4 ))
-          .venv/bin/python -m pytest -q tests --ignore=tests/e2e -n "$workers"
-      - name: Teaching rules
-        run: .venv/bin/python scripts/teach_lint.py
-      - name: Every lesson and lab keeps its public address
-        run: .venv/bin/python scripts/slugs.py --check
-      - name: Coverage references exist
-        run: .venv/bin/python scripts/coverage.py --check
-      - name: No credentials, keys, vendor course codes or certification phrases in the repository
-        run: .venv/bin/python scripts/public_scan.py
+  checks-content:
+    needs: classify
+    if: needs.classify.outputs.tier == 'content'
+    uses: ./.github/workflows/checks-content.yml
 
-  site:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {persist-credentials: false}
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
-      # the frontend tests read the lessons through the Python environment, so it comes first
-      - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
-      - name: Frontend unit tests, type check and build
-        working-directory: frontend
-        run: npm ci && npm test && npm run build
-      - name: Static export, then the same scan on the generated site
-        run: .venv/bin/python scripts/export_static.py && .venv/bin/python scripts/public_scan.py frontend/dist
-      - name: Internal links and assets exist
-        run: .venv/bin/python scripts/check_site.py frontend/dist
-      - name: Manifest of the exported site (compared with the one built on Windows)
-        run: .venv/bin/python scripts/site_manifest.py frontend/dist site-linux.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: {name: site-linux, path: site-linux.txt, retention-days: 3, if-no-files-found: error}
+  checks-app:
+    needs: classify
+    if: needs.classify.outputs.tier == 'deep'
+    uses: ./.github/workflows/checks-app.yml
 
-  # Windows: the contributor workflow of docs/WINDOWS.md, with its own commands (PowerShell, the environment's
-  # .venv\Scripts\python.exe): Python and frontend tests, content checks, the static export and its checks, the local
-  # server, and a fifth of the browser tests against the export built here. The production image is a Linux container:
-  # it is built and tested only on Linux (below). Each command is its own step, so a failure names what failed.
-  windows:
-    needs: changes
-    runs-on: windows-latest
-    timeout-minutes: 40
-    defaults:
-      run: {shell: pwsh}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {persist-credentials: false}
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
-      - name: Python environment
-        run: uv venv .venv --python 3.12 && uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
-      - name: Course content loads
-        run: .venv\Scripts\python.exe scripts\check_content.py
-      - name: Unit, API, security, content and portability tests
-        run: .venv\Scripts\python.exe -m pytest -q tests --ignore=tests/e2e -n ([Math]::Min([Environment]::ProcessorCount, 4))
-      - name: Teaching rules
-        run: .venv\Scripts\python.exe scripts\teach_lint.py
-      - name: Every lesson and lab keeps its public address
-        run: .venv\Scripts\python.exe scripts\slugs.py --check
-      - name: Coverage references exist
-        run: .venv\Scripts\python.exe scripts\coverage.py --check
-      - name: No credentials, keys, vendor course codes or certification phrases in the repository
-        run: .venv\Scripts\python.exe scripts\public_scan.py
-      - name: Frontend unit tests, type check and build
-        working-directory: frontend
-        run: npm ci && npm test && npm run build
-      - name: Static export, the scan of the generated site, and its internal links
-        run: >-
-          .venv\Scripts\python.exe scripts\export_static.py &&
-          .venv\Scripts\python.exe scripts\public_scan.py frontend\dist &&
-          .venv\Scripts\python.exe scripts\check_site.py frontend\dist
-      - name: Manifest of the exported site (compared with the one built on Linux)
-        run: .venv\Scripts\python.exe scripts\site_manifest.py frontend\dist site-windows.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: {name: site-windows, path: site-windows.txt, retention-days: 3, if-no-files-found: error}
-      # in Windows PowerShell 5.1 (the one Windows includes), the other steps in PowerShell 7
-      - name: The local server answers in practice mode (scripts\serve.py --practice, as in docs/WINDOWS.md)
-        shell: powershell
-        run: |
-          $server = Start-Process -PassThru -NoNewWindow .venv\Scripts\python.exe -ArgumentList 'scripts\serve.py', '--practice'
-          try {
-            foreach ($i in 1..120) {
-              try { $status = Invoke-RestMethod http://127.0.0.1:8768/api/status; break } catch { Start-Sleep -Milliseconds 500 }
-            }
-            if ($status.mode -ne 'practice') { throw "no practice-mode server on 127.0.0.1:8768" }
-            $page = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8768/
-            if ($page.StatusCode -ne 200 -or $page.Content -notmatch '<div id="root">') { throw "the site is not served" }
-            "serve.py: practice mode; the site and its API answer on 127.0.0.1:8768"
-          } finally { Stop-Process -Id $server.Id }
-      - name: Firefox for the browser tests
-        if: needs.changes.outputs.site == 'true'
-        run: .venv\Scripts\python.exe -m playwright install firefox
-      - name: Browser tests against the static export built on Windows (part 1 of 5)
-        if: needs.changes.outputs.site == 'true'
-        env:
-          E2E_BROWSER: firefox
-        run: .venv\Scripts\python.exe -m pytest -q tests/e2e --shard 1/5 -n ([Math]::Min([Environment]::ProcessorCount, 4))
-
-  # The same source must export the same site on Linux and on Windows, byte for byte (paths, line endings, encodings).
-  same-site:
-    needs: [site, windows]
-    # also when a later Windows step (the browser tests) failed: both manifests exist by then
-    if: ${{ !cancelled() && needs.site.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with: {pattern: site-*, merge-multiple: true}
-      - name: The sites exported on Linux and on Windows are identical
-        run: |
-          if [ ! -f site-windows.txt ]; then
-            echo "::error title=Not compared::the windows job stopped before its export; see that job"; exit 1
-          fi
-          echo "$(wc -l < site-linux.txt) files exported on Linux, $(wc -l < site-windows.txt) on Windows"
-          diff site-linux.txt site-windows.txt && echo "identical"
-
-  # The production image, then the browser tests against it (its nginx rules, headers and Content-Security-Policy).
-  # Hosted runners for private repositories have 2 CPUs, which the browser tests saturate, so they run in three
-  # parallel parts (--shard; every test is in exactly one part), each building the image from the same commit.
-  # A few browser tests also use the local practice server, so the frontend is built here as well.
-  image-and-browser:
-    needs: changes
-    if: needs.changes.outputs.site == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      # both engines: Firefox, and Chromium (the engine of Chrome, Edge and Android's browser, which most learners
-      # use; it found bugs Firefox did not: a focus trap, a toggle event's timing)
-      matrix:
-        browser: [firefox, chromium]
-        shard: [1, 2, 3]
-    name: image-and-browser (${{ matrix.browser }} ${{ matrix.shard }}/3)
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {persist-credentials: false}
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
-      - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
-      - name: Runner size (the browser test workers follow it)
-        run: nproc && free -m
-      - run: npm ci && npm run build
-        working-directory: frontend
-      - name: Build the static image
-        env:
-          BUILD_COMMIT: ${{ github.sha }}
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: |
-          docker build -t static-site:ci -f Containerfile \
-            --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
-            --build-arg SITE_URL=https://example.org \
-            --build-arg REPO_URL="$REPO_URL" .
-      - name: Smoke test the image as it is deployed (leaves it running for the browser tests)
-        run: scripts/smoke_image.sh static-site:ci 8080
-      # The browser download is cached by Playwright version (the system libraries are installed every time). Only
-      # this test job uses a cache; the candidate workflow does not.
-      - id: pw
-        run: echo "version=$(.venv/bin/python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.pw.outputs.version }}
-      - run: scripts/ci_browser.sh "$BROWSER"
-        env:
-          BROWSER: ${{ matrix.browser }}
-      - name: Browser tests against the running image (${{ matrix.browser }}, part ${{ matrix.shard }} of 3)
-        env:
-          E2E_BROWSER: ${{ matrix.browser }}
-          ACADEMY_E2E_SITE: http://127.0.0.1:8080/
-          SHARD: ${{ matrix.shard }}/3
-        # one browser per CPU, at most four (each needs about 300-500 MB)
-        run: |
-          workers=$(( $(nproc) < 4 ? $(nproc) : 4 ))
-          .venv/bin/python -m pytest -q tests/e2e --shard "$SHARD" -n "$workers" --durations=10
-
-  # Rollout: require browser-tests and remove the six matrix contexts before changing the matrix.
-  browser-tests:
-    needs: [changes, image-and-browser]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Every part of the browser tests passed, or the change did not need them
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          SITE: ${{ needs.changes.outputs.site }}
-          PARTS: ${{ needs.image-and-browser.result }}
-        run: |
-          echo "changes: $CHANGES; image and browser tests needed: $SITE; their result: $PARTS"
-          [ "$CHANGES" = success ] || exit 1
-          case "$SITE/$PARTS" in true/success | false/skipped) ;; *) exit 1 ;; esac
-
-  # Rollout bridge: all eleven old contexts still report. Make ci-ok the ONLY required context
-  # after this commit is on main, before merging the contributor tiers.
+  # The only required check. It passes only when the classifier ran and exactly the lane it chose succeeded, the other
+  # lane being skipped: a lane cannot pass by being skipped, and a failed, cancelled or missing verdict fails.
   ci-ok:
-    needs: [changes, content-and-python, site, windows, same-site, browser-tests]
+    needs: [classify, checks-content, checks-app]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: All required checks passed
+      - name: The lane the base classifier chose succeeded
         env:
-          CHANGES: ${{ needs.changes.result }}
-          CONTENT: ${{ needs.content-and-python.result }}
-          SITE: ${{ needs.site.result }}
-          WINDOWS: ${{ needs.windows.result }}
-          SAME_SITE: ${{ needs.same-site.result }}
-          BROWSER: ${{ needs.browser-tests.result }}
+          CLASSIFY: ${{ needs.classify.result }}
+          TIER: ${{ needs.classify.outputs.tier }}
+          CONTENT: ${{ needs.checks-content.result }}
+          APP: ${{ needs.checks-app.result }}
         run: |
-          for result in "$CHANGES" "$CONTENT" "$SITE" "$WINDOWS" "$SAME_SITE" "$BROWSER"; do
-            [ "$result" = success ] || exit 1
-          done
+          echo "classify: $CLASSIFY; lane: $TIER; checks-content: $CONTENT; checks-app: $APP"
+          case "$CLASSIFY/$TIER/$CONTENT/$APP" in
+            success/content/success/skipped | success/deep/skipped/success) echo "ci-ok" ;;
+            *) echo "::error title=ci-ok::the chosen lane did not succeed (see the line above)"; exit 1 ;;
+          esac

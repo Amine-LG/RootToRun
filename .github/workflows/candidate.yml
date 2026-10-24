@@ -1,7 +1,8 @@
 name: candidate
-# After a merge to main, once ci has passed for that commit: build the production image once (job "build"), run the
-# browser tests against that exact image in three parallel parts (job "test"; both read-only), then push that image to
-# a private candidate package and record its digest (job "publish", which runs no code from the repository).
+# After a merge to main, once ci-main (checks-main.yml) has passed for that commit: build the production image once
+# (job "build"), run the browser tests against that exact image in three parallel parts (job "test"; both read-only),
+# then push that image to a private candidate package and record its digest (job "publish", which runs no code from
+# the repository).
 #
 # Nothing is deployed. This repository holds no deployment credentials: deployment is a separate step that only the
 # owner performs (verify, preview and promote in the private deployment repository, then a manual Argo CD sync). The
@@ -9,7 +10,7 @@ name: candidate
 # variable CANDIDATE_ENABLED is "true".
 on:
   workflow_run:
-    workflows: [ci]
+    workflows: [ci-main]
     types: [completed]
     branches: [main]
 permissions: {}
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    # only a successful ci run of a push to main in this repository (never a pull request, never a fork)
+    # only a successful ci-main run of a push to main in this repository (never a pull request, never a fork)
     if: >-
       vars.CANDIDATE_ENABLED == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -84,9 +85,8 @@ jobs:
         with: {ref: "${{ github.event.workflow_run.head_sha }}", persist-credentials: false}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: {node-version: 22}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with: {version: "0.12.21", enable-cache: true, cache-dependency-glob: "requirements*.txt"}
-      - run: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r requirements-dev.txt
+      # Python 3.12, uv pinned by version and hash, .venv with requirements-dev.txt (official actions only)
+      - uses: ./.github/actions/python-env
       # the browser tests' practice server serves the frontend build
       - run: npm ci && npm run build
         working-directory: frontend
