@@ -35,3 +35,17 @@ def test_the_command_line_reads_paths_from_standard_input():
     assert run("docs/INSTALL.md\nSECURITY.md\n") == "false"
     assert run("docs/INSTALL.md\ncontent/en/tracks.yaml\n") == "true"
     assert run("") == "true"
+
+
+def test_every_job_pins_the_same_uv():
+    """setup-uv without `version` installs the newest uv on every run: each job that sets up uv pins one version."""
+    import yaml
+    versions = {}
+    for workflow in ("ci.yml", "candidate.yml"):
+        jobs = yaml.safe_load((config.ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))["jobs"]
+        for name, job in jobs.items():
+            for step in job.get("steps", []):
+                if "astral-sh/setup-uv@" in step.get("uses", ""):
+                    versions[f"{workflow}:{name}"] = (step.get("with") or {}).get("version")
+    assert len(versions) >= 5
+    assert len(set(versions.values())) == 1 and None not in versions.values(), versions
