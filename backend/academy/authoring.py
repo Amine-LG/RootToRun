@@ -1,6 +1,7 @@
 """Opt-in local authoring over the existing YAML. No Git or cluster operations."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import ipaddress
 import os
@@ -177,6 +178,53 @@ def scalar_end(node):
                 node.end_mark.index if node.flow_style else 0])
 
 
+def _parse_entries(kind, text):
+    """(id, title, start, end) of each item in one content file's text; raises on a file authoring cannot edit."""
+    raw = yaml.load(text, Loader=SourceLoader)
+    node = yaml.compose(text, Loader=SourceLoader)
+    if kind == "diagnostic":
+        if not isinstance(raw, dict):
+            raise ValueError("expected one diagnostic object")
+        return [(raw["track"], raw.get("title", raw["track"]), 0, len(text))]
+    if not isinstance(node, SequenceNode) or node.flow_style:
+        raise ValueError("expected a block-style YAML list")
+    out = []
+    for data, entry in zip(raw, node.value):
+        if not isinstance(entry, MappingNode):
+            raise ValueError("expected block-style list objects")
+        start = text.rfind("\n", 0, entry.start_mark.index) + 1
+        if not text[start:entry.start_mark.index].strip().startswith("-"):
+            raise ValueError("each item must start on its own line")
+        end = scalar_end(entry)
+        # Include the final scalar's inline comment and newline; leave standalone comments alone.
+        if end and text[end - 1] != "\n":
+            line_end = text.find("\n", end)
+            end = len(text) if line_end < 0 else line_end + 1
+        out.append((data["id"], data.get("title", data["id"]), start, end))
+    return out
+
+
+# (kind, sha256 of a file's text) -> ("ok", entries) or ("error", message). The parse is a pure function of the text,
+# and every lookup, publish and rollback lists every file of a kind: unchanged files are not parsed again. The path
+# checks and the read itself are never cached.
+_PARSED: dict[tuple[str, str], tuple[str, object]] = {}
+_PARSED_MAX = 512
+
+
+def _entries(kind, text):
+    key = (kind, digest(text))
+    hit = _PARSED.get(key)
+    if hit is None:
+        try:
+            hit = ("ok", tuple(_parse_entries(kind, text)))
+        except (ValueError, KeyError, TypeError, yaml.YAMLError) as e:
+            hit = ("error", str(e))
+        if len(_PARSED) >= _PARSED_MAX:
+            _PARSED.clear()
+        _PARSED[key] = hit
+    return hit
+
+
 def blocks(kind):
     identity(kind)
     root = config.content_dir()
@@ -189,30 +237,11 @@ def blocks(kind):
         if not path.exists():
             continue
         text = path.read_bytes().decode("utf-8")  # retain CRLF, Unicode and every unrelated byte
-        try:
-            raw = yaml.load(text, Loader=SourceLoader)
-            node = yaml.compose(text, Loader=SourceLoader)
-            if kind == "diagnostic":
-                if not isinstance(raw, dict):
-                    raise ValueError("expected one diagnostic object")
-                out.append(Block(kind, raw["track"], raw.get("title", raw["track"]), path, text, 0, len(text)))
-                continue
-            if not isinstance(node, SequenceNode) or node.flow_style:
-                raise ValueError("expected a block-style YAML list")
-            for data, entry in zip(raw, node.value):
-                if not isinstance(entry, MappingNode):
-                    raise ValueError("expected block-style list objects")
-                start = text.rfind("\n", 0, entry.start_mark.index) + 1
-                if not text[start:entry.start_mark.index].strip().startswith("-"):
-                    raise ValueError("each item must start on its own line")
-                end = scalar_end(entry)
-                # Include the final scalar's inline comment and newline; leave standalone comments alone.
-                if end and text[end - 1] != "\n":
-                    line_end = text.find("\n", end)
-                    end = len(text) if line_end < 0 else line_end + 1
-                out.append(Block(kind, data["id"], data.get("title", data["id"]), path, text, start, end))
-        except (ValueError, KeyError, TypeError, yaml.YAMLError) as e:
-            raise HTTPException(422, f"{candidate.name}: {e}") from None
+        status, value = _entries(kind, text)
+        if status == "error":
+            raise HTTPException(422, f"{candidate.name}: {value}") from None
+        # a copy: the memo is shared and an id or title is whatever the YAML holds
+        out += [Block(kind, ident, title, path, text, start, end) for ident, title, start, end in copy.deepcopy(value)]
     ids = [b.id for b in out]
     if len(ids) != len(set(ids)):
         raise HTTPException(422, f"duplicate {kind} ids")

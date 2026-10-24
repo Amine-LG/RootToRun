@@ -439,9 +439,11 @@ function Palette({ onClose, trigger }: { onClose: () => void; trigger: React.Ref
           <Kbd>Esc</Kbd>
           <button type="button" className="pal-cancel" onClick={onClose} data-testid="palette-cancel">{t('pal.cancel')}</button>
         </div>
+        {/* the pointer selects a result only when it moves: a list that appears under a resting pointer must not take the
+            keyboard's choice (Enter would open whatever happened to be under it) */}
         <ul className="palette-list" role="listbox" id="pal-list" aria-label={t('nav.search')} ref={list}>
           {hits.map((h, i) => (
-            <li key={h.href + h.title} id={`pal-opt-${i}`} role="option" aria-selected={i === sel} className={i === sel ? 'on' : ''} onMouseEnter={() => setSel(i)} onClick={() => open(h)} data-href={h.href}>
+            <li key={h.href + h.title} id={`pal-opt-${i}`} role="option" aria-selected={i === sel} className={i === sel ? 'on' : ''} onMouseMove={() => i !== sel && setSel(i)} onClick={() => open(h)} data-href={h.href}>
               <Icon name={h.icon} size={16} />
               <span className="ph-main">
                 <span className={h.kind === t('pal.command') ? 'mono' : ''}>{h.title}</span>
