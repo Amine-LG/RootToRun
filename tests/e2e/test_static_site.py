@@ -273,3 +273,28 @@ def test_direct_links_and_page_titles(page, static_site):
     page.wait_for_selector(".pager-alert")
     page.goto(static_site.rstrip("/") + "/#/lesson/o1.cli")  # an old link: the hash form, with an id
     expect(page).to_have_url(re.compile(re.escape(lesson_url("o1.cli")) + "$"))
+
+
+def test_a_resting_pointer_does_not_take_the_search_results_keyboard_choice(page, static_site):
+    """Opening search with the keyboard while the pointer rests where a result will appear: the first result stays
+    the one Enter opens, until the pointer moves. (It once took the hovered result: a flaky failure of the test above
+    in Chromium and Firefox CI, and the wrong page for a learner.)"""
+    page.goto(static_site.rstrip("/") + "/commands")
+    expect(page.get_by_test_id("cmd-search")).to_be_visible()
+    page.keyboard.press("Control+k")
+    page.get_by_test_id("palette-input").fill("OOMKilled")
+    option = page.locator(".palette-list [role=option]")
+    expect(option.nth(3)).to_be_visible()
+    box = option.nth(3).bounding_box()
+    page.keyboard.press("Escape")
+    page.mouse.move(box["x"] + 20, box["y"] + box["height"] / 2)  # rests where the fourth result will appear
+    page.keyboard.press("Control+k")
+    page.get_by_test_id("palette-input").fill("OOMKilled")
+    expect(option.nth(3)).to_be_visible()
+    # Chromium gives the hover to an element that appears under a resting pointer a moment later (its next synthetic
+    # mouse event); checking that nothing happens needs that moment
+    page.wait_for_timeout(1000)
+    selected = page.locator(".palette-list [role=option][aria-selected=true]")
+    expect(selected).to_have_attribute("id", "pal-opt-0")
+    page.mouse.move(box["x"] + 30, box["y"] + box["height"] / 2)  # a real movement still selects what it points at
+    expect(selected).to_have_attribute("id", "pal-opt-3")
