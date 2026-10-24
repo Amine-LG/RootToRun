@@ -5,6 +5,7 @@
   - "Restart" starts an incident or a challenge again;
 and only "Reset all learning progress" (Progress page) deletes saved progress. Reloading never leaves an exercise
 finished and disabled. Static site, no cluster."""
+import time
 import json
 import re
 
@@ -156,6 +157,10 @@ def test_order_exercise_can_be_tried_again_after_showing_the_order(page, static_
     expect(o.get_by_test_id("order-verdict")).to_contain_text("This is the right order")
     solved = items.all_inner_texts()
     o.get_by_test_id("order-again").click()  # after the shown order: a fresh attempt from the start order
+    # read once the reset has rendered: a busy runner read the shown order a moment before it (Firefox, PR #3)
+    deadline = time.monotonic() + 5
+    while items.all_inner_texts() != start and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
     assert items.all_inner_texts() == start != solved
     expect(o.locator(".order-list .icon-btn:not(:disabled)").first).to_be_visible()
     expect(o.get_by_test_id("order-check")).to_be_enabled()

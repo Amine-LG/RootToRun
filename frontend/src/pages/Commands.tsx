@@ -5,7 +5,7 @@ import { CopyButton, Icon, PageSkeleton } from '../components/ui'
 import { api, type CommandRef } from '../lib/data'
 import { useApp, useLoad } from '../lib/app'
 import { t } from '../lib/i18n'
-import { searchRanked } from '../lib/match'
+import { searchRanked } from '../lib/search'
 import { labHref, lessonHref } from '../lib/urls'
 
 const TOOLS = ['oc', 'kubectl', 'podman'] as const

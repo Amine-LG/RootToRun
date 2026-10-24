@@ -35,7 +35,8 @@ import {
   type Progress,
 } from '../lib/progress'
 import { DIAGRAMS } from '../lib/diagrams'
-import { Diagram, SimById, simTitle } from './Studio'
+import { Diagram, SimById } from './Studio'
+import { SIM_CATALOG } from '../sims/catalog'
 import { useOverlay } from '../lib/overlay'
 
 // The lesson player. A lesson is an ordered plan of typed activities (lib/plan.ts), shown one at a time with an outline,
@@ -52,7 +53,7 @@ export default function Lesson({ id }: { id: string }) {
   const [deeper, setDeeper] = useState(false)
   const top = useRef<HTMLDivElement>(null)
   const plan = useMemo(() => (l ? compileLesson(l) : []), [l])
-  const simNames = useSimNames()
+  const simNames = (id: string) => SIM_CATALOG[id]?.title || t('lesson.model')
 
   const params = new URLSearchParams(loc.search)
   const want = params.get('a')
@@ -196,14 +197,6 @@ export default function Lesson({ id }: { id: string }) {
       {deeper && <DeeperPanel l={l} onClose={() => setDeeper(false)} />}
     </div>
   )
-}
-
-function useSimNames() {
-  const [names, setNames] = useState<Record<string, string>>({})
-  useEffect(() => {
-    simTitle().then(setNames, () => setNames({}))
-  }, [])
-  return (id: string) => names[id] || t('lesson.model')
 }
 
 /** What the learner has done in this lesson, as separate facts (never one "understood" percentage). */

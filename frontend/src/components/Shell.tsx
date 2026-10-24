@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, type CommandRef, type LabSummary, type ReviewCard } from '../lib/data'
 import { useApp } from '../lib/app'
 import { getLang, LANG_NAMES, setLang, t } from '../lib/i18n'
-import { plain, searchRanked } from '../lib/match'
+import { plain, searchRanked } from '../lib/search'
 import { DIAGRAMS } from '../lib/diagrams'
-import { loadSims, type SimDef } from '../pages/Studio'
-import { useProgress, useSaveFailed } from '../lib/progress'
+import { SIM_LIST } from '../sims/catalog'
+import { hasCardProgress, useProgress, useSaveFailed } from '../lib/progress'
 import { cardQueue } from '../lib/standing'
 import { detailKind, labHref, lessonHref } from '../lib/urls'
 import { COPYRIGHT, CREATOR } from '../lib/brand'
@@ -37,9 +37,15 @@ export function useCardCounts() {
   const { lang } = useApp()
   const prog = useProgress()
   const [cards, setCards] = useState<ReviewCard[]>([])
+  // Matches progress.unlocked: before any reading/lab work there cannot be a due card.
+  // Depend on this flag so finishing the first lesson updates the badge in the same session.
+  const hasUnlocked = hasCardProgress(prog)
   useEffect(() => {
-    api.cards(lang).then(setCards, () => setCards([]))
-  }, [lang])
+    let alive = true
+    setCards([])
+    if (hasUnlocked) api.cards(lang).then((c) => alive && setCards(c), () => alive && setCards([]))
+    return () => { alive = false }
+  }, [lang, hasUnlocked])
   const q = cardQueue(cards, prog)
   return { ready: q.ready.length, fresh: q.fresh.length, again: q.again.length }
 }
@@ -345,16 +351,20 @@ function Palette({ onClose, trigger }: { onClose: () => void; trigger: React.Ref
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const [cmds, setCmds] = useState<CommandRef[]>([])
-  const [sims, setSims] = useState<SimDef[]>([])
   const inp = useRef<HTMLInputElement>(null)
   const opener = useRef(document.activeElement as HTMLElement | null)
   // closed: the focus goes back where it was (a11y), unless the page has moved it since (a chosen result's heading)
   useEffect(() => () => void (opener.current?.isConnected && !document.querySelector('#main')?.contains(document.activeElement) && opener.current.focus({ preventScroll: true })), [])
   useEffect(() => {
     inp.current?.focus()
-    api.commands(lang).then(setCmds, () => setCmds([]))
-    loadSims().then(setSims, () => setSims([]))
-  }, [lang])
+  }, [])
+  // Opening the palette needs only the curriculum and model metadata. Commands are needed on first typing.
+  const needsCommands = q.trim().length > 0
+  useEffect(() => {
+    let alive = true
+    if (needsCommands) api.commands(lang).then((c) => alive && setCmds(c), () => alive && setCmds([]))
+    return () => { alive = false }
+  }, [lang, needsCommands])
 
   const all = useMemo<Hit[]>(() => {
     const out: Hit[] = [
@@ -372,7 +382,7 @@ function Palette({ onClose, trigger }: { onClose: () => void; trigger: React.Ref
     ]
     if (cur) {
       for (const l of Object.values(cur.lessons)) out.push({ kind: t('pal.lesson'), title: l.title, sub: plain(l.objective).slice(0, 110), href: lessonHref(l.id), icon: 'book' })
-      for (const s of sims) out.push({ kind: t('pal.model'), title: s.title, sub: s.summary, href: `/studio/model/${s.id}`, icon: 'shapes' })
+      for (const s of SIM_LIST) out.push({ kind: t('pal.model'), title: s.title, sub: s.summary, href: `/studio/model/${s.id}`, icon: 'shapes' })
       for (const d of DIAGRAMS) out.push({ kind: t('pal.diagram'), title: d.title, sub: plain(d.caption || '').slice(0, 110), href: `/studio/diagram/${d.id}`, icon: 'map' })
       for (const l of Object.values(cur.labs)) out.push({ kind: l.kind === 'incident' ? t('pal.incident') : t('pal.lab'), title: l.title, sub: plain(l.summary), href: labHref(l.id), icon: l.kind === 'incident' ? 'siren' : 'flask' })
       for (const l of Object.values(cur.labs))
@@ -388,7 +398,7 @@ function Palette({ onClose, trigger }: { onClose: () => void; trigger: React.Ref
         out.push({ kind: t('pal.command'), title: c.cmd, sub: c.meaning && plain(c.meaning), href: `/commands?q=${encodeURIComponent(c.cmd)}`, icon: 'terminal' })
       }
     return out
-  }, [cur, cmds, sims])
+  }, [cur, cmds])
 
   const hits = useMemo(() => searchRanked(all, q, (h) => h.title, (h) => `${h.title} ${h.sub || ''} ${h.kind}`).slice(0, 40), [all, q])
   useEffect(() => setSel(0), [q])

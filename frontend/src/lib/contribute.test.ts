@@ -57,7 +57,7 @@ describe('edit targets', () => {
     expect(SIMS.length).toBeGreaterThan(0)
     for (const s of SIMS) {
       const want = `frontend/src/sims/${fileOf[componentOf[s.id]]}`
-      expect(editTargets({ type: 'model', id: s.id, title: s.title }).map((e) => e.path), s.id).toEqual([want, 'frontend/src/sims/index.ts'])
+      expect(editTargets({ type: 'model', id: s.id, title: s.title }).map((e) => e.path), s.id).toEqual([want, 'frontend/src/sims/catalog.ts'])
     }
     expect(Object.keys(MODEL_SOURCES).sort()).toEqual(SIMS.map((s) => s.id).sort()) // no stale entry
   })

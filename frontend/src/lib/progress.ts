@@ -201,6 +201,8 @@ function save(): boolean {
   subs.forEach((f) => f())
   return ok
 }
+/** False while the browser refuses to store progress: a reload would lose what this tab holds (lib/chunks.ts). */
+export const progressSaved = () => !saveFailed
 /** True while the browser refuses to store progress (storage full, blocked or private browsing): the shell says so,
  *  so that nothing is shown as kept that would vanish with the tab. */
 export function useSaveFailed(): boolean {
@@ -403,6 +405,13 @@ export function unlocked(card: { source: string; ref: string }, p: Progress) {
   if (card.source === 'lesson') return !!(p.lessons[card.ref]?.done || p.lessons[card.ref]?.skipped)
   const l = p.labs[card.ref]
   return !!(l && (l.replayed || l.verified || l.revealed || l.selfCheck))
+}
+
+/** Whether progress can unlock any recall card, without downloading the deck to discover it is empty.
+ *  RecallBreak excludes the current lesson: it only offers cards from earlier work. */
+export function hasCardProgress(p: Progress, exceptRef?: string): boolean {
+  return Object.keys(p.lessons).some((ref) => ref !== exceptRef && unlocked({ source: 'lesson', ref }, p)) ||
+    Object.keys(p.labs).some((ref) => ref !== exceptRef && unlocked({ source: 'lab', ref }, p))
 }
 
 export function exportProgress(): string {

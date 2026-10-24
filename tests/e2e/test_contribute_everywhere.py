@@ -79,7 +79,7 @@ CASES = [
     ("lab", lab_url("lab.deploy-apps"), "lab.deploy-apps", [defined_in("labs", "lab.deploy-apps")], ["content", "command", "website"]),
     ("incident", lab_url("inc.dns-typo"), "inc.dns-typo", [defined_in("incidents", "inc.dns-typo")], ["content", "command", "website"]),
     ("challenge", lab_url("ch.right-size"), "ch.right-size", [defined_in("challenges", "ch.right-size")], ["content", "command", "website"]),
-    ("model", "/studio/model/scheduler", "scheduler", [model_file("scheduler"), "frontend/src/sims/index.ts"], ["content", "website"]),
+    ("model", "/studio/model/scheduler", "scheduler", [model_file("scheduler"), "frontend/src/sims/catalog.ts"], ["content", "website"]),
     ("diagram", "/studio/diagram/rbac", "rbac", ["frontend/src/lib/diagrams.ts"], ["content", "website"]),
     ("runbook", "/runbook/rb.route-503", "rb.route-503", [defined_in("runbooks", "rb.route-503")], ["content", "website"]),
     ("case", "/case/case.friday-release", "case.friday-release", [defined_in("cases", "case.friday-release")], ["content", "website"]),
