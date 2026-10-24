@@ -39,14 +39,18 @@ the Containerfile and nginx, any other file type, and anything the list does not
 | the whole Python suite, Linux and Windows | yes | yes | yes |
 | frontend tests, type check, build, export, scan, internal links, Linux and Windows | yes | yes | yes |
 | Linux and Windows exports identical | yes | yes | yes |
-| every page opens in Chromium: renders, no error, fits a phone | yes | in the browser suite | in the browser suite |
+| every page opens in Chromium: its content shows, no error, fits a phone | yes | in the browser suite | in the browser suite |
 | production image built once and smoke-tested | | yes | yes |
 | the whole browser suite against the image, Chromium and Firefox | | yes (3 + 3 parts) | yes |
 | browser tests in Firefox on Windows | | part 1 of 5 | all 5 parts |
 | dependency review of added packages | | yes | |
 
 A content change cannot touch the code, the nginx rules or the build that the image and the browser suite test; it
-can break how a page renders, which the page check opens. The deep lane's jobs run side by side; the content lane's
+can break how a page renders. The page check opens every page as it first appears and requires its own content (a
+lesson's facts, the lab player, a diagnostic's introduction); what a page shows only after a click (a diagnostic's
+questions, a lesson's "Go deeper" panel) is covered by `frontend/src/lib/md.content.test.ts`, which renders every
+string of the content, in the site job of both lanes. What the content lane leaves to ci-main: Firefox, the Windows
+browser tests and the production image's nginx rules for content pages. The deep lane's jobs run side by side; the content lane's
 python, site, windows and same-site jobs are the deep lane's own (`tests/test_ci_workflows.py` checks that they are
 identical).
 
@@ -59,15 +63,16 @@ scripts/test_all.sh          # everything, both browser engines (long); TEST_WEB
 
 ## Who must review: ci-guard
 
-`ci-guard` is the check a pull request cannot rewrite: `pull_request_target` runs it from the default branch; it checks
-out and runs nothing from the pull request, reads the changed files and their file modes from the API, and posts the
+`ci-guard` is the check a pull request cannot rewrite: `pull_request_target` runs it from the default branch, for pull
+requests into it only (its verdict is a status on a commit); it checks out and runs nothing from the pull request, reads the changed files and their file modes from the API, and posts the
 commit status `ci-guard`. It passes when the owner opened the pull request, or when every changed file is Markdown
 documentation or a lesson screenshot (an ordinary file), or when the owner approved that exact commit. Anything else
 from anyone else needs the owner's approval first, including lessons, labs, incidents, challenges, diagnostics and
 recordings: their commands and manifests are shown to learners, applied to their own clusters (a lab's
 `elevated_setup` with the admin identity, after the learner's consent) and run by the owner's recorder. Content is never
-run in CI, in either lane; the lab model refuses manifests that would hand out administration
-(`backend/academy/labs.py`), and the owner's review covers what no validator can judge.
+run in CI, in either lane. The lab model limits the roles and bindings a lab can apply (`backend/academy/labs.py`), and a
+learner confirms each command as it will run, but commands run as admin are not limited by it: the owner's review is
+what covers lab content.
 
 GitHub starts no trusted workflow on a review: after approving or withdrawing an approval, the owner re-runs
 `ci-guard`, or adds or removes any label on the pull request. A new commit always needs a new approval. The comparison
@@ -88,16 +93,18 @@ off, because the owner cannot approve their own pull requests.
 
 ## When main fails
 
-`ci-main` runs after every merge and is never cancelled. A failed, cancelled or timed-out run opens one issue, "main is
-failing", assigned to the owner (or comments on the open one); a passing run for the commit main points to closes it
-(`main-alert.yml`). It is an alert, not a lock: nothing stops another merge while main is red, so fix main first. The
-release candidate is built only from a successful `ci-main` run of a push to main.
+`ci-main` runs after every merge and is never cancelled. Whenever a run completes, `main-alert.yml` looks at the latest
+completed run (latest attempt) for the commit main points to now: failed, cancelled or timed out, it opens one issue,
+"main is failing", assigned to the owner; passed, it closes it. A late or older run cannot hide a newer failure. It is an
+alert, not a lock: nothing stops another merge while main is red, so fix main first. The release candidate is built
+only from a successful `ci-main` run of a push to main.
 
 ## Required checks (repository ruleset)
 
-Before this change: the eleven job names of the single-file workflow, which also reported `ci-ok`. After it: `ci-ok`
-and `ci-guard`, both from GitHub Actions. The switch is the owner's, in this order: confirm on GitHub how `ci-ok`
-reports failed, cancelled, skipped and re-run jobs; require `ci-ok` next to the eleven names; when this change is
-ready to merge (its own run reports `ci-ok`, not the eleven names), remove the eleven names and merge it; check
-`ci-guard` on a pull request from another account, then require it. Job names inside the lanes are not required and
-may change.
+Before the lanes: the eleven job names of the single-file workflow, which also reported `ci-ok`. After them: `ci-ok`
+and `ci-guard`, both from GitHub Actions. The switch is the owner's, in this order, so that a check a pull request
+cannot rewrite is required before the eleven names go: merge `ci-guard` on its own; check on a pull request from
+another account that it reports and blocks, then require it next to the eleven names; confirm on GitHub how `ci-ok`
+reports failed, cancelled, skipped and re-run jobs, and require it too; when the lanes are ready to merge (their own
+run reports `ci-ok`, not the eleven names), remove the eleven names, merge the lanes, and re-run open pull requests.
+Job names inside the lanes are not required and may change.

@@ -11,6 +11,7 @@ import sys
 import yaml
 
 from academy import config
+from test_ci_guard import guard_program
 
 WF = config.ROOT / ".github" / "workflows"
 ACTIONS = config.ROOT / ".github" / "actions"
@@ -167,137 +168,25 @@ def test_the_release_candidate_tests_the_published_image_with_the_whole_suite():
     assert WORKFLOWS["candidate.yml"]["jobs"]["publish"]["needs"] == ["build", "test"]
 
 
-def guard_program():
-    run = WORKFLOWS["ci-guard.yml"]["jobs"]["guard"]["steps"][0]["run"]
-    return run.split("verdict=$(python3", 1)[1].split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
-
-
-GH_STUB = '''import json, os, sys
-from pathlib import Path
-args = sys.argv[1:]
-if "POST" in args:
-    with open(os.environ["STATUS_LOG"], "a", encoding="utf-8") as f: f.write(json.dumps(args) + "\\n")
-elif any("/compare/" in a for a in args):
-    assert args[1] == "repos/owner/repo/compare/" + os.environ["BASE"] + "..." + os.environ["HEAD"]
-    print(json.dumps([os.environ["FILE"], None]))
-elif any("/git/trees/" in a for a in args):
-    side = "HEAD" if os.environ["HEAD"] in " ".join(args) else "BASE"
-    if side == "HEAD" or os.environ.get("IN_BASE") == "1":
-        print(json.dumps([os.environ["FILE"], os.environ.get("MODE", "100644")]))
-elif any("/reviews?" in a for a in args):
-    for row in json.loads(os.environ["REVIEWS"]): print(json.dumps(row))
-else:
-    count = Path(os.environ["HEAD_CALLS"])
-    n = int(count.read_text(encoding="utf-8")) if count.exists() else 0
-    heads = json.loads(os.environ["API_HEADS"])
-    print(heads[min(n, len(heads)-1)])
-    count.write_text(str(n+1), encoding="utf-8")
-'''
-
-
-def test_guard_uses_the_latest_owner_review_and_binds_the_diff_to_the_event_head(tmp_path):
-    """Execute the trusted shell with an offline gh stub: historical approvals and a stale event cannot grant access."""
-    stub = tmp_path / "gh-stub.py"
-    stub.write_text(GH_STUB, encoding="utf-8")
-    script = tmp_path / "guard.sh"
-    script.write_text('gh() { "$GUARD_PYTHON" "$GUARD_STUB" "$@"; }\n' +
-                      WORKFLOWS["ci-guard.yml"]["jobs"]["guard"]["steps"][0]["run"], encoding="utf-8")
-    head, other = "a" * 40, "b" * 40
-    approval = [1, "APPROVED", "owner", head]
-    lesson = "content/en/lessons/lx0.yaml"
-    cases = [
-        ("CONTRIBUTOR", [], [head], "docs/é\n$(id).md", "100644", "success"),
-        ("CONTRIBUTOR", [], [head], "content/media/lesson/screen.png", "100644", "success"),
-        ("CONTRIBUTOR", [], [head], "docs/link.md", "120000", "failure"),  # a symbolic link is never exempt
-        ("CONTRIBUTOR", [], [head], "docs/run.md", "100755", "failure"),  # nor an executable
-        ("CONTRIBUTOR", [], [head], lesson, "100644", "failure"),  # lessons carry commands: the owner reviews them
-        ("CONTRIBUTOR", [], [head], "content/en/labs/b5-quotas-limits.yaml", "100644", "failure"),
-        ("CONTRIBUTOR", [], [head], "content/recordings/lab.x.json", "100644", "failure"),
-        ("CONTRIBUTOR", [approval], [head], lesson, "100644", "success"),
-        ("OWNER", [], [head], "pytest.py", "100644", "success"),
-        ("CONTRIBUTOR", [], [head], "pytest.py", "100644", "failure"),
-        ("MEMBER", [], [head], "pytest.py", "100644", "failure"),
-        ("COLLABORATOR", [], [head], "pytest.py", "100644", "failure"),
-        ("CONTRIBUTOR", [approval], [head], "pytest.py", "100644", "success"),
-        ("CONTRIBUTOR", [approval, [2, "COMMENTED", "owner", head]], [head], "pytest.py", "100644", "success"),
-        ("CONTRIBUTOR", [[1, "APPROVED", "someone-else", head]], [head], "pytest.py", "100644", "failure"),
-        ("CONTRIBUTOR", [[1, "APPROVED", "owner", other]], [head], "pytest.py", "100644", "failure"),
-        ("CONTRIBUTOR", [approval, [2, "CHANGES_REQUESTED", "owner", head]], [head], "pytest.py", "100644", "failure"),
-        ("CONTRIBUTOR", [approval, [2, "DISMISSED", "owner", head]], [head], "pytest.py", "100644", "failure"),
-        ("CONTRIBUTOR", [approval], [other], "pytest.py", "100644", "error"),
-        ("CONTRIBUTOR", [approval], [head, other], "pytest.py", "100644", "error"),
-    ]
-    for n, (association, reviews, heads, path, mode, expected) in enumerate(cases):
-        case = tmp_path / str(n)
-        case.mkdir()
-        env = {**os.environ, "GUARD_PYTHON": sys.executable, "GUARD_STUB": str(stub), "RUNNER_TEMP": str(case),
-               "REPO": "owner/repo", "OWNER": "owner", "PR": "1", "BASE": "c" * 40, "HEAD": head,
-               "AUTHOR_ASSOCIATION": association, "CHANGED_FILES": "1", "GH_TOKEN": "offline-test",
-               "FILE": path, "MODE": mode, "REVIEWS": json.dumps(reviews), "API_HEADS": json.dumps(heads),
-               "STATUS_LOG": str(case / "statuses"), "HEAD_CALLS": str(case / "head-calls")}
-        result = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", str(script)], env=env,
-                                capture_output=True, text=True, encoding="utf-8")
-        statuses = [json.loads(line) for line in (case / "statuses").read_text(encoding="utf-8").splitlines()]
-        assert f"state={expected}" in statuses[-1], (n, result.stdout, result.stderr, statuses)
-        assert (result.returncode == 0) == (expected == "success"), (n, result.stdout, result.stderr)
-
-
-def test_the_guard_exempts_only_documentation_and_screenshots(tmp_path):
-    def verdict(files, changed=None, modes=None, truncated=False):
-        listing, base, head = tmp_path / "files", tmp_path / "base", tmp_path / "head"
-        listing.write_text("".join(json.dumps(f) + "\n" for f in files), encoding="utf-8")
-        paths = {p for f in files for p in f if p}
-        rows = "".join(json.dumps([p, (modes or {}).get(p, "100644")]) + "\n" for p in paths)
-        base.write_text(rows, encoding="utf-8")
-        head.write_text(("TRUNCATED\n" if truncated else "") + rows, encoding="utf-8")
-        env = {**os.environ, "CHANGED_FILES": str(len(files) if changed is None else changed)}
-        return subprocess.run([sys.executable, "-I", "-", str(listing), str(base), str(head)], input=guard_program(),
-                              encoding="utf-8", capture_output=True, check=True, env=env).stdout.strip()
-    clean = [["docs/AUTHORING.md", None], ["docs/$(id).md", None], ["docs/é\nfile.md", None], ["README.md", None],
-             ["content/media/lesson/screen.png", None]]
-    assert verdict(clean) == "clean"
-    for path in [".github/workflows/ci.yml", ".github/actions/python-env/uv-requirements.txt", ".github/CODEOWNERS",
-                 "scripts/ci_needs_site.py", "scripts/test_content.sh", "tests/test_api.py", "tests/e2e/conftest.py",
-                 "pytest.ini", "frontend/src/lib/cmdfmt.test.ts", "requirements-dev.txt", "frontend/package.json",
-                 "frontend/package-lock.json", "frontend/scripts/licenses.mjs", "frontend/vite.config.ts",
-                 "Containerfile", ".dockerignore", "deploy/nginx/nginx.conf", "frontend/vitest.config.ts",
-                 "frontend/.npmrc", ".npmrc", "pytest.py", "pyproject.toml", "frontend/npm-shrinkwrap.json",
-                 "frontend/src/App.tsx", "backend/academy/main.py", "unknown", "docs/../pytest.py", "content/unknown.py",
-                 "docs/а.MD", "content/media/a/b/c.png", "content/en/lessons/lx0.yaml", "content/en/labs/x.yaml",
-                 "content/en/incidents/x.yaml", "content/en/challenges/x.yaml", "content/en/diagnostics/x.yaml",
-                 "content/recordings/lab.x.json", "content/en/tools.yaml", "content/media/lesson/x.svg"]:
-        assert verdict(clean + [[path, None]]).startswith("review: 1 "), path
-    assert verdict([["docs/x.md", "scripts/ci_needs_site.py"]]).startswith("review")  # a rename counts by its old path
-    assert verdict(clean, modes={"docs/AUTHORING.md": "120000"}).startswith("review")  # a symbolic link
-    assert verdict(clean, modes={"README.md": "160000"}).startswith("review")  # a submodule
-    assert verdict(clean, changed=6).startswith("unlisted")  # fewer files listed than the pull request has
-    assert verdict([["docs/a.md", None]] * 300).startswith("unlisted")  # immutable compare lists at most 300
-    assert verdict(clean, truncated=True).startswith("unlisted")  # a file tree too large to read fails closed
-
-    # what is exempt from review also takes the content lane (never the reverse: the lane is about tests, not trust)
-    namespace = {}
-    exec(guard_program().split("def tree(", 1)[0], namespace)
-    from scripts.ci_needs_site import content_path
-    for path in [f.relative_to(config.ROOT).as_posix() for f in config.ROOT.rglob("*")
-                 if f.is_file() and not any(p in {".git", ".venv", "node_modules", "dist", "__pycache__"} for p in f.parts)]:
-        assert not namespace["exempt_path"](path) or content_path(path), path
-
-
-def alert_run(tmp_path, conclusion, sha, head, open_issue):
+def alert_run(tmp_path, main, latest, open_issue, event_url):
+    """The alert's shell with an offline gh: `main` is the commit main points to, `latest` the latest completed ci-main
+    run for it ("conclusion url", or "" for none), `open_issue` the open issue's number or ""."""
     stub = tmp_path / "gh.py"
     stub.write_text('''import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["LOG"], "a", encoding="utf-8") as f: f.write(json.dumps(args) + "\\n")
 if args[:2] == ["issue", "list"]:
     print(os.environ["OPEN"])
-elif args[:1] == ["api"]:
+elif args[:1] == ["api"] and "/commits/main" in args[1]:
     print(os.environ["MAIN"])
+elif args[:1] == ["api"] and "/runs?" in args[1]:
+    assert "head_sha=" + os.environ["MAIN"] in args[1] and "status=completed" in args[1]
+    print(os.environ["LATEST"])
 ''', encoding="utf-8")
-    log = tmp_path / f"log-{conclusion}-{sha[:1]}-{open_issue or 'none'}"
+    log = tmp_path / f"log-{len(list(tmp_path.glob('log-*')))}"
     script = 'gh() { "$PY" "$STUB" "$@"; }\n' + WORKFLOWS["main-alert.yml"]["jobs"]["alert"]["steps"][0]["run"]
-    env = {**os.environ, "PY": sys.executable, "STUB": str(stub), "LOG": str(log), "OPEN": open_issue, "MAIN": head,
-           "REPO": "owner/repo", "OWNER": "owner", "CONCLUSION": conclusion, "SHA": sha, "EVENT": "push",
-           "RUN_URL": "https://github.com/owner/repo/actions/runs/1", "GH_TOKEN": "offline-test"}
+    env = {**os.environ, "PY": sys.executable, "STUB": str(stub), "LOG": str(log), "OPEN": open_issue, "MAIN": main,
+           "LATEST": latest, "REPO": "owner/repo", "OWNER": "owner", "EVENT_RUN_URL": event_url, "GH_TOKEN": "offline"}
     result = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script], env=env,
                             capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
@@ -305,13 +194,28 @@ elif args[:1] == ["api"]:
     return [c[:2] for c in calls if c[0] == "issue" and c[1] != "list"], calls
 
 
-def test_a_failing_main_opens_one_issue_and_only_the_current_commit_closes_it(tmp_path):
-    a, b = "a" * 40, "b" * 40
-    actions, calls = alert_run(tmp_path, "failure", a, a, "")
+def test_the_alert_follows_mains_current_state_not_the_event(tmp_path):
+    a = "a" * 40
+    run1, run2 = "https://github.com/owner/repo/actions/runs/1", "https://github.com/owner/repo/actions/runs/2"
+    actions, calls = alert_run(tmp_path, a, f"failure {run1}", "", run1)
     assert actions == [["issue", "create"]] and "--assignee" in calls[-1] and "owner" in calls[-1]
     for conclusion in ("failure", "cancelled", "timed_out", "startup_failure"):
-        assert alert_run(tmp_path, conclusion, a, a, "7")[0] == [["issue", "comment"]], conclusion
-    assert alert_run(tmp_path, "success", a, a, "7")[0] == [["issue", "close"]]
-    assert alert_run(tmp_path, "success", b, a, "7")[0] == []  # an older commit passing does not close it
-    assert alert_run(tmp_path, "success", a, a, "")[0] == []
-    assert alert_run(tmp_path, "skipped", a, a, "7")[0] == []
+        assert alert_run(tmp_path, a, f"{conclusion} {run1}", "7", run1)[0] == [["issue", "comment"]], conclusion
+    assert alert_run(tmp_path, a, f"failure {run2}", "7", run1)[0] == []  # an older run's event: no repeat comment
+    assert alert_run(tmp_path, a, f"success {run2}", "7", run2)[0] == [["issue", "close"]]
+    # the review's sequences: a newer failure at the same commit stays open when an older success arrives late,
+    # and a late failure of an older commit opens nothing while main's own latest run passed
+    assert alert_run(tmp_path, a, f"failure {run2}", "7", run1)[0] == []
+    assert alert_run(tmp_path, a, f"success {run2}", "", run1)[0] == []
+    assert alert_run(tmp_path, a, "", "7", run1)[0] == []  # no completed run for main's commit yet
+    assert alert_run(tmp_path, a, f"skipped {run1}", "7", run1)[0] == []
+
+
+def test_what_the_guard_exempts_also_takes_the_content_lane():
+    """Exempt from review implies the content lane (never the reverse: the lane is about tests, not trust)."""
+    namespace = {}
+    exec(guard_program().split("def tree(", 1)[0], namespace)
+    from scripts.ci_needs_site import content_path
+    for path in [f.relative_to(config.ROOT).as_posix() for f in config.ROOT.rglob("*")
+                 if f.is_file() and not any(p in {".git", ".venv", "node_modules", "dist", "__pycache__"} for p in f.parts)]:
+        assert not namespace["exempt_path"](path) or content_path(path), path

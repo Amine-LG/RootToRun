@@ -17,6 +17,9 @@ name: ci-guard
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited, ready_for_review, labeled, unlabeled]
+    # only pull requests into the protected branch: the status is posted on a commit, so a pull request of the same
+    # commit into another branch, with a different diff, must not post a verdict for it
+    branches: [main]
 permissions: {}
 concurrency:
   group: ci-guard-${{ github.event.pull_request.number }}
@@ -41,8 +44,11 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
           CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          [ "$BASE_REF" = "$DEFAULT_BRANCH" ] || { echo "::error::not a pull request into $DEFAULT_BRANCH"; exit 1; }
           [[ "$BASE" =~ ^[0-9a-f]{40}$ && "$HEAD" =~ ^[0-9a-f]{40}$ && "$PR" =~ ^[0-9]+$ && "$CHANGED_FILES" =~ ^[0-9]+$ && "$OWNER" =~ ^[A-Za-z0-9-]+$ ]]
           status() {  # status <state> <description>
             gh api -X POST "repos/$REPO/statuses/$HEAD" -f state="$1" -f context=ci-guard -f description="${2:0:140}" > /dev/null
@@ -76,7 +82,7 @@ jobs:
           import json, os, sys
           from pathlib import PurePosixPath
           # Exempt from the owner's review: Markdown documentation and lesson screenshots, nothing else. Never import a
-          # file from the pull request to make this decision (tests/test_ci_workflows.py tests this function).
+          # file from the pull request to make this decision (tests/test_ci_guard.py tests this function).
           ROOT_DOCS = {"README.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md",
                        "THIRD_PARTY_NOTICES.md"}
           def exempt_path(path):

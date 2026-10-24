@@ -1,7 +1,8 @@
-"""Every lesson (shown whole), lab, incident, challenge and diagnostic renders and fits a 390 px phone: its page shows
-instead of the recovery panel, with no page or console error, and no horizontal page scroll. Long tables and code
-scroll inside their own boxes; buttons that carry a title wrap. One test per page group. This is the content lane's
-browser check (docs/CI.md): content that the renderer cannot show fails here."""
+"""Every lesson (shown whole), lab, incident, challenge and diagnostic renders and fits a 390 px phone: its own content
+shows (the lesson's facts, the lab player, the diagnostic's introduction), not the recovery panel or a load error, with
+no page or console error, and no horizontal page scroll. Long tables and code scroll inside their own boxes; buttons
+that carry a title wrap. One test per page group. This is the content lane's browser check (docs/CI.md): it opens each
+page as it first appears; what a page shows after a click is rendered by frontend/src/lib/md.content.test.ts."""
 import json
 
 import pytest
@@ -25,13 +26,17 @@ def test_the_page_groups_cover_every_page_once(page, static_site):
 def test_every_page_renders_and_is_no_wider_than_a_phone(page, static_site, group):
     site = static_site.rstrip("/")
     page.set_viewport_size({"width": 390, "height": 844})
-    routes = pages_of(curriculum(page, site), group)
+    cur = curriculum(page, site)
+    shows = {**{x["path"]: "[data-testid=lesson-facts]" for x in cur["lessons"].values()},
+             **{x["path"]: "main .page.lab" for x in cur["labs"].values()},
+             **{x["path"]: "[data-testid=diag-intro]" for x in cur["diagnostics"].values()}}
+    routes = pages_of(cur, group)
     assert routes, group
     wide, broken = [], []
     for r in routes:
         page.goto(site + r)
         page.wait_for_selector("main .page:not(:has(.sk-page))")
-        if page.locator("[data-testid=page-error]").count():
+        if page.locator("[data-testid=page-error]").count() or not page.locator(shows[r]).count():
             broken.append(r)
             continue
         w = page.evaluate("document.documentElement.scrollWidth")
