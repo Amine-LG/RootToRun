@@ -1,7 +1,7 @@
 # Files that decide what CI runs, how the site and the image are built, which dependencies are installed, and what a
 # lab applies to a learner's cluster. GitHub asks the owner to review pull requests that change them. This file does
 # not block a merge by itself ("Require review from Code Owners" is off: the owner could not approve their own pull
-# requests); ci-guard (.github/workflows/ci-guard.yml) is what requires the owner's approval (CONTRIBUTING.md).
+# requests); ci-guard (.github/workflows/ci-guard.yml) is what requires the owner's approval (docs/CI.md).
 /.github/                    @Amine-LG
 /scripts/                    @Amine-LG
 /tests/                      @Amine-LG

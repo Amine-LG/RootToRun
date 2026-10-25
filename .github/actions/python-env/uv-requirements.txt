@@ -1,0 +1,6 @@
+# uv for CI, installed with pip from PyPI with --require-hashes (no third-party GitHub Action). One version for every
+# job; update the version and both hashes together (https://pypi.org/project/uv/<version>/#files).
+# 0.13.4: the first release without the CA store trusting a compromised emSign root (GHSA-hq85-5cpj-mr62)
+uv==0.13.4 \
+    --hash=sha256:05e4332791b4d55b6dde8695b7fa6079b26991519f44760887c5dfbd5ca4fe53 \
+    --hash=sha256:b2ff80397273fff0e02c20eacae6882834c811827d6fc08f658db156fe754386

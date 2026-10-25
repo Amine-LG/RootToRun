@@ -67,8 +67,9 @@ cd frontend && npm ci && npm test && npm run build && cd ..
 .venv/bin/python -m pytest tests/e2e                     # browser tests on the exported site
 ```
 
-On Windows, the same checks in PowerShell are in [docs/WINDOWS.md](docs/WINDOWS.md). CI runs these checks on Linux
-and Windows, builds the production image and runs the browser tests against it. Please do not weaken a
+Edited only lessons, labs or docs? `scripts/test_content.sh` runs the content checks, the Python suite and the site
+checks of the content lane in one command; CI adds the browser check of every page and the Windows checks. On Windows, the same checks in PowerShell are in [docs/WINDOWS.md](docs/WINDOWS.md). CI runs these checks on
+Linux and Windows, builds the production image and runs the browser tests against it ([docs/CI.md](docs/CI.md)). Please do not weaken a
 check to make it pass; if you think one is wrong, say so in the pull request.
 
 ## Pull requests

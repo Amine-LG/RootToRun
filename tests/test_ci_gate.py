@@ -1,55 +1,54 @@
-"""ci-ok is the one check a ruleset can require: it passes only when every other job of ci.yml passed, and the
-browser tests were either run and passed or not needed. Here its own shell runs against each result GitHub can give."""
+"""ci-ok, the one check a ruleset requires (docs/CI.md): the router runs the base commit's classifier, calls exactly
+one lane, and ci-ok passes only when the classifier ran and the lane it chose succeeded while the other was skipped.
+Its own shell runs here against every result GitHub can give (failure, cancelled, skipped, missing), and no job of a
+lane can be skipped by a condition (a skipped job counts as passed inside a called workflow)."""
 import itertools
-import shutil
+import os
 import subprocess
-from pathlib import Path
 
 import pytest
-import yaml
 
 from platforms import WINDOWS
-
-JOBS = yaml.safe_load((Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.yml")
-                      .read_text(encoding="utf-8"))["jobs"]
-NOT_SUCCESS = ["failure", "cancelled", "skipped", ""]  # "" when the job is missing from `needs`
-needs_bash = pytest.mark.skipif(WINDOWS or not shutil.which("bash"), reason="the gates run on ubuntu-latest (bash)")
+from test_ci_workflows import WORKFLOWS
 
 
-def gate(job, env):
-    (step,) = JOBS[job]["steps"]
-    return subprocess.run([shutil.which("bash"), "-e", "-c", step["run"]], env=env, capture_output=True).returncode
+def test_the_router_calls_one_lane_per_verdict_and_the_gate_needs_all():
+    jobs = WORKFLOWS["ci.yml"]["jobs"]
+    assert set(jobs) == {"classify", "checks-content", "checks-app", "ci-ok"}
+    assert jobs["checks-content"] == {"needs": "classify", "if": "needs.classify.outputs.tier == 'content'",
+                                      "uses": "./.github/workflows/checks-content.yml"}
+    assert jobs["checks-app"] == {"needs": "classify", "if": "needs.classify.outputs.tier == 'deep'",
+                                  "uses": "./.github/workflows/checks-app.yml"}
+    assert jobs["ci-ok"]["needs"] == ["classify", "checks-content", "checks-app"] and jobs["ci-ok"]["if"] == "always()"
+    run = jobs["classify"]["steps"][1]["run"]
+    assert 'git show "$BASE:scripts/ci_needs_site.py"' in run and "python3 -I" in run
+    assert 'git diff --no-renames --raw -z "$BASE...$HEAD"' in run and "--tier-raw" in run
+    assert 'if [ "$verdict" = "tier=content" ]; then tier=content; else tier=deep; fi' in run
+    # inside a lane, a job is skipped only when one it needs failed (the lane then fails): no condition can quietly
+    # skip a check, except the dependency review, which needs a pull request's base
+    for name in ("checks-content.yml", "checks-app.yml", "checks-main.yml"):
+        for job_id, job in WORKFLOWS[name]["jobs"].items():
+            assert "if" not in job or (name, job_id, job["if"]) == (
+                "checks-app.yml", "deps", "github.event_name == 'pull_request'"), f"{name}:{job_id}"
+            assert job.get("strategy", {}).get("fail-fast", False) is False, f"{name}:{job_id}"
 
 
-def test_the_gates_always_report_and_cover_every_job():
-    for job in ("ci-ok", "browser-tests"):
-        assert JOBS[job]["if"] == "always()", job
-    covered = set(JOBS["ci-ok"]["needs"]) | set(JOBS["browser-tests"]["needs"])
-    assert covered == set(JOBS) - {"ci-ok"}
-    # each job ci-ok waits for is one of the results its step checks
-    assert {v.split(".")[1] for v in JOBS["ci-ok"]["steps"][0]["env"].values()} == set(JOBS["ci-ok"]["needs"])
+def gate_script():
+    return WORKFLOWS["ci.yml"]["jobs"]["ci-ok"]["steps"][0]["run"]
 
 
-@needs_bash
-def test_ci_ok_passes_only_when_every_job_passed():
-    names = list(JOBS["ci-ok"]["steps"][0]["env"])
-    assert gate("ci-ok", dict.fromkeys(names, "success")) == 0
-    for name, result in itertools.product(names, NOT_SUCCESS):
-        assert gate("ci-ok", {**dict.fromkeys(names, "success"), name: result}) != 0, (name, result)
-
-
-@needs_bash
-@pytest.mark.parametrize("changes, site, parts, passes", [
-    ("success", "true", "success", True),
-    ("success", "false", "skipped", True),  # documentation only: the browser tests were not needed
-    ("success", "true", "skipped", False),
-    ("success", "true", "failure", False),
-    ("success", "true", "cancelled", False),
-    ("success", "false", "failure", False),
-    ("success", "", "skipped", False),
-    ("failure", "", "skipped", False),
-    ("cancelled", "false", "skipped", False),
-    ("skipped", "false", "skipped", False),
-])
-def test_browser_tests_reject_an_unexpected_skip(changes, site, parts, passes):
-    assert (gate("browser-tests", {"CHANGES": changes, "SITE": site, "PARTS": parts}) == 0) is passes
+@pytest.mark.skipif(WINDOWS, reason="the gate runs on ubuntu-latest (bash)")
+def test_the_gate_decision_table_for_every_combination():
+    """Exhaustive: every result GitHub can report (and an empty value) for each input, and odd verdicts."""
+    results = ["success", "failure", "cancelled", "skipped", ""]
+    tiers = ["content", "deep", "", "full", "content ", "CONTENT"]
+    passes = []
+    for classify, tier, content, app in itertools.product(results, tiers, results, results):
+        env = {"PATH": os.environ["PATH"], "CLASSIFY": classify, "TIER": tier, "CONTENT": content, "APP": app}
+        ok = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", gate_script()], env=env,
+                            capture_output=True).returncode == 0
+        expected = classify == "success" and ((tier, content, app) in {("content", "success", "skipped"),
+                                                                       ("deep", "skipped", "success")})
+        assert ok == expected, env
+        passes += [(classify, tier, content, app)] if ok else []
+    assert len(passes) == 2  # of 5 * 6 * 5 * 5 = 750 combinations

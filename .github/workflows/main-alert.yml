@@ -1,0 +1,73 @@
+name: main-alert
+# A failing main must not go unnoticed while more pull requests merge. Each time a ci-main run (checks-main.yml)
+# completes, this reads the ci-main runs of the commit main points to now, not the event that arrived. While one of
+# them is still queued or running (a re-run, say), it changes nothing. Otherwise the latest started attempt decides:
+# failed, cancelled or timed out, it opens one issue, "main is failing", assigned to the owner (or comments on it when
+# this event is that run); passed, it closes it. Main is read again before writing, but reads and writes are not
+# atomic: the issue can lag main's state until the next run completes. It is an alert, not a merge lock.
+#
+# workflow_run runs this file from the default branch, never from a pull request. It checks out nothing and runs no
+# file of the repository; its only write permission is issues. Every value it uses comes from GitHub.
+on:
+  workflow_run:
+    workflows: [ci-main]
+    types: [completed]
+    branches: [main]
+permissions: {}
+concurrency:
+  group: main-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    if: github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: read   # the runs of ci-main
+      contents: read  # the commit main points to now
+      issues: write
+    steps:
+      - name: Open, update or close the "main is failing" issue from main's current state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          [[ "$OWNER" =~ ^[A-Za-z0-9-]+$ && "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]
+          title="main is failing"
+          open=$(gh issue list -R "$REPO" --state open --author "app/github-actions" --search "\"$title\" in:title" \
+                 --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          # every run of that commit, on every page; none while one is queued or running (its completion decides);
+          # otherwise the latest started attempt (a re-run's newest attempt has the newest start time)
+          latest=$(gh api --paginate --slurp "repos/$REPO/actions/workflows/checks-main.yml/runs?branch=main&head_sha=$head&per_page=100" | \
+                   jq -r '[.[].workflow_runs[]] as $runs | if any($runs[]; .status != "completed") then empty else
+                          $runs | sort_by([.run_started_at, .id, .run_attempt]) | last | select(. != null) |
+                          "\(.conclusion) \(.html_url)" end')
+          conclusion=${latest%% *}; url=${latest#* }
+          echo "main is at ${head:0:12}; its latest ci-main: ${latest:-pending or none}; open issue: ${open:-none}"
+          [ -n "$latest" ] || exit 0  # no run of the current commit yet, or one is pending: nothing changes
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          [ "$current" = "$head" ] || exit 0  # main moved meanwhile: its own runs decide
+          [[ "$conclusion" =~ ^[a-z_]+$ && "$url" =~ ^https://github\.com/[A-Za-z0-9._/-]+$ ]]
+          case "$conclusion" in
+            success)
+              if [ -n "$open" ]; then
+                gh issue close -R "$REPO" "$open" --comment "ci-main passed for ${head:0:12}, the commit main points to: $url"
+              fi ;;
+            failure|cancelled|timed_out|startup_failure|action_required)
+              body="ci-main ended with **$conclusion** for $head, the commit main points to: $url"
+              if [ -z "$open" ]; then
+                gh issue create -R "$REPO" --title "$title" --assignee "$OWNER" --body "$body
+
+          Fix main before merging more pull requests. This issue closes itself when ci-main passes for the commit main
+          points to (.github/workflows/main-alert.yml)."
+              elif [ "$url" = "$EVENT_RUN_URL" ]; then
+                gh issue comment -R "$REPO" "$open" --body "$body"
+              fi ;;
+            *) echo "nothing to do for $conclusion" ;;
+          esac

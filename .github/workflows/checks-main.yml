@@ -1,0 +1,59 @@
+name: ci-main
+# After a merge (push to main), on demand (workflow_dispatch) and weekly: the whole deep lane (checks-app.yml, with
+# the first fifth of the Windows browser tests) plus the other four fifths on Windows, so every browser test also runs
+# in Firefox on Windows after each merge. A successful run of a push to main starts candidate.yml (it listens for
+# "ci-main"); a failed one opens or updates the "main is failing" issue (main-alert.yml). Runs on main are never
+# cancelled (no concurrency group): every merged commit gets its own complete run.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"  # Mondays 04:23 UTC (GitHub disables schedules after 60 days without repository activity)
+permissions:
+  contents: read
+env:
+  ACADEMY_CLUSTER: "off"
+  KUBECONFIG: /nonexistent
+
+jobs:
+  checks-app:
+    uses: ./.github/workflows/checks-app.yml
+
+  # Parts 2 to 5 of the browser tests in Firefox on Windows (part 1 runs in checks-app, also before a merge).
+  windows-browser-rest:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [2, 3, 4, 5]
+    name: windows-browser (${{ matrix.shard }}/5)
+    defaults:
+      run: {shell: pwsh}
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - uses: ./.github/actions/python-env
+        with: {install: "false"}
+      - name: Python environment
+        run: uv venv .venv --python 3.12 && uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
+      - name: Frontend build (the browser tests export the static site from it)
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Firefox for the browser tests
+        run: .venv\Scripts\python.exe -m playwright install firefox
+      - name: Browser tests against the static export built on Windows
+        env:
+          E2E_BROWSER: firefox
+          SHARD: ${{ matrix.shard }}/5
+          E2E_ARTIFACTS: e2e-artifacts
+        run: .venv\Scripts\python.exe -m pytest -q tests/e2e --shard $env:SHARD -n ([Math]::Min([Environment]::ProcessorCount, 4))
+      # the traces of failed browser tests, when there are any (tests/e2e/conftest.py): python -m playwright show-trace
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with: {name: "browser-traces-windows-${{ matrix.shard }}", path: e2e-artifacts, retention-days: 7, if-no-files-found: ignore}

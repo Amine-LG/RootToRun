@@ -1,5 +1,6 @@
 """docs/WINDOWS.md says its commands are tested in CI: every command of its setup, website and test blocks must be one
-the `windows` job of ci.yml runs (the same executable, script and arguments; CI may add -q, workers or a shard)."""
+the Windows jobs of checks-app.yml run (the same executable, script and arguments; CI may add -q, workers or a
+shard)."""
 import re
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTED_SECTIONS = ("## Get the code and its environment", "## Run the website locally", "## Run the tests")
-CI_ONLY = re.compile(r"\s(-q|-n \(\[Math\]::Min\(\[Environment\]::ProcessorCount, 4\)\)|--shard \d/\d)(?=\s|$)")
+CI_ONLY = re.compile(r"\s(-q|-n \(\[Math\]::Min\(\[Environment\]::ProcessorCount, 4\)\)|--shard (\d/\d|\$env:SHARD))(?=\s|$)")
 
 
 def commands(text):
@@ -27,9 +28,9 @@ def test_the_windows_guide_shows_the_commands_ci_runs():
             for block in re.findall(r"```powershell\n(.*?)```", section, re.S):
                 documented += commands(block)
     assert len(documented) >= 12
-    job = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]["windows"]
+    jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "checks-app.yml").read_text(encoding="utf-8"))["jobs"]
     run = []
-    for step in job["steps"]:
+    for step in jobs["windows"]["steps"] + jobs["windows-python"]["steps"] + jobs["windows-browser"]["steps"]:
         run += commands(step.get("run", ""))
         if "serve.py" in step.get("run", ""):  # the server check starts it with Start-Process: its own form
             run.append(r".venv\Scripts\python.exe scripts\serve.py --practice")

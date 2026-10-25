@@ -1,5 +1,5 @@
 name: ci-guard
-# The one check a pull request cannot rewrite (CONTRIBUTING.md, "Who must review"). On `pull_request`, a pull
+# The one check a pull request cannot rewrite (docs/CI.md, "What the checks guarantee"). On `pull_request`, a pull
 # request supplies its own workflow files and scripts, so it could make `ci-ok` pass by editing them. This workflow is
 # `pull_request_target`: GitHub runs it from the DEFAULT branch, never from the pull request. It checks out nothing and
 # runs no file of the pull request; it reads the changed files and their file modes from the API and posts the commit

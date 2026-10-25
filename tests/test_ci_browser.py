@@ -47,29 +47,31 @@ def test_a_browser_that_does_not_start_gets_its_libraries(tmp_path):
 
 
 def test_every_linux_browser_install_in_ci_goes_through_the_script():
-    for workflow in ("ci.yml", "candidate.yml"):
-        jobs = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
+    used = set()
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
         runs = [s.get("run", "") for job in jobs.values() if "windows" not in str(job.get("runs-on"))
-                for s in job["steps"]]
-        assert not [r for r in runs if "playwright install" in r], workflow
-        assert [r for r in runs if r.startswith("scripts/ci_browser.sh ")], workflow
+                for s in job.get("steps", [])]
+        assert not [r for r in runs if "playwright install" in r], workflow.name
+        used |= {workflow.name for r in runs if r.startswith("scripts/ci_browser.sh ")}
+    assert used == {"checks-app.yml", "checks-content.yml", "candidate.yml"}
 
 
 def test_every_browser_test_step_uploads_its_traces_only_on_failure():
     """The Playwright traces a failed browser test leaves (tests/e2e/conftest.py, E2E_ARTIFACTS) are uploaded only when
     the job failed, kept a week, one name per matrix part, with the pinned upload action. This checks the upload
     configuration, not that a trace exists: a test that fails only in its teardown may have none."""
-    checked = 0
-    for workflow in ("ci.yml", "candidate.yml"):
-        jobs = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
-        pins = {s["uses"] for job in jobs.values() for s in job["steps"] if "actions/upload-artifact@" in s.get("uses", "")}
-        assert len(pins) == 1 and re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", pins.pop()), (workflow, pins)
+    checked = []
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
+        pins = {s["uses"] for job in jobs.values() for s in job.get("steps", []) if "actions/upload-artifact@" in s.get("uses", "")}
+        assert all(re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", pin) for pin in pins), (workflow.name, pins)
         for name, job in jobs.items():
-            steps = job["steps"]
+            steps = job.get("steps", [])
             for i, step in enumerate(steps):
                 if "-m pytest" not in step.get("run", "") or "tests/e2e" not in step["run"].split("--ignore=tests/e2e")[0]:
                     continue
-                where = f"{workflow}:{name}:{step.get('name')}"
+                where = f"{workflow.name}:{name}:{step.get('name')}"
                 out = step.get("env", {}).get("E2E_ARTIFACTS")
                 assert out, where
                 (upload,) = [s for s in steps[i + 1:] if "actions/upload-artifact@" in s.get("uses", "")
@@ -78,5 +80,7 @@ def test_every_browser_test_step_uploads_its_traces_only_on_failure():
                 assert upload["with"]["retention-days"] <= 7 and upload["with"]["if-no-files-found"] == "ignore", where
                 for key in job.get("strategy", {}).get("matrix", {}):
                     assert "${{ matrix.%s }}" % key in upload["with"]["name"], where
-                checked += 1
-    assert checked == 3  # the Linux matrix, the Windows job, the candidate's test job
+                checked.append(f"{workflow.name}:{name}")
+    # the deep lane's Linux matrix and Windows part, the content lane's pages, ci-main's Windows parts, the candidate
+    assert sorted(checked) == ["candidate.yml:test", "checks-app.yml:browser", "checks-app.yml:windows-browser",
+                               "checks-content.yml:pages", "checks-main.yml:windows-browser-rest"], checked
