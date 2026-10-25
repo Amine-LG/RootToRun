@@ -117,6 +117,9 @@ def test_about_states_licences_version_and_ships_the_licence_texts(page, static_
     its bundled fonts and libraries require (frontend/scripts/licenses.mjs)."""
     version = json.loads((config.ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))["version"]
     page.goto(static_site)
+    # the home page renders its content once the curriculum arrives, which moves the footer down: click it after that
+    # (a Windows CI run clicked during the move; the click landed elsewhere and nothing opened)
+    page.wait_for_selector("main .page:not(:has(.sk-page))")
     page.locator(".site-foot").get_by_role("link", name="Licences").click()
     section = page.locator("#licences")
     expect(section).to_contain_text("Creative Commons Attribution-ShareAlike 4.0")
