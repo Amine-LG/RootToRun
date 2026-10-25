@@ -5,6 +5,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 from addresses import diag_url, lesson_url
+from conftest import still
 
 
 def open_(page, site, route="/"):
@@ -66,6 +67,7 @@ def test_learner_pages_have_no_horizontal_scroll(browser, static_site, width):
     page.get_by_test_id("diag-conf-1").click()
     check("diagnostic question")
     page.get_by_test_id("diag-next").click()
+    still(page)
     page.get_by_test_id("diag-stop").click()
     expect(page.get_by_test_id("diag-results")).to_be_visible()
     check("diagnostic results")

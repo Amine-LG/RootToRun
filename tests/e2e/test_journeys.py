@@ -10,6 +10,7 @@ import re
 
 from playwright.sync_api import expect
 from addresses import diag_url, is_practice, lesson_at, lesson_url, track_url
+from conftest import still
 
 
 def norm(md: str) -> str:
@@ -23,18 +24,6 @@ def open_(page, site, route="/"):
 
 def data(page, site, path):
     return json.loads(page.request.get(site.rstrip("/") + "/data/en/" + path).text())
-
-
-def still(page, frames=10):
-    """Wait until the page has not scrolled for `frames` animation frames (at most 5 s)."""
-    page.evaluate("""(n) => new Promise(done => {
-        let last = scrollY, same = 0, start = performance.now()
-        const tick = () => {
-            if (scrollY === last) same++; else { same = 0; last = scrollY }
-            if (same >= n || performance.now() - start > 5000) done(); else requestAnimationFrame(tick)
-        }
-        requestAnimationFrame(tick)
-    })""", frames)
 
 
 def test_returning_engineer_finds_gaps_and_tests_out(page, static_site):
@@ -139,6 +128,7 @@ def test_practice_triage_leads_to_an_incident(page, static_site):
     page.get_by_test_id("diag-start").click()
     page.get_by_test_id("diag-idk").click()
     page.get_by_test_id("diag-next").click()
+    still(page)
     page.get_by_test_id("diag-stop").click()
     link = page.get_by_test_id("diag-study").locator("a").first
     href = link.get_attribute("href")

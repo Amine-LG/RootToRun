@@ -1,24 +1,12 @@
 """Track diagnostics: answer with a confidence, get a plan; nothing is marked as done; results survive a reload."""
 from playwright.sync_api import expect
 from addresses import diag_url, track_url
+from conftest import still
 
 
 def open_(page, site, route="/"):
     page.goto(site.rstrip("/") + route)
     page.wait_for_selector("main .page:not(:has(.sk-page))")
-
-
-def still(page, frames=10):
-    """Wait until the page has not scrolled for `frames` animation frames (at most 5 s): each new question is scrolled
-    into view just after it appears, and under load a click during that scroll could hit another button."""
-    page.evaluate("""(n) => new Promise(done => {
-        let last = scrollY, same = 0, start = performance.now()
-        const tick = () => {
-            if (scrollY === last) same++; else { same = 0; last = scrollY }
-            if (same >= n || performance.now() - start > 5000) done(); else requestAnimationFrame(tick)
-        }
-        requestAnimationFrame(tick)
-    })""", frames)
 
 
 def answer(page, choice: int | None, conf: int = 1):
@@ -68,6 +56,7 @@ def test_retake_clears_previous_answers(page, static_site):
     open_(page, static_site, diag_url("start"))
     page.get_by_test_id("diag-start").click()
     answer(page, 0)
+    still(page)
     page.get_by_test_id("diag-stop").click()
     page.get_by_test_id("diag-retake").click()
     expect(page.get_by_test_id("diag-question")).to_contain_text("Question 1 of")
@@ -111,6 +100,7 @@ def test_path_offers_the_same_first_step_as_the_results(page, static_site):
     page.get_by_test_id("diag-start").click()
     for conf in (0, 0, 2):  # two guesses wrong, then a confident mistake
         answer(page, 0, conf)
+    still(page)
     page.get_by_test_id("diag-stop").click()
     first = page.get_by_test_id("diag-study").locator("a").first.get_attribute("href")
     open_(page, static_site, track_url("admin1"))
