@@ -50,9 +50,13 @@
     - kind: teach
       id: tree
       body: |
-        Every process has a parent, so processes form a tree. At its root is **PID 1**, the first process the
-        kernel starts when the machine boots. On RHEL it is **systemd**, which starts and supervises the system's
-        services.
+        Processes have parents, so they form a tree. At its root is **PID 1**, the first process the kernel
+        starts when the machine boots. On RHEL it is **systemd**, which starts and supervises the system's
+        services: every program that the system or you start descends from it.
+
+        The kernel also runs work of its own, as **kernel threads**. They hang from a second root, **PID 2**
+        (`kthreadd`), and `ps -f` shows their names in square brackets: `[kthreadd]` itself and many
+        `[kworker/…]` threads. PID 1 and PID 2 are the only two processes without a parent: their PPID is 0.
     - kind: show
       id: pid1
       run: "ps -o pid,user,comm -p 1; echo \"processes running now: $(ps -e --no-headers | wc -l)\""
@@ -66,7 +70,7 @@
         - text: "The PID of your shell"
           why: "Your shell starts the commands you type. Services are started by systemd, before you even log in."
         - text: "0: services have no parent"
-          why: "Every process except the very first has a parent. Services are children of systemd."
+          why: "Only PID 1 (systemd) and PID 2 (`kthreadd`, the root of the kernel's own threads) have no parent: their PPID is 0. Services are children of systemd."
       answer: 0
     - kind: show
       id: services
