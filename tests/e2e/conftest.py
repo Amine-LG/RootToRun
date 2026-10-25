@@ -71,6 +71,20 @@ def wait_true(page, expression, arg=None, timeout=30_000):
         page.wait_for_timeout(50)
 
 
+def still(page, frames=10):
+    """Wait until the page has not scrolled for `frames` animation frames (at most 5 s). New content (the next
+    diagnostic question, a revealed panel) is smooth-scrolled into view a few frames after it appears, so a button can
+    pass Playwright's two-frame stability check just before it moves, and the click lands where it used to be."""
+    page.evaluate("""(n) => new Promise(done => {
+        let last = scrollY, same = 0, start = performance.now()
+        const tick = () => {
+            if (scrollY === last) same++; else { same = 0; last = scrollY }
+            if (same >= n || performance.now() - start > 5000) done(); else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+    })""", frames)
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):
     """Each phase's report on the test item (item.rep_setup, item.rep_call, item.rep_teardown). Once the last one is

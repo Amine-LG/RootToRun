@@ -18,6 +18,7 @@ from playwright.sync_api import expect
 
 from academy import config, urls
 from addresses import diag_url, lab_url, lesson_url
+from conftest import still
 
 BASE = "http://ux6.local"
 VIEWPORTS = [(1440, 900), (820, 1180), (390, 844)]
@@ -151,9 +152,11 @@ def test_u6_01_partial_topic_is_not_shown(browser, ux6_export, viewport):
         for _ in items[:at]:
             page.get_by_test_id("diag-idk").click()
             page.get_by_test_id("diag-next").click()
+            still(page)
         page.get_by_test_id("diag-choice").nth(first["answer"]).click()
         page.get_by_test_id("diag-conf-2").click()
         page.get_by_test_id("diag-next").click()
+        still(page)
         page.get_by_test_id("diag-stop").click()
         expect(page.get_by_test_id("diag-results")).to_be_visible()
         # The learner has not demonstrated all of the topic's authored questions.
