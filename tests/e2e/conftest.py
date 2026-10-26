@@ -56,8 +56,32 @@ def browser():
     import os
     with pw.sync_playwright() as p:
         b = getattr(p, os.environ.get("E2E_BROWSER", "firefox")).launch()  # E2E_BROWSER=chromium for a second engine
+        warm_up(b)
         yield b
         b.close()
+
+
+WARM_PAGE = """<!doctype html><title>warm-up</title><p>Root to Run</p><pre>oc get pods -n team-a</pre>
+<script type="module">document.body.append(Object.assign(document.createElement("p"), {textContent: "ready"}))</script>"""
+
+
+def warm_up(b, timeout=120_000):
+    """The first page a freshly started browser draws can stall on a new Windows runner: in Firefox, after the page's
+    scripts had arrived, no request and no frame for 27 s, then a normal load; twice it was the first test of a worker
+    that timed out. Draw one page here, on the host the tests use, with its own limit, so no test pays for it. A slow
+    warm-up is reported as a warning, which shows how often this happens."""
+    import warnings
+    start = time.monotonic()
+    ctx = b.new_context()
+    page = ctx.new_page()
+    page.route("http://127.0.0.1/warm-up", lambda route: route.fulfill(content_type="text/html", body=WARM_PAGE))
+    page.goto("http://127.0.0.1/warm-up", timeout=timeout)
+    page.get_by_text("ready").wait_for(timeout=timeout)
+    page.evaluate("() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))")
+    ctx.close()
+    took = time.monotonic() - start
+    if took > 5:
+        warnings.warn(f"the browser's first page took {took:.0f} s (warm-up, before any test)")
 
 
 def wait_true(page, expression, arg=None, timeout=30_000):
